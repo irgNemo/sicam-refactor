@@ -1,4 +1,6 @@
-# Python Virtual Environments
+# ============================================================================
+# PYTHON - Virtual Environments
+# ============================================================================
 venv/
 ENV/
 env/
@@ -6,7 +8,9 @@ env/
 pip-log.txt
 pip-delete-this-directory.txt
 
-# Django
+# ============================================================================
+# DJANGO - Configuration and Database
+# ============================================================================
 *.log
 *.pot
 *.pyc
@@ -17,30 +21,59 @@ local_settings.py
 db.sqlite3
 db.sqlite3-journal
 
-# FastAPI / Python
+# ============================================================================
+# PYTHON - Build and Distribution
+# ============================================================================
 *.egg-info/
 dist/
 build/
 *.whl
 .Python
 *.so
+*.egg
+
+# ============================================================================
+# ENVIRONMENT AND SECRETS (CRITICAL - NEVER COMMIT)
+# ============================================================================
 .env
 .env.local
 .env.*.local
+.env.development
+.env.production
+*.pem
+*.key
 
-# Node.js / Vue.js
+# ============================================================================
+# DATABASE FILES
+# ============================================================================
+*.db
+*.sqlite
+*.sqlite3
+
+# ============================================================================
+# FRONTEND - Node.js and Vue/Vite
+# ============================================================================
 node_modules/
 npm-debug.log
 yarn-error.log
-dist/
-build/
 
-# VS Code
+# ============================================================================
+# IDE - Visual Studio Code
+# ============================================================================
 .vscode/
 *.code-workspace
 
-# IDE
+# ============================================================================
+# IDE - IntelliJ/PyCharm
+# ============================================================================
 .idea/
+*.iml
+*.iws
+*.ipr
+
+# ============================================================================
+# IDE - Generic
+# ============================================================================
 .DS_Store
 *.swp
 *.swo
@@ -51,65 +84,54 @@ build/
 *.sublime-project
 *.sublime-workspace
 
-# Model Cache Folders
+# ============================================================================
+# MACHINE LEARNING - Model Files and Cache
+# ============================================================================
 cellpose/
 *.pt
 *.pth
 *.h5
 model_cache/
 .cache/
+models/
+membranas_*
 
-# Media and uploads
+# ============================================================================
+# UPLOADS AND MEDIA
+# ============================================================================
 media/
 uploads/
 
-# Build and test outputs
-build/
-dist/
-*.egg-info/
+# ============================================================================
+# PYTHON - Testing and Profiling
+# ============================================================================
 .pytest_cache/
 .coverage
 htmlcov/
-
-# Cache directories
-__pycache__/
 .mypy_cache/
 .dmypy.json
 dmypy.json
-*.egg
 
-# Environment files
-.env
-.env.local
-.env.development
-.env.production
-*.pem
-*.key
+# ============================================================================
+# JUPYTER NOTEBOOKS
+# ============================================================================
+.ipynb_checkpoints/
+*.ipynb
+/Funciones_de_Segmentación_en_models_py.ipynb
 
-# SQLite
-*.db
-*.sqlite
-*.sqlite3
-
-# Lock files (optional - comment out if you want to commit them)
-# package-lock.json
-# yarn.lock
-# poetry.lock
-# pipenv.lock
-
-# Temporary files
+# ============================================================================
+# TEMPORARY FILES
+# ============================================================================
 *.tmp
 *.temp
 *.bak
 *.backup
 Thumbs.db
 
-# Jupyter Notebook
-.ipynb_checkpoints
-*.ipynb_checkpoints
-
-# OS specific
-Thumbs.db
-.DS_Store
-.AppleDouble
-.LSOverride
+# ============================================================================
+# LOCK FILES (Optional - uncomment to commit for reproducibility)
+# ============================================================================
+# package-lock.json
+# yarn.lock
+# poetry.lock
+# pipenv.lock

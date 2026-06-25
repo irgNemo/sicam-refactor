@@ -1,0 +1,115 @@
+# Python Virtual Environments
+venv/
+ENV/
+env/
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Django
+*.log
+*.pot
+*.pyc
+__pycache__/
+local_settings.py
+/media
+/staticfiles
+db.sqlite3
+db.sqlite3-journal
+
+# FastAPI / Python
+*.egg-info/
+dist/
+build/
+*.whl
+.Python
+*.so
+.env
+.env.local
+.env.*.local
+
+# Node.js / Vue.js
+node_modules/
+npm-debug.log
+yarn-error.log
+dist/
+build/
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# IDE
+.idea/
+.DS_Store
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
+
+# Model Cache Folders
+cellpose/
+*.pt
+*.pth
+*.h5
+model_cache/
+.cache/
+
+# Media and uploads
+media/
+uploads/
+
+# Build and test outputs
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Cache directories
+__pycache__/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+*.egg
+
+# Environment files
+.env
+.env.local
+.env.development
+.env.production
+*.pem
+*.key
+
+# SQLite
+*.db
+*.sqlite
+*.sqlite3
+
+# Lock files (optional - comment out if you want to commit them)
+# package-lock.json
+# yarn.lock
+# poetry.lock
+# pipenv.lock
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+Thumbs.db
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb_checkpoints
+
+# OS specific
+Thumbs.db
+.DS_Store
+.AppleDouble
+.LSOverride

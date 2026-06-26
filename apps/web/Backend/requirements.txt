@@ -1,0 +1,22 @@
+# Django y extensiones core
+Django==5.0.1
+djangorestframework==3.14.0
+django-cors-headers==4.3.1
+django-environ==0.12.0
+
+# Database
+psycopg2-binary==2.9.9
+
+# Image processing
+Pillow==10.2.0
+
+# HTTP client (para llamadas a microservicios)
+requests==2.31.0
+
+# Optional: para mejor desarrollo
+django-extensions==3.2.3
+
+# Testing (comentar si no necesario en desarrollo)
+pytest==7.4.4
+pytest-django==4.7.0
+pytest-cov==4.1.0

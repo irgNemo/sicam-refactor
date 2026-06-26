@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+python-multipart
+numpy
+opencv-python-headless
+matplotlib
+scikit-image
+scikit-learn
+
+# Cellpose/model dependencies are intentionally not installed automatically here.
+# Provision them explicitly in the target environment to avoid large downloads:
+#   pip install cellpose

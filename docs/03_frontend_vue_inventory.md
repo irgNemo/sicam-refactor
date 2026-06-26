@@ -3,8 +3,10 @@
 ## Project
 
 ```text
-micronucleos-web/Frontend
+apps/web/Frontend
 ```
+
+This frontend comes from the previous `micronucleos-web/Frontend` project.
 
 ## Frameworks and Libraries
 
@@ -22,6 +24,8 @@ src/components/TopBar.vue
 src/components/SideBar.vue
 src/components/MainContent.vue
 src/views/RegistroView.vue
+src/services/apiClient.js
+.env.example
 ```
 
 ## Package Scripts
@@ -34,6 +38,20 @@ src/views/RegistroView.vue
   "lint": "eslint . --fix --cache"
 }
 ```
+
+## Technical Validation Status
+
+The frontend source now uses the centralized `apiClient`, but a full build validation is still pending in the current environment.
+
+Recommended validation:
+
+```bash
+cd apps/web/Frontend
+npm install
+npm run build
+```
+
+During the sanitation pass, `node_modules` was not present, so the build could not be completed without installing dependencies.
 
 ## Main Application Layout
 
@@ -54,10 +72,38 @@ registro
 
 Current status:
 
-- `segmentacion`: active UI shell
-- `registro`: implemented
-- `analisis`: placeholder
-- `caracterizacion`: placeholder
+- `segmentacion`: active UI shell.
+- `registro`: implemented.
+- `analisis`: placeholder.
+- `caracterizacion`: placeholder.
+
+## API Client Configuration
+
+The frontend now centralizes Axios in:
+
+```text
+src/services/apiClient.js
+```
+
+Current client:
+
+```js
+import axios from "axios";
+
+const apiClient = axios.create({
+  baseURL: import.meta.env.VITE_API_BASE_URL,
+});
+
+export default apiClient;
+```
+
+Environment example:
+
+```env
+VITE_API_BASE_URL=http://127.0.0.1:8000
+```
+
+No hardcoded `http://127.0.0.1:8000` references remain in `apps/web/Frontend/src`.
 
 ## Component: TopBar.vue
 
@@ -65,14 +111,16 @@ Purpose: main navigation between sections.
 
 Observed behavior:
 
-- Emits `change-section`
-- Parent `App.vue` switches active section
+- Emits `change-section`.
+- Parent `App.vue` switches active section.
 
 ## Component: SideBar.vue
 
 Purpose: search/select patients and cases.
 
 ### Backend calls
+
+Through `apiClient`:
 
 ```http
 GET /api/pacientes/
@@ -115,13 +163,15 @@ The summary logic expects nested data:
 analisis.muestras_saliva[].resultados[]
 ```
 
-But the backend serializer only includes `muestras_saliva` and does not include nested `resultados` inside each sample. This should be aligned.
+But the backend serializer currently nests `muestras_saliva` without nested `resultados`. This should be aligned later.
 
 ## Component: MainContent.vue
 
 Purpose: displays selected analysis/case content.
 
 ### Backend calls
+
+Through `apiClient`:
 
 ```http
 GET /api/analisis/
@@ -143,8 +193,8 @@ caseId
 
 ### Limitations
 
-- No call to segmentation microservices.
-- No endpoint for segmentation result retrieval.
+- No frontend action calls a Django segmentation endpoint yet.
+- No segmentation result retrieval endpoint exists yet.
 - No visible persistence of edited polygons.
 - Export buttons are UI-only at this stage.
 
@@ -153,6 +203,8 @@ caseId
 Purpose: register patients, create cases, upload images.
 
 ### Backend calls
+
+Through `apiClient`:
 
 ```http
 GET  /api/pacientes/
@@ -215,71 +267,42 @@ imagen=<file>
 analisis=<analysis_id>
 ```
 
-## Frontend Configuration Issues
+Current limitation: uploaded images still map to `MuestraSaliva`; there is no sample type selector for saliva versus blood.
 
-The API base URL is repeated and hardcoded:
+## Configuration Status
 
-```text
-http://127.0.0.1:8000
-```
+Resolved:
 
-Recommended replacement:
+- Frontend API URL is externalized through `VITE_API_BASE_URL`.
+- Axios is centralized in `src/services/apiClient.js`.
+- `.env.example` exists.
 
-```text
-VITE_API_BASE_URL=http://127.0.0.1:8000
-```
+Still pending:
 
-Then centralize Axios in:
-
-```text
-src/services/apiClient.js
-```
+- Install dependencies and run a successful frontend build.
+- Add a frontend control for sample type (`SALIVA` / `SANGRE`).
+- Add a UI action to trigger `POST /api/muestras/{id}/segmentar/` once backend supports it.
+- Add segmentation job/status/result UI.
+- Document frontend runtime/deployment configuration.
 
 ## Recommended Frontend Refactor
 
-Target structure:
+Do not introduce Vue Router, Pinia, or a full module rewrite yet.
 
-```text
-src/
-├── app/
-│   └── App.vue
-├── components/
-│   └── shared/
-├── modules/
-│   ├── patients/
-│   ├── cases/
-│   ├── samples/
-│   ├── segmentation/
-│   ├── characterization/
-│   └── reports/
-├── services/
-│   ├── apiClient.js
-│   ├── patientsApi.js
-│   ├── casesApi.js
-│   ├── analysesApi.js
-│   └── samplesApi.js
-└── router/
-```
+Low-risk next steps:
 
-## Recommended State Strategy
-
-For a small version:
-
-- Keep component-local state.
-- Centralize API calls.
-
-For a more maintainable version:
-
-- Introduce Pinia for patient/case/analysis state.
-- Add Vue Router.
-- Isolate segmentation editor state.
+1. Keep component-local state.
+2. Add small API wrappers around `apiClient` only when duplication grows.
+3. Add sample type UI after the backend model/API can represent it.
+4. Add segmentation trigger UI after Django exposes the endpoint.
 
 ## Required Frontend Work for Full SICAM
 
 - Add sample type selector: `SALIVA | SANGRE`.
 - Add segmentation trigger action.
-- Add segmentation job status UI.
+- Add segmentation status/result UI.
 - Add polygon/mask editor persistence.
+- Add validation workflow UI.
 - Add characterization module.
 - Add report export module.
 - Add authentication/session handling.

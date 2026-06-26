@@ -2,37 +2,67 @@
 
 ## Summary
 
-The documentation describes SICAM as an integrated platform, but the code currently consists of three mostly independent applications.
+SICAM now has a cleaner repository baseline, externalized configuration, a centralized frontend API client, and Django-side clients for the segmentation microservices.
 
-The main gap is orchestration:
+The main remaining gap is still orchestration:
 
 ```text
-Django backend does not yet orchestrate saliva/blood segmentation services and persist their outputs as first-class domain data.
+Django does not yet expose an endpoint that receives a stored sample,
+calls the correct segmentation microservice, persists the returned JSON,
+and returns a segmentation status/result to the frontend.
 ```
 
-## Gap 1: Backend does not call segmentation microservices
+## Already Addressed
 
-Existing microservices:
+The following items should no longer be treated as open gaps:
+
+- The repository has a monorepo-style structure with `apps/web`, `apps/segmentation-saliva` and `apps/segmentation-blood`.
+- Frontend API base URL is no longer hardcoded in Vue components.
+- `apps/web/Frontend/src/services/apiClient.js` exists.
+- `apps/web/Frontend/.env.example` exists.
+- `apps/web/Backend/.env.example` exists.
+- Django settings use environment variables through `django-environ`.
+- Segmentation service URLs are configured in `SEGMENTATION_SERVICES`.
+- Django HTTP clients for saliva and blood segmentation exist in `api/services/segmentation/`.
+
+## Gap 0: Minimal technical validation is still pending
+
+Before functional integration, the current workspace still needs a minimal validation pass:
+
+- backend Django dependency install, checks and focused tests;
+- frontend dependency install and build;
+- saliva microservice startup/endpoint smoke test;
+- blood microservice startup/endpoint smoke test;
+- basic documentation of runtime commands and environment variables.
+
+This is separate from implementing new functionality.
+
+## Gap 1: Django endpoint does not trigger segmentation
+
+Existing microservice endpoints:
 
 ```text
 Segmentacion_web: POST /segmentar
 segmentacion_sangre: POST /api/v1/segmentar
 ```
 
-Current Django backend has no observed client code for these services.
+Django clients now exist, but no public Django endpoint uses them yet.
 
-### Required Integration
+Missing endpoint:
+
+```http
+POST /api/muestras/{id}/segmentar/
+```
+
+Required flow:
 
 ```text
 Sample uploaded
-  ↓
-Django determines sample type
-  ↓
-Django calls the correct microservice
-  ↓
-Django stores returned polygons/counts
-  ↓
-Frontend displays editable segmentation
+  -> Django loads sample
+  -> Django determines sample type
+  -> Django calls the correct segmentation client
+  -> Django stores returned polygons/counts
+  -> Frontend displays segmentation result
 ```
 
 ## Gap 2: Backend only models saliva samples
@@ -43,18 +73,26 @@ Current model:
 MuestraSaliva
 ```
 
-Required:
+Required model direction:
 
 ```text
 ImagenMuestra
-- sample_type: SALIVA | BLOOD
+- sample_type: SALIVA | SANGRE
 ```
+
+The current upload flow posts to `/api/muestras/` and maps to `MuestraSaliva`, so blood is not represented in Django.
 
 ## Gap 3: Frontend does not let user select sample type
 
-The documents state that the user must specify saliva or blood because each type has a different processing pipeline.
+The UI currently uploads images through `POST /api/muestras/`.
 
-The current upload flow posts to `/api/muestras/` and maps to `MuestraSaliva`, so blood is not represented.
+Missing:
+
+- sample type selector;
+- API payload support for sample type;
+- filtering/display behavior for saliva versus blood samples.
+
+This should wait until the backend can represent sample type.
 
 ## Gap 4: Segmentation output is not persisted as JSON
 
@@ -72,38 +110,38 @@ Microservices return:
 }
 ```
 
-Backend currently stores:
+Current backend models store:
 
-- counts in `ResultadoAnalisis`
-- mask image files in `AnalisisMascara`
+- counts in `ResultadoAnalisis`;
+- mask image files in `AnalisisMascara`.
 
-It does not store editable polygons.
+They do not store editable polygons or raw segmentation output.
 
 ## Gap 5: No validation workflow
 
-Documents describe interactive validation and correction by specialist.
+Documents describe interactive validation and correction by a specialist.
 
 Current code lacks:
 
-- validated flag
-- reviewer
-- edited object persistence
-- revision history
-- undo/redo persistence
-- distinction between automatic and manual result
+- validated flag;
+- reviewer;
+- edited object persistence;
+- revision history;
+- undo/redo persistence;
+- distinction between automatic and manual result.
 
 ## Gap 6: Characterization missing from implementation
 
-The academic documents describe calculation of:
+The academic/domain documents describe calculation of:
 
-- area
-- perimeter
-- roundness/circularity
-- centroid
-- mean intensity
-- distance nucleus-micronucleus
-- area fraction
-- intensity fraction
+- area;
+- perimeter;
+- roundness/circularity;
+- centroid;
+- mean intensity;
+- distance nucleus-micronucleus;
+- area fraction;
+- intensity fraction.
 
 The frontend has a placeholder for characterization, and the backend has no characterization model or endpoint.
 
@@ -111,7 +149,7 @@ The frontend has a placeholder for characterization, and the backend has no char
 
 The documents describe PDF and CSV generation.
 
-Current code has UI buttons for export, but no backend report generation or file model was observed.
+Current code has UI buttons for export, but no backend report generation or file model has been implemented.
 
 ## Gap 8: Authentication/roles not implemented as described
 
@@ -121,29 +159,34 @@ Current Django project includes default Django auth apps but no observed custom 
 
 Missing:
 
-- Doctor profile
-- Admin-created doctor workflow
-- Login endpoint
-- Token/session API
-- Route protection
-- Frontend auth state
+- doctor profile;
+- admin-created doctor workflow;
+- login endpoint;
+- token/session API;
+- route protection;
+- frontend auth state.
 
-## Gap 9: Configuration not externalized
+## Gap 9: Health/readiness endpoints are incomplete
 
-Hardcoded values exist in backend and frontend:
+The backend has a simple `saludo` function in `api.views`, but no health route is registered in `api/urls.py`.
 
-```text
-Django SECRET_KEY
-Django DB credentials
-CORS_ALLOW_ALL_ORIGINS
-Frontend API URL
-```
+Health/readiness endpoints for Django and both FastAPI services should be formalized later.
 
-Microservice URLs are not centrally configured.
+## Gap 9.1: Deployment documentation is incomplete
+
+There is no single validated runbook covering:
+
+- how to run Django;
+- how to run Vue/Vite;
+- how to run both FastAPI segmentation services;
+- required environment variables per service;
+- expected ports;
+- local smoke-test commands;
+- production/deployment assumptions.
 
 ## Gap 10: Duplicated code in microservices
 
-Both microservices contain similar:
+Both microservices contain similar structures:
 
 ```text
 app/routers/segmentacion.py
@@ -152,13 +195,13 @@ app/utils/poligonos.py
 segmentacion_core/cellpose/
 ```
 
-Recommendation: extract shared code and schemas.
+Recommendation: do not merge them yet. First make Django orchestration work, then consider extracting shared schemas/utilities.
 
 ## Gap 11: API contracts are implicit
 
-There is no OpenAPI schema customization, no shared type definitions, and no contract document used by Django/frontend/microservices.
+There is no shared schema package or contract document enforced across Django, frontend and microservices.
 
-This is risky because Codex or developers may accidentally change field names like:
+Important fields to preserve:
 
 ```text
 objetos
@@ -175,10 +218,10 @@ Academic/domain language:
 
 ```text
 Paciente
-Caso clínico
+Caso clinico
 Muestra
-Segmentación
-Caracterización
+Segmentacion
+Caracterizacion
 Reporte
 ```
 
@@ -193,4 +236,4 @@ ResultadoAnalisis
 AnalisisMascara
 ```
 
-Recommendation: define a canonical ubiquitous language and apply it consistently.
+Recommendation: define canonical names before adding new models, but avoid mass renaming in the next integration step.

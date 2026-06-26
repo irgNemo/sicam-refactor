@@ -6,32 +6,42 @@ SICAM is a web-based system for automated and semi-automated analysis of micronu
 
 Its clinical/technical purpose is to assist specialists by:
 
-- Segmenting biological structures.
-- Detecting micronuclei.
-- Allowing expert validation and correction.
-- Producing quantitative characterization.
-- Exporting results as PDF/CSV.
+- segmenting biological structures;
+- detecting micronuclei;
+- allowing expert validation and correction;
+- producing quantitative characterization;
+- exporting results as PDF/CSV.
 
 SICAM is a support tool, not a replacement for specialist judgment.
 
-## Current Codebase Shape
+## Repository Source Context
 
-The current codebase is split into three projects:
+The refactored workspace was built from three previous repositories:
 
 ```text
-micronucleos-web        # Main Django + Vue web application
-Segmentacion_web       # Saliva segmentation FastAPI service
-segmentacion_sangre    # Blood segmentation FastAPI service
+micronucleos-web      # Django + Vue web application
+Segmentacion_web     # Saliva segmentation FastAPI service
+segmentacion_sangre  # Blood segmentation FastAPI service
 ```
+
+Current workspace paths:
+
+```text
+apps/web/
+apps/segmentation-saliva/
+apps/segmentation-blood/
+```
+
+Treat this as the current monorepo structure. Do not merge, move or restructure these folders unless explicitly requested.
 
 ## Current Architecture
 
 ```mermaid
 flowchart LR
     UI[Vue 3 Frontend] --> API[Django REST Backend]
-    API -. missing integration .-> SALIVA[FastAPI Saliva Segmentation]
-    API -. missing integration .-> BLOOD[FastAPI Blood Segmentation]
-    API --> DB[(PostgreSQL configured)]
+    API -. clients exist, endpoint missing .-> SALIVA[FastAPI Saliva Segmentation]
+    API -. clients exist, endpoint missing .-> BLOOD[FastAPI Blood Segmentation]
+    API --> DB[(SQLite local default / PostgreSQL configurable)]
 ```
 
 ## Current Backend
@@ -39,7 +49,7 @@ flowchart LR
 Main backend:
 
 ```text
-micronucleos-web/Backend
+apps/web/Backend
 ```
 
 Current Django app:
@@ -71,12 +81,68 @@ Current endpoints:
 /api/analisis/{id}/cambiar_estado/
 ```
 
+Missing endpoint:
+
+```http
+POST /api/muestras/{id}/segmentar/
+```
+
+## Backend Configuration Status
+
+Django settings are externalized with `django-environ`.
+
+Current environment example:
+
+```text
+apps/web/Backend/.env.example
+```
+
+Configuration includes:
+
+- security settings;
+- database settings;
+- CORS origins;
+- language/timezone;
+- saliva and blood segmentation service URLs/timeouts.
+
+The local default database is SQLite. PostgreSQL is configurable but not hardcoded as the default.
+
+## Backend Segmentation Client Status
+
+Django already has segmentation clients:
+
+```text
+apps/web/Backend/api/services/segmentation/
+├── base_client.py
+├── saliva_client.py
+├── blood_client.py
+├── exceptions.py
+├── factory.py
+├── tests.py
+└── USAGE.md
+```
+
+Public helpers:
+
+```python
+from api.services.segmentation import get_segmentation_client, segment_image
+```
+
+Supported keys:
+
+```text
+SALIVA
+SANGRE
+```
+
+Important boundary: these clients are not yet wired into any existing DRF endpoint.
+
 ## Current Frontend
 
 Main frontend:
 
 ```text
-micronucleos-web/Frontend
+apps/web/Frontend
 ```
 
 Framework:
@@ -94,15 +160,25 @@ analisis          # placeholder
 caracterizacion  # placeholder
 ```
 
-Known issue:
+Frontend API status:
 
 ```text
-API URL is hardcoded as http://127.0.0.1:8000 in multiple components.
+src/services/apiClient.js exists
+VITE_API_BASE_URL is used
+.env.example exists
 ```
+
+No hardcoded Django API base URL remains in `apps/web/Frontend/src`.
 
 ## Current Saliva Segmentation Service
 
-Project:
+Project path:
+
+```text
+apps/segmentation-saliva
+```
+
+Source repository:
 
 ```text
 Segmentacion_web
@@ -117,7 +193,7 @@ POST /segmentar
 Pipeline:
 
 ```text
-bytes → RGB image → Cellpose membrane segmentation → nucleus detection → micronucleus detection → masks → polygons JSON
+bytes -> RGB image -> Cellpose membrane segmentation -> nucleus detection -> micronucleus detection -> masks -> polygons JSON
 ```
 
 Output:
@@ -144,7 +220,13 @@ micronucleo
 
 ## Current Blood Segmentation Service
 
-Project:
+Project path:
+
+```text
+apps/segmentation-blood
+```
+
+Source repository:
 
 ```text
 segmentacion_sangre
@@ -159,7 +241,7 @@ POST /api/v1/segmentar
 Pipeline:
 
 ```text
-bytes → RGB image → resize 224x224 → grayscale → gamma correction → CLAHE → sharpening → Cellpose → robust z-score → DBSCAN → circularity filter → masks → polygons JSON
+bytes -> RGB image -> resize 224x224 -> grayscale -> gamma correction -> CLAHE -> sharpening -> Cellpose -> robust z-score -> DBSCAN -> circularity filter -> masks -> polygons JSON
 ```
 
 Output:
@@ -173,7 +255,7 @@ Output:
       "puntos": [[10, 20], [12, 25]]
     },
     {
-      "id": 1,
+      "id": 2,
       "tipo": "micronucleo",
       "puntos": [[30, 40], [32, 45]]
     }
@@ -190,7 +272,7 @@ micronucleo
 
 ## Main Architectural Gap
 
-The current backend does not yet integrate the microservices.
+The current backend has clients for the microservices, but does not yet orchestrate segmentation through an API endpoint.
 
 Target flow:
 
@@ -203,18 +285,32 @@ sequenceDiagram
     participant DB as Database
 
     User->>Frontend: Upload sample image
-    Frontend->>Django: POST sample image
+    Frontend->>Django: POST /api/muestras/
     Django->>DB: Save image
     User->>Frontend: Trigger segmentation
-    Frontend->>Django: POST /samples/{id}/segment
+    Frontend->>Django: POST /api/muestras/{id}/segmentar/
     Django->>Service: POST image file
-    Service->>Django: Return polygons JSON
-    Django->>DB: Save segmentation result
+    Service->>Django: Return objetos JSON
+    Django->>DB: Save segmentation JSON/counts
     Django->>Frontend: Return result/status
     User->>Frontend: Review/edit segmentation
     Frontend->>Django: PATCH segmentation JSON
     Django->>DB: Save validated segmentation
 ```
+
+## Current Validation Status
+
+The repository has been sanitized and documented, but a minimal technical validation pass is still pending.
+
+Pending validation:
+
+- Django backend checks/tests in the current environment.
+- Vue frontend dependency install and build.
+- Saliva FastAPI service startup and endpoint smoke test.
+- Blood FastAPI service startup and endpoint smoke test.
+- Local runbook/deployment documentation for all services.
+
+Do not assume the integrated runtime is validated until these checks are performed and documented.
 
 ## Canonical Domain Language
 
@@ -244,25 +340,22 @@ ResultadoCaracterizacion
 Reporte
 ```
 
+Do not rename existing models until a migration plan is approved.
+
 ## Required Sample Types
 
-```text
-SALIVA
-BLOOD
-```
-
-Or Spanish equivalents:
+Use canonical sample type values consistently:
 
 ```text
 SALIVA
 SANGRE
 ```
 
-Pick one canonical representation and keep it stable across backend, frontend and microservices.
+The current Django segmentation factory uses `SANGRE`, not `BLOOD`.
 
 ## Stable Segmentation Contract
 
-Codex should preserve this contract unless explicitly instructed otherwise:
+Codex should preserve this microservice contract unless explicitly instructed otherwise:
 
 ```json
 {
@@ -274,6 +367,14 @@ Codex should preserve this contract unless explicitly instructed otherwise:
     }
   ]
 }
+```
+
+Important labels:
+
+```text
+membrana
+nucleo
+micronucleo
 ```
 
 Recommended future normalized contract:
@@ -302,88 +403,106 @@ Recommended future normalized contract:
 }
 ```
 
+Treat this normalized contract as future-facing only.
+
 ## Refactor Constraints
 
 Preserve:
 
-- Current endpoints until replacements exist.
-- Current frontend behavior.
-- Current microservice segmentation logic.
-- Current polygon output fields.
-- Clinical traceability from patient to case to image to result.
+- current endpoints until replacements exist;
+- current frontend behavior;
+- current microservice segmentation logic;
+- current polygon output fields;
+- clinical traceability from patient to case to image to result.
 
 Avoid:
 
-- Rewriting Cellpose internals in the first phase.
-- Renaming all models at once.
-- Breaking `/api/pacientes/`, `/api/casos/`, `/api/analisis/`, `/api/muestras/`.
-- Having frontend call microservices directly.
-- Changing object type labels without migration.
+- rewriting Cellpose internals in the first phase;
+- renaming all models at once;
+- breaking `/api/pacientes/`, `/api/casos/`, `/api/analisis/`, `/api/muestras/`;
+- having frontend call microservices directly;
+- changing object type labels without migration.
 
-## Recommended Refactor Sequence
+## Updated Refactor Sequence
 
-### Step 1: Configuration cleanup
+### Step 0: Baseline sanitation - done
 
-- `.env.example`
+- `.gitignore`
+- generated/local file cleanup
+- backend `.env.example`
+- frontend `.env.example`
 - Django environment variables
-- Frontend `VITE_API_BASE_URL`
-- microservice URL settings
+- frontend `VITE_API_BASE_URL`
+- frontend `apiClient`
+- Django segmentation clients
 
-### Step 2: API client centralization
+### Step 1: Minimal technical validation
 
-- Frontend Axios client
-- Backend segmentation clients
+- Validate Django backend checks/tests.
+- Validate Vue frontend build.
+- Validate both FastAPI services can start.
+- Smoke-test microservice segmentation endpoints with controlled inputs where feasible.
+- Document run/deployment commands and any environment assumptions.
+
+### Step 2: Segmentation endpoint
+
+- Add `POST /api/muestras/{id}/segmentar/`.
+- Use existing Django segmentation clients.
+- Map service errors to API responses.
+- Preserve current endpoints.
 
 ### Step 3: Segmentation persistence
 
-- Add `ResultadoSegmentacion` model
-- Store `objetos` JSON
-- Store counts JSON
-- Add segmentation status
+- Add `ResultadoSegmentacion` or equivalent.
+- Store raw `objetos` JSON.
+- Store derived counts.
+- Track status/error metadata.
 
 ### Step 4: Sample generalization
 
-- Add sample type
-- Support blood and saliva uploads
-- Dispatch correct microservice by type
+- Add or migrate toward `ImagenMuestra`.
+- Add `tipo_muestra`.
+- Support saliva and blood uploads.
+- Dispatch correct microservice by type.
 
 ### Step 5: Editor persistence
 
-- PATCH segmentation JSON
-- validation status
-- reviewer metadata
+- PATCH segmentation JSON.
+- validation status.
+- reviewer metadata.
+- revision history if needed.
 
 ### Step 6: Characterization and reports
 
-- Characterization endpoint
-- CSV export
-- PDF export
+- Characterization endpoint.
+- CSV export.
+- PDF export.
 
-## Good First Codex Task
-
-```text
-Refactor only configuration.
-Do not change models.
-Do not change endpoint behavior.
-Add environment variables and .env.example.
-Preserve local development defaults.
-```
-
-## Good Second Codex Task
+## Good Next Codex Task
 
 ```text
-Centralize frontend API access.
-Create src/services/apiClient.js.
-Use import.meta.env.VITE_API_BASE_URL.
-Replace duplicated hardcoded API_URL values.
-Preserve all UI behavior.
+Validate the SICAM refactored repository.
+Do not change source code.
+Run backend, frontend and microservice checks as far as the environment allows.
+Report commands, outputs, blockers and next fixes.
 ```
 
-## Good Third Codex Task
+## Good Functional Task After Validation
 
 ```text
-Add a Django service client module for segmentation microservices.
-Do not call it from existing endpoints yet.
-Implement saliva and blood client functions that accept a local image path or file object and return the parsed JSON response.
-Add unit tests with mocked HTTP responses.
+Add POST /api/muestras/{id}/segmentar/ to the Django backend.
+Use api.services.segmentation.segment_image().
+Do not change existing endpoints.
+Do not rename models.
+Do not change segmentation algorithms.
+Add focused tests for success and service error handling.
 ```
+
+## Still Pending By Requirement
+
+- `POST /api/muestras/{id}/segmentar/`.
+- Persistence of segmentation JSON.
+- Generalization from `MuestraSaliva` to `ImagenMuestra`.
+- Validation workflow.
+- Characterization.
+- Reports.

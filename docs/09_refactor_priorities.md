@@ -2,7 +2,7 @@
 
 ## Priority Model
 
-Use four refactor phases:
+Use four practical refactor phases:
 
 ```text
 Phase 0: Stabilize
@@ -11,109 +11,119 @@ Phase 2: Generalize
 Phase 3: Extend
 ```
 
-## Phase 0 - Stabilize Configuration and Baseline
+## Current Phase Status
 
-### Goals
+### Phase 0 - Stabilize
 
-- Make the project reproducible.
-- Avoid leaking secrets.
-- Give Codex clear execution commands.
+Status: mostly completed for repository/configuration sanitation.
 
-### Tasks
+Done:
 
-1. Add `.env.example`.
-2. Move Django settings to environment variables.
-3. Move frontend API URL to `VITE_API_BASE_URL`.
-4. Add README execution instructions per service.
-5. Add health endpoints to microservices.
-6. Add minimal smoke tests.
+- `.gitignore` cleaned up.
+- Generated/local files removed.
+- Backend `.env.example` exists.
+- Django settings use environment variables.
+- Frontend `.env.example` exists.
+- Frontend API base URL moved to `VITE_API_BASE_URL`.
+- Frontend Axios calls centralized in `src/services/apiClient.js`.
 
-### Deliverables
+Still useful in Phase 0 follow-up:
 
-```text
-.env.example
-README.md
-docs/development_setup.md
-```
+- Install dependencies in the active environment and run builds/tests.
+- Add routed health/readiness endpoints.
+- Add minimal smoke tests.
+- Document local run/deployment commands for all services.
 
-## Phase 1 - Integrate Segmentation Services
+### Phase 1 - Integrate Segmentation Services
 
-### Goals
+Status: partially completed.
 
-- Django should orchestrate segmentation.
-- Frontend should call Django, not microservices directly.
+Done:
 
-### Tasks
-
-1. Add service clients in Django:
+- Django service clients exist:
 
 ```text
-api/clients/saliva_segmentation_client.py
-api/clients/blood_segmentation_client.py
+apps/web/Backend/api/services/segmentation/
+├── base_client.py
+├── saliva_client.py
+├── blood_client.py
+├── exceptions.py
+├── factory.py
+├── tests.py
+└── USAGE.md
 ```
 
-2. Add backend endpoint:
+Still pending:
+
+1. Add backend endpoint:
 
 ```http
 POST /api/muestras/{id}/segmentar/
 ```
 
+2. Use `segment_image(...)` from `api.services.segmentation`.
 3. Persist segmentation response JSON.
 4. Return segmentation status and counts to frontend.
-5. Add error handling for unavailable microservices.
+5. Add API-level error handling for unavailable microservices.
 
-### Deliverables
+Recommended deliverables:
 
 ```text
-SegmentationClient
-SegmentationResult model
-Segment sample endpoint
+ResultadoSegmentacion model or equivalent JSON persistence
+POST /api/muestras/{id}/segmentar/
+API response contract for segmentation status/result
 ```
 
 ## Phase 2 - Generalize Samples and Domain Model
 
-### Goals
+Status: pending.
+
+Goals:
 
 - Support saliva and blood in one coherent model.
 - Reduce duplicated domain structures.
 
-### Tasks
+Tasks:
 
 1. Replace or extend `MuestraSaliva` with `ImagenMuestra`.
-2. Add `tipo_muestra` enum:
+2. Add canonical sample type values:
 
 ```text
 SALIVA
-BLOOD
+SANGRE
 ```
 
 3. Refactor upload frontend to select sample type.
-4. Add migration strategy.
-5. Align model names.
+4. Add a migration strategy.
+5. Align serializer/API names without breaking existing endpoints prematurely.
 
-### Deliverables
+Deliverables:
 
 ```text
-ImagenMuestra model
+ImagenMuestra model or compatibility layer
 Sample type selection UI
 Migration plan
+Backward-compatible API strategy
 ```
 
 ## Phase 3 - Validation, Characterization and Reports
 
-### Goals
+Status: pending.
+
+Goals:
 
 - Implement the workflow described in SICAM documents.
 
-### Tasks
+Tasks:
 
 1. Add segmentation editor persistence.
 2. Add validation status.
-3. Add characterization calculation endpoint.
-4. Add CSV export.
-5. Add PDF report generation.
+3. Add reviewer/audit metadata.
+4. Add characterization calculation endpoint.
+5. Add CSV export.
+6. Add PDF report generation.
 
-### Deliverables
+Deliverables:
 
 ```text
 Validated segmentation flow
@@ -121,81 +131,99 @@ Characterization module
 CSV/PDF export
 ```
 
-## High-Impact Low-Risk Refactors
+## High-Impact Low-Risk Next Work
 
-These are good first tasks for Codex:
+These are good next tasks for Codex:
 
-### 1. Centralize frontend API client
+### 1. Run minimal technical validation
 
-Create:
-
-```text
-src/services/apiClient.js
-```
-
-Replace all hardcoded Axios calls.
-
-### 2. Add backend environment settings
-
-Use:
-
-```python
-os.environ.get(...)
-```
-
-or `django-environ`.
-
-### 3. Add Pydantic response models to microservices
-
-Formalize:
+Before adding functional integration, validate the current baseline:
 
 ```text
-PolygonObject
-SegmentationResponse
+Backend Django: install dependencies, run manage.py check, run focused tests
+Frontend Vue: install dependencies, run npm run build
+Saliva service: start service and smoke-test POST /segmentar
+Blood service: start service and smoke-test POST /api/v1/segmentar
 ```
 
-### 4. Add `/health` endpoints
+Document any failures as environment/setup issues or code issues.
 
-For Django and both FastAPI services.
+### 2. Add Django segmentation endpoint
 
-### 5. Add sample type enum
+Add a narrow DRF action:
 
-Even before replacing `MuestraSaliva`, introduce canonical sample type values.
+```http
+POST /api/muestras/{id}/segmentar/
+```
+
+Constraints:
+
+- Use existing segmentation clients.
+- Do not change existing endpoints.
+- Do not generalize models in the same step unless explicitly requested.
+- Return clear API errors for timeout/connection/invalid response.
+
+### 3. Add segmentation JSON persistence
+
+Introduce a migration-backed persistence model or field for raw `objetos` JSON.
+
+Do not collapse this into `ResultadoAnalisis` without a clear migration plan.
+
+### 4. Add sample type plan
+
+Before changing models, document how `MuestraSaliva` will evolve into `ImagenMuestra`.
+
+### 5. Add smoke tests
+
+Cover:
+
+- existing API routes;
+- frontend build after dependency install;
+- segmentation client tests with mocked HTTP;
+- future segmentation endpoint.
 
 ## Refactors to Avoid Initially
 
 Do not start with:
 
-- Full architecture rewrite.
-- Replacing Vue components with a new UI framework.
-- Rewriting Cellpose logic.
-- Merging both microservices before integration works.
-- Changing all model names at once.
-- Introducing Celery before a synchronous orchestration endpoint exists.
+- full architecture rewrite;
+- replacing Vue components with a new UI framework;
+- rewriting Cellpose logic;
+- merging both microservices before Django orchestration works;
+- changing all model names at once;
+- introducing Celery before a synchronous orchestration endpoint exists.
 
-## Suggested First Codex Prompt
+## Suggested Next Codex Prompt
+
+```text
+You are validating the SICAM refactored repository.
+
+Task:
+1. Do not modify source code.
+2. Install/use existing dependencies only if approved.
+3. Run minimal backend, frontend and microservice checks.
+4. Report exact commands, failures and next fixes.
+5. Do not add functional changes.
+```
+
+## Suggested Functional Prompt After Validation
 
 ```text
 You are refactoring the SICAM Django backend.
-Read docs/01_repository_inventory.md through docs/10_codex_master_context.md first.
 
 Task:
-1. Add environment-based settings for SECRET_KEY, DEBUG, ALLOWED_HOSTS, database credentials and CORS.
-2. Preserve current behavior in development.
-3. Create .env.example.
-4. Do not change models or endpoints.
-5. Show a summary of changed files.
+1. Add POST /api/muestras/{id}/segmentar/.
+2. Use api.services.segmentation.segment_image().
+3. Preserve existing endpoints.
+4. Do not rename models.
+5. Persist or return segmentation JSON only as explicitly requested.
+6. Add focused tests.
 ```
 
-## Suggested Second Codex Prompt
+## Later Prompt
 
 ```text
-You are refactoring the SICAM Vue frontend.
-Read docs/03_frontend_vue_inventory.md and docs/10_codex_master_context.md first.
-
-Task:
-1. Create src/services/apiClient.js using VITE_API_BASE_URL.
-2. Replace hardcoded http://127.0.0.1:8000 references in components.
-3. Preserve existing UI behavior.
-4. Do not introduce Vue Router or Pinia yet.
+Plan the migration from MuestraSaliva to ImagenMuestra.
+Do not modify models yet.
+Document backward compatibility, data migration, endpoint impact and frontend changes.
 ```

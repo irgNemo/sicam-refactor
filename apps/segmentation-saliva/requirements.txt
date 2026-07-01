@@ -6,7 +6,15 @@ opencv-python-headless
 matplotlib
 scikit-image
 scikit-learn
+tqdm
+numba
+torch
+natsort
 
 # Cellpose/model dependencies are intentionally not installed automatically here.
 # Provision them explicitly in the target environment to avoid large downloads:
 #   pip install cellpose
+#
+# PyTorch is a special runtime dependency for the vendored cellpose code.
+# For local CPU-only validation, install with:
+#   python -m pip install torch --index-url https://download.pytorch.org/whl/cpu

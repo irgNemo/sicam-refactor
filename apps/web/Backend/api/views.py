@@ -22,6 +22,13 @@ from .serializers import (
     AnalisisSerializer,
     MuestraSalivaSerializer
 )
+from .services.segmentation.exceptions import (
+    InvalidSegmentationResponseError,
+    SegmentationConnectionError,
+    SegmentationServiceError,
+    SegmentationTimeoutError,
+)
+from .services.segmentation.factory import segment_image
 
 class PacienteViewSet(viewsets.ModelViewSet):
     queryset = Paciente.objects.all()
@@ -78,3 +85,66 @@ class MuestraSalivaViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'])
+    def segmentar(self, request, pk=None):
+        """Solicitar segmentacion de una muestra de saliva existente."""
+        muestra = self.get_object()
+
+        if not muestra.imagen:
+            return Response(
+                {'error': 'La muestra no tiene imagen asociada'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            muestra.imagen.open('rb')
+            try:
+                image_bytes = muestra.imagen.read()
+            finally:
+                muestra.imagen.close()
+        except (OSError, ValueError) as exc:
+            return Response(
+                {'error': f'No se pudo leer la imagen de la muestra: {str(exc)}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not image_bytes:
+            return Response(
+                {'error': 'La imagen de la muestra esta vacia'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            result = segment_image(
+                'SALIVA',
+                image_bytes,
+                filename=muestra.imagen.name
+            )
+        except SegmentationTimeoutError as exc:
+            return Response(
+                {'error': str(exc)},
+                status=status.HTTP_504_GATEWAY_TIMEOUT
+            )
+        except SegmentationConnectionError as exc:
+            return Response(
+                {'error': str(exc)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+        except InvalidSegmentationResponseError as exc:
+            return Response(
+                {'error': str(exc)},
+                status=status.HTTP_502_BAD_GATEWAY
+            )
+        except SegmentationServiceError as exc:
+            return Response(
+                {'error': str(exc)},
+                status=status.HTTP_502_BAD_GATEWAY
+            )
+        except Exception:
+            return Response(
+                {'error': 'Error inesperado al solicitar segmentacion'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        return Response(result, status=status.HTTP_200_OK)

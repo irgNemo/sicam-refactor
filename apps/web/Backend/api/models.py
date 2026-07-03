@@ -90,6 +90,29 @@ class ResultadoAnalisis(models.Model):
     def __str__(self):
         return f"Resultado {self.id_resultado}"
 
+
+# Modelo de resultado JSON de segmentacion
+class ResultadoSegmentacion(models.Model):
+    id_resultado_segmentacion = models.AutoField(primary_key=True)
+    muestra = models.ForeignKey(
+        MuestraSaliva,
+        on_delete=models.CASCADE,
+        related_name='resultados_segmentacion'
+    )
+    tipo_muestra = models.CharField(max_length=20, default='SALIVA')
+    respuesta_json = models.JSONField()
+    estado = models.CharField(max_length=20, default='COMPLETADO')
+    error = models.TextField(blank=True, null=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return (
+            f"Resultado Segmentacion {self.id_resultado_segmentacion} - "
+            f"{self.tipo_muestra} - {self.estado}"
+        )
+
+
 # Modelo de Máscara
 class AnalisisMascara(models.Model):
     id_mascara_analisis = models.AutoField(primary_key=True)

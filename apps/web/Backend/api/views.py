@@ -15,7 +15,13 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
-from .models import Paciente, Caso, AnalisisPred, MuestraSaliva
+from .models import (
+    AnalisisPred,
+    Caso,
+    MuestraSaliva,
+    Paciente,
+    ResultadoSegmentacion,
+)
 from .serializers import (
     PacienteSerializer, 
     CasoSerializer, 
@@ -147,4 +153,27 @@ class MuestraSalivaViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-        return Response(result, status=status.HTTP_200_OK)
+        try:
+            resultado = ResultadoSegmentacion.objects.create(
+                muestra=muestra,
+                tipo_muestra='SALIVA',
+                respuesta_json=result,
+                estado='COMPLETADO',
+            )
+        except Exception:
+            return Response(
+                {'error': 'Error al persistir resultado de segmentacion'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        response_data = {
+            **result,
+            'resultado_segmentacion': {
+                'id': resultado.id_resultado_segmentacion,
+                'estado': resultado.estado,
+                'tipo_muestra': resultado.tipo_muestra,
+                'creado_en': resultado.creado_en.isoformat(),
+            }
+        }
+
+        return Response(response_data, status=status.HTTP_200_OK)

@@ -48,7 +48,7 @@
             :key="muestra.id_muestra"
             class="thumb"
             :class="{ active: muestra === imagenSeleccionada }"
-            @click="imagenSeleccionada = muestra"
+            @click="selectImagen(muestra)"
           >
             <img
               :src="muestra.imagen"
@@ -183,6 +183,34 @@
                 </tbody>
               </table>
 
+              <div v-if="imagenSeleccionada" class="segmentation-panel">
+                <button
+                  class="btn-segment full-width"
+                  :disabled="segmentacionLoading"
+                  @click="ejecutarSegmentacion"
+                >
+                  {{ segmentacionLoading ? 'Segmentando...' : 'Ejecutar segmentacion' }}
+                </button>
+
+                <div v-if="segmentacionError" class="segmentation-status error">
+                  {{ segmentacionError }}
+                </div>
+
+                <div v-if="segmentacionMetadata" class="segmentation-status success">
+                  <div class="status-title">
+                    Segmentacion {{ segmentacionMetadata.estado }}
+                  </div>
+                  <div class="status-grid">
+                    <span>ID resultado</span>
+                    <strong>#{{ segmentacionMetadata.id }}</strong>
+                    <span>Tipo</span>
+                    <strong>{{ segmentacionMetadata.tipo_muestra }}</strong>
+                    <span>Objetos</span>
+                    <strong>{{ segmentacionObjetosCount }}</strong>
+                  </div>
+                </div>
+              </div>
+
               <button class="btn-review full-width">
                 <span class="btn-icon">⚠️</span>
                 Marcar para revisión manual
@@ -285,6 +313,7 @@
 
 <script>
 import apiClient from "../services/apiClient";
+import { segmentarMuestra } from "../services/segmentationService";
 
 export default {
   name: "MainContent",
@@ -299,6 +328,9 @@ export default {
       analisis: [],
       loading: true,
       imagenSeleccionada: null,
+      segmentacionLoading: false,
+      segmentacionResultado: null,
+      segmentacionError: "",
     };
   },
 
@@ -321,11 +353,48 @@ export default {
       if (!this.imagenSeleccionada) return null;
       return this.imagenSeleccionada.resultados?.[0] || null;
     },
+
+    segmentacionMetadata() {
+      return this.segmentacionResultado?.resultado_segmentacion || null;
+    },
+
+    segmentacionObjetosCount() {
+      const objetos = this.segmentacionResultado?.objetos;
+      return Array.isArray(objetos) ? objetos.length : 0;
+    },
   },
 
   watch: {
     imagenes(nuevas) {
-      this.imagenSeleccionada = nuevas[0] || null;
+      this.selectImagen(nuevas[0] || null);
+    },
+  },
+
+  methods: {
+    selectImagen(muestra) {
+      this.imagenSeleccionada = muestra;
+      this.segmentacionResultado = null;
+      this.segmentacionError = "";
+      this.segmentacionLoading = false;
+    },
+
+    async ejecutarSegmentacion() {
+      if (!this.imagenSeleccionada || this.segmentacionLoading) return;
+
+      this.segmentacionLoading = true;
+      this.segmentacionResultado = null;
+      this.segmentacionError = "";
+
+      try {
+        const response = await segmentarMuestra(this.imagenSeleccionada.id_muestra);
+        this.segmentacionResultado = response.data;
+      } catch (error) {
+        console.error("Error al segmentar muestra:", error);
+        this.segmentacionError =
+          error.response?.data?.error || "No fue posible segmentar la muestra";
+      } finally {
+        this.segmentacionLoading = false;
+      }
     },
   },
 
@@ -863,6 +932,66 @@ export default {
   font-size: 48px;
   margin-bottom: 12px;
   opacity: 0.3;
+}
+
+.segmentation-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.btn-segment {
+  padding: 12px;
+  border: 2px solid #1e88e5;
+  background: #1e88e5;
+  color: white;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 10px;
+  transition: all 0.2s ease;
+}
+
+.btn-segment:hover:not(:disabled) {
+  background: #1976d2;
+  border-color: #1976d2;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(30, 136, 229, 0.25);
+}
+
+.btn-segment:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.segmentation-status {
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.segmentation-status.error {
+  border: 1px solid #ffcdd2;
+  background: #ffebee;
+  color: #c62828;
+}
+
+.segmentation-status.success {
+  border: 1px solid #c8e6c9;
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.status-title {
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 10px;
 }
 
 .btn-review {

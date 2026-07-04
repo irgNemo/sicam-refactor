@@ -26,7 +26,8 @@ from .serializers import (
     PacienteSerializer, 
     CasoSerializer, 
     AnalisisSerializer,
-    MuestraSalivaSerializer
+    MuestraSalivaSerializer,
+    ResultadoSegmentacionSerializer,
 )
 from .services.segmentation.exceptions import (
     InvalidSegmentationResponseError,
@@ -91,6 +92,17 @@ class MuestraSalivaViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get'], url_path='resultados-segmentacion')
+    def resultados_segmentacion(self, request, pk=None):
+        """Consultar resultados de segmentacion asociados a la muestra."""
+        muestra = self.get_object()
+        resultados = muestra.resultados_segmentacion.order_by(
+            '-creado_en',
+            '-id_resultado_segmentacion'
+        )
+        serializer = ResultadoSegmentacionSerializer(resultados, many=True)
+        return Response(serializer.data)
 
     @action(detail=True, methods=['post'])
     def segmentar(self, request, pk=None):

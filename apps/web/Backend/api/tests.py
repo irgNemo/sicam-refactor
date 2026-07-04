@@ -177,3 +177,103 @@ class MuestraSalivaSegmentationEndpointTests(APITestCase):
         assert response.status_code == status.HTTP_502_BAD_GATEWAY
         assert 'error' in response.data
         assert ResultadoSegmentacion.objects.count() == 0
+
+
+class MuestraSalivaSegmentationResultsReadTests(APITestCase):
+    def setUp(self):
+        self.media_root = tempfile.mkdtemp()
+        self.override = override_settings(MEDIA_ROOT=self.media_root)
+        self.override.enable()
+
+        self.paciente = Paciente.objects.create(
+            nombre='Paciente',
+            apellido='Lectura',
+            fecha_nacimiento=date(1990, 1, 1),
+            identificacion='PAC-READ-001',
+        )
+        self.caso = Caso.objects.create(
+            paciente=self.paciente,
+            titulo='Caso lectura',
+        )
+        self.analisis = AnalisisPred.objects.create(
+            id_paciente_fk=self.paciente,
+            id_caso_fk=self.caso,
+        )
+
+    def tearDown(self):
+        self.override.disable()
+        shutil.rmtree(self.media_root, ignore_errors=True)
+
+    def _create_muestra(self):
+        return MuestraSaliva.objects.create(
+            analisis=self.analisis,
+            imagen=SimpleUploadedFile(
+                'sample.jpg',
+                b'fake image bytes',
+                content_type='image/jpeg',
+            ),
+        )
+
+    def _url(self, muestra_id):
+        return reverse(
+            'muestra-resultados-segmentacion',
+            kwargs={'pk': muestra_id}
+        )
+
+    def test_resultados_segmentacion_empty_list(self):
+        muestra = self._create_muestra()
+
+        response = self.client.get(self._url(muestra.id_muestra))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data == []
+
+    def test_resultados_segmentacion_returns_saved_results(self):
+        muestra = self._create_muestra()
+        resultado = ResultadoSegmentacion.objects.create(
+            muestra=muestra,
+            tipo_muestra='SALIVA',
+            estado='COMPLETADO',
+            respuesta_json={
+                'objetos': [
+                    {'id': 1, 'tipo': 'membrana', 'puntos': [[10, 20]]}
+                ]
+            },
+        )
+
+        response = self.client.get(self._url(muestra.id_muestra))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data) == 1
+        assert response.data[0]['id'] == resultado.id_resultado_segmentacion
+        assert response.data[0]['tipo_muestra'] == 'SALIVA'
+        assert response.data[0]['estado'] == 'COMPLETADO'
+        assert response.data[0]['respuesta_json'] == resultado.respuesta_json
+        assert 'creado_en' in response.data[0]
+        assert 'actualizado_en' in response.data[0]
+
+    def test_resultados_segmentacion_orders_newest_first(self):
+        muestra = self._create_muestra()
+        first_result = ResultadoSegmentacion.objects.create(
+            muestra=muestra,
+            tipo_muestra='SALIVA',
+            estado='COMPLETADO',
+            respuesta_json={'objetos': [{'id': 1}]},
+        )
+        second_result = ResultadoSegmentacion.objects.create(
+            muestra=muestra,
+            tipo_muestra='SALIVA',
+            estado='COMPLETADO',
+            respuesta_json={'objetos': [{'id': 2}]},
+        )
+
+        response = self.client.get(self._url(muestra.id_muestra))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data[0]['id'] == second_result.id_resultado_segmentacion
+        assert response.data[1]['id'] == first_result.id_resultado_segmentacion
+
+    def test_resultados_segmentacion_not_found(self):
+        response = self.client.get(self._url(999999))
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND

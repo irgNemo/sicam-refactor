@@ -101,6 +101,7 @@ class ResultadoSegmentacion(models.Model):
     )
     tipo_muestra = models.CharField(max_length=20, default='SALIVA')
     respuesta_json = models.JSONField()
+    resultado_normalizado = models.JSONField(blank=True, null=True)
     estado = models.CharField(max_length=20, default='COMPLETADO')
     error = models.TextField(blank=True, null=True)
     creado_en = models.DateTimeField(auto_now_add=True)

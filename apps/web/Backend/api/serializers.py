@@ -41,6 +41,7 @@ class ResultadoSegmentacionSerializer(serializers.ModelSerializer):
             'tipo_muestra',
             'estado',
             'respuesta_json',
+            'resultado_normalizado',
             'creado_en',
             'actualizado_en',
         )

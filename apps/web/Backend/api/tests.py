@@ -22,6 +22,57 @@ from .services.segmentation.exceptions import (
     SegmentationServiceError,
     SegmentationTimeoutError,
 )
+from .services.segmentation.normalizers import normalize_segmentation_result
+
+
+class SegmentationResultNormalizerTests(APITestCase):
+    def test_normalizer_calculates_total_objects_and_counts_by_label(self):
+        raw_result = {
+            'objetos': [
+                {'id': 1, 'tipo': 'membrana', 'puntos': [[10, 20]]},
+                {'id': 2, 'tipo': 'nucleo', 'puntos': [[30, 40]]},
+                {'id': 3, 'tipo': 'membrana', 'puntos': [[50, 60]]},
+            ]
+        }
+
+        result = normalize_segmentation_result(raw_result, sample_type='SALIVA')
+
+        assert result['version'] == '1.0'
+        assert result['sample_type'] == 'SALIVA'
+        assert result['summary']['total_objects'] == 3
+        assert result['summary']['counts_by_label'] == {
+            'membrana': 2,
+            'nucleo': 1,
+        }
+
+    def test_normalizer_without_objects_returns_empty_objects(self):
+        result = normalize_segmentation_result({}, sample_type='SALIVA')
+
+        assert result['objects'] == []
+        assert result['summary']['total_objects'] == 0
+        assert result['summary']['counts_by_label'] == {}
+
+    def test_normalizer_keeps_incomplete_object_without_geometry(self):
+        raw_result = {
+            'objetos': [
+                {'id': 1, 'tipo': 'membrana'}
+            ]
+        }
+
+        result = normalize_segmentation_result(raw_result, sample_type='SALIVA')
+
+        assert result['objects'][0]['id'] == 1
+        assert result['objects'][0]['label'] == 'membrana'
+        assert result['objects'][0]['geometry'] is None
+        assert result['summary']['total_objects'] == 1
+
+    def test_normalizer_requires_dict_raw_result(self):
+        try:
+            normalize_segmentation_result([], sample_type='SALIVA')
+        except ValueError as exc:
+            assert 'objeto JSON' in str(exc)
+        else:
+            raise AssertionError('normalize_segmentation_result must fail')
 
 
 class MuestraSalivaSegmentationEndpointTests(APITestCase):
@@ -76,6 +127,11 @@ class MuestraSalivaSegmentationEndpointTests(APITestCase):
 
         assert response.status_code == status.HTTP_200_OK
         assert response.data['objetos'] == expected_response['objetos']
+        assert response.data['resultado_normalizado']['sample_type'] == 'SALIVA'
+        assert response.data['resultado_normalizado']['summary'] == {
+            'total_objects': 1,
+            'counts_by_label': {'membrana': 1},
+        }
         assert response.data['resultado_segmentacion']['estado'] == 'COMPLETADO'
         assert response.data['resultado_segmentacion']['tipo_muestra'] == 'SALIVA'
         mock_segment_image.assert_called_once()
@@ -88,6 +144,7 @@ class MuestraSalivaSegmentationEndpointTests(APITestCase):
         assert resultado.tipo_muestra == 'SALIVA'
         assert resultado.estado == 'COMPLETADO'
         assert resultado.respuesta_json == expected_response
+        assert resultado.resultado_normalizado == response.data['resultado_normalizado']
 
     @patch('api.views.segment_image')
     def test_segmentar_muestra_repeated_success_creates_new_result(
@@ -111,6 +168,57 @@ class MuestraSalivaSegmentationEndpointTests(APITestCase):
             first_response.data['resultado_segmentacion']['id']
             != second_response.data['resultado_segmentacion']['id']
         )
+
+    @patch('api.views.segment_image')
+    def test_segmentar_muestra_without_objects_persists_empty_normalized_result(
+        self,
+        mock_segment_image
+    ):
+        muestra = self._create_muestra()
+        mock_segment_image.return_value = {}
+
+        response = self.client.post(self._url(muestra.id_muestra))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['resultado_normalizado']['objects'] == []
+        assert response.data['resultado_normalizado']['summary']['total_objects'] == 0
+
+        resultado = ResultadoSegmentacion.objects.get(muestra=muestra)
+        assert resultado.respuesta_json == {}
+        assert resultado.resultado_normalizado['objects'] == []
+
+    @patch('api.views.segment_image')
+    def test_segmentar_muestra_incomplete_object_does_not_break_normalization(
+        self,
+        mock_segment_image
+    ):
+        muestra = self._create_muestra()
+        mock_segment_image.return_value = {
+            'objetos': [
+                {'id': 1, 'tipo': 'membrana'}
+            ]
+        }
+
+        response = self.client.post(self._url(muestra.id_muestra))
+
+        assert response.status_code == status.HTTP_200_OK
+        normalized_object = response.data['resultado_normalizado']['objects'][0]
+        assert normalized_object['label'] == 'membrana'
+        assert normalized_object['geometry'] is None
+
+    @patch('api.views.segment_image')
+    def test_segmentar_muestra_invalid_raw_result_does_not_create_result(
+        self,
+        mock_segment_image
+    ):
+        muestra = self._create_muestra()
+        mock_segment_image.return_value = []
+
+        response = self.client.post(self._url(muestra.id_muestra))
+
+        assert response.status_code == status.HTTP_502_BAD_GATEWAY
+        assert 'error' in response.data
+        assert ResultadoSegmentacion.objects.count() == 0
 
     def test_segmentar_muestra_not_found(self):
         response = self.client.post(self._url(999999))
@@ -239,6 +347,29 @@ class MuestraSalivaSegmentationResultsReadTests(APITestCase):
                     {'id': 1, 'tipo': 'membrana', 'puntos': [[10, 20]]}
                 ]
             },
+            resultado_normalizado={
+                'version': '1.0',
+                'sample_type': 'SALIVA',
+                'objects': [
+                    {
+                        'id': 1,
+                        'label': 'membrana',
+                        'geometry': {
+                            'type': 'polygon',
+                            'points': [[10, 20]],
+                        },
+                        'source': {
+                            'raw_type': 'membrana',
+                        },
+                    }
+                ],
+                'summary': {
+                    'total_objects': 1,
+                    'counts_by_label': {
+                        'membrana': 1,
+                    },
+                },
+            },
         )
 
         response = self.client.get(self._url(muestra.id_muestra))
@@ -249,6 +380,10 @@ class MuestraSalivaSegmentationResultsReadTests(APITestCase):
         assert response.data[0]['tipo_muestra'] == 'SALIVA'
         assert response.data[0]['estado'] == 'COMPLETADO'
         assert response.data[0]['respuesta_json'] == resultado.respuesta_json
+        assert (
+            response.data[0]['resultado_normalizado']
+            == resultado.resultado_normalizado
+        )
         assert 'creado_en' in response.data[0]
         assert 'actualizado_en' in response.data[0]
 

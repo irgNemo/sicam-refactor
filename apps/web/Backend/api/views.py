@@ -36,6 +36,7 @@ from .services.segmentation.exceptions import (
     SegmentationTimeoutError,
 )
 from .services.segmentation.factory import segment_image
+from .services.segmentation.normalizers import normalize_segmentation_result
 
 class PacienteViewSet(viewsets.ModelViewSet):
     queryset = Paciente.objects.all()
@@ -166,10 +167,27 @@ class MuestraSalivaViewSet(viewsets.ModelViewSet):
             )
 
         try:
+            normalized_result = normalize_segmentation_result(
+                result,
+                sample_type='SALIVA'
+            )
+        except ValueError as exc:
+            return Response(
+                {'error': str(exc)},
+                status=status.HTTP_502_BAD_GATEWAY
+            )
+        except Exception:
+            return Response(
+                {'error': 'Error inesperado al normalizar resultado de segmentacion'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        try:
             resultado = ResultadoSegmentacion.objects.create(
                 muestra=muestra,
                 tipo_muestra='SALIVA',
                 respuesta_json=result,
+                resultado_normalizado=normalized_result,
                 estado='COMPLETADO',
             )
         except Exception:
@@ -185,7 +203,8 @@ class MuestraSalivaViewSet(viewsets.ModelViewSet):
                 'estado': resultado.estado,
                 'tipo_muestra': resultado.tipo_muestra,
                 'creado_en': resultado.creado_en.isoformat(),
-            }
+            },
+            'resultado_normalizado': normalized_result,
         }
 
         return Response(response_data, status=status.HTTP_200_OK)

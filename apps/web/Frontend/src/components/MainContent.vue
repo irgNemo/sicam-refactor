@@ -209,6 +209,43 @@
                     <strong>{{ segmentacionObjetosCount }}</strong>
                   </div>
                 </div>
+
+                <div class="segmentation-history">
+                  <div class="history-title">
+                    Historial persistido
+                    <span v-if="historialSegmentacion.length">
+                      {{ historialSegmentacion.length }}
+                    </span>
+                  </div>
+
+                  <div v-if="historialLoading" class="segmentation-status neutral">
+                    Cargando historial...
+                  </div>
+
+                  <div v-else-if="historialError" class="segmentation-status error">
+                    {{ historialError }}
+                  </div>
+
+                  <div v-else-if="!ultimoResultadoSegmentacion" class="segmentation-status neutral">
+                    Sin resultados historicos
+                  </div>
+
+                  <div v-else class="segmentation-status neutral">
+                    <div class="status-title">
+                      Ultimo resultado #{{ ultimoResultadoSegmentacion.id }}
+                    </div>
+                    <div class="status-grid">
+                      <span>Estado</span>
+                      <strong>{{ ultimoResultadoSegmentacion.estado }}</strong>
+                      <span>Tipo</span>
+                      <strong>{{ ultimoResultadoSegmentacion.tipo_muestra }}</strong>
+                      <span>Fecha</span>
+                      <strong>{{ formatearFechaResultado(ultimoResultadoSegmentacion.creado_en) }}</strong>
+                      <span>Objetos</span>
+                      <strong>{{ ultimoHistorialObjetosCount }}</strong>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <button class="btn-review full-width">
@@ -313,7 +350,10 @@
 
 <script>
 import apiClient from "../services/apiClient";
-import { segmentarMuestra } from "../services/segmentationService";
+import {
+  obtenerResultadosSegmentacion,
+  segmentarMuestra,
+} from "../services/segmentationService";
 
 export default {
   name: "MainContent",
@@ -331,6 +371,9 @@ export default {
       segmentacionLoading: false,
       segmentacionResultado: null,
       segmentacionError: "",
+      historialSegmentacion: [],
+      historialLoading: false,
+      historialError: "",
     };
   },
 
@@ -362,6 +405,15 @@ export default {
       const objetos = this.segmentacionResultado?.objetos;
       return Array.isArray(objetos) ? objetos.length : 0;
     },
+
+    ultimoResultadoSegmentacion() {
+      return this.historialSegmentacion[0] || null;
+    },
+
+    ultimoHistorialObjetosCount() {
+      const objetos = this.ultimoResultadoSegmentacion?.respuesta_json?.objetos;
+      return Array.isArray(objetos) ? objetos.length : 0;
+    },
   },
 
   watch: {
@@ -376,6 +428,40 @@ export default {
       this.segmentacionResultado = null;
       this.segmentacionError = "";
       this.segmentacionLoading = false;
+      this.historialSegmentacion = [];
+      this.historialError = "";
+      this.historialLoading = false;
+
+      if (muestra) {
+        this.cargarHistorialSegmentacion(muestra.id_muestra);
+      }
+    },
+
+    async cargarHistorialSegmentacion(muestraId) {
+      this.historialLoading = true;
+      this.historialError = "";
+
+      try {
+        const response = await obtenerResultadosSegmentacion(muestraId);
+
+        if (this.imagenSeleccionada?.id_muestra === muestraId) {
+          this.historialSegmentacion = Array.isArray(response.data)
+            ? response.data
+            : [];
+        }
+      } catch (error) {
+        console.error("Error al cargar historial de segmentacion:", error);
+
+        if (this.imagenSeleccionada?.id_muestra === muestraId) {
+          this.historialSegmentacion = [];
+          this.historialError =
+            error.response?.data?.error || "No fue posible cargar el historial";
+        }
+      } finally {
+        if (this.imagenSeleccionada?.id_muestra === muestraId) {
+          this.historialLoading = false;
+        }
+      }
     },
 
     async ejecutarSegmentacion() {
@@ -388,6 +474,7 @@ export default {
       try {
         const response = await segmentarMuestra(this.imagenSeleccionada.id_muestra);
         this.segmentacionResultado = response.data;
+        await this.cargarHistorialSegmentacion(this.imagenSeleccionada.id_muestra);
       } catch (error) {
         console.error("Error al segmentar muestra:", error);
         this.segmentacionError =
@@ -395,6 +482,11 @@ export default {
       } finally {
         this.segmentacionLoading = false;
       }
+    },
+
+    formatearFechaResultado(fecha) {
+      if (!fecha) return "";
+      return new Date(fecha).toLocaleString("es-MX");
     },
   },
 
@@ -981,6 +1073,35 @@ export default {
   border: 1px solid #c8e6c9;
   background: #e8f5e9;
   color: #2e7d32;
+}
+
+.segmentation-status.neutral {
+  border: 1px solid #d9e2ec;
+  background: #f8f9fa;
+  color: #2c3e50;
+}
+
+.segmentation-history {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.history-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: #2c3e50;
+}
+
+.history-title span {
+  background: #f0f4f8;
+  border-radius: 10px;
+  color: #666;
+  font-size: 11px;
+  padding: 2px 8px;
 }
 
 .status-title {

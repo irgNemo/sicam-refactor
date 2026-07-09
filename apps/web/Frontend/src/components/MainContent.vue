@@ -122,6 +122,7 @@
                     :key="polygon.key"
                     :points="polygon.points"
                     class="segmentation-polygon"
+                    :style="{ fill: polygon.fill, stroke: polygon.stroke }"
                   />
                 </svg>
                 <div
@@ -344,6 +345,32 @@
                   </div>
                 </div>
 
+                <div v-if="overlayLabels.length" class="overlay-label-controls">
+                  <div class="history-title">
+                    Etiquetas del overlay
+                  </div>
+
+                  <div class="overlay-label-list">
+                    <label
+                      v-for="label in overlayLabels"
+                      :key="label.label"
+                      class="overlay-label-item"
+                    >
+                      <input
+                        type="checkbox"
+                        :checked="label.visible"
+                        @change="toggleOverlayLabel(label.label)"
+                      />
+                      <span
+                        class="overlay-color"
+                        :style="{ background: label.fill, borderColor: label.stroke }"
+                      ></span>
+                      <span class="overlay-label-name">{{ label.label }}</span>
+                      <span class="overlay-label-count">{{ label.count }}</span>
+                    </label>
+                  </div>
+                </div>
+
                 <div class="segmentation-history">
                   <div class="history-title">
                     Historial persistido
@@ -510,6 +537,15 @@ export default {
       historialError: "",
       imageNaturalSize: { width: 0, height: 0 },
       imageRenderedSize: { width: 0, height: 0 },
+      overlayLabelVisibility: {},
+      overlayPalette: [
+        { stroke: "rgba(30, 136, 229, 0.92)", fill: "rgba(30, 136, 229, 0.16)" },
+        { stroke: "rgba(67, 160, 71, 0.92)", fill: "rgba(67, 160, 71, 0.16)" },
+        { stroke: "rgba(239, 83, 80, 0.92)", fill: "rgba(239, 83, 80, 0.16)" },
+        { stroke: "rgba(251, 140, 0, 0.92)", fill: "rgba(251, 140, 0, 0.16)" },
+        { stroke: "rgba(142, 68, 173, 0.92)", fill: "rgba(142, 68, 173, 0.16)" },
+        { stroke: "rgba(0, 137, 123, 0.92)", fill: "rgba(0, 137, 123, 0.16)" },
+      ],
     };
   },
 
@@ -662,30 +698,63 @@ export default {
     },
 
     overlayPolygons() {
-      const objects = Array.isArray(this.resultadoNormalizadoActivo?.objects)
-        ? this.resultadoNormalizadoActivo.objects
-        : [];
-
       if (!this.imagenSeleccionada || !this.overlayContainment.canProject) {
         return [];
       }
 
-      return objects
-        .filter(object => object.geometry?.type === "polygon")
-        .map((object, index) => {
-          const points = this.scalePolygonPoints(object.geometry?.points);
+      return this.overlayDrawableObjects
+        .filter(item => this.overlayLabelVisibility[item.label] !== false)
+        .map((item, index) => {
+          const color = this.overlayColorForLabel(item.label);
           return {
-            key: `${object.id || index}-${object.label || "polygon"}`,
-            points,
+            key: `${item.object.id || index}-${item.label}`,
+            points: item.points,
+            fill: color.fill,
+            stroke: color.stroke,
           };
         })
-        .filter(polygon => polygon.points.length >= 3)
         .map(polygon => ({
           ...polygon,
           points: polygon.points
             .map(point => point.join(","))
             .join(" "),
         }));
+    },
+
+    overlayDrawableObjects() {
+      const objects = Array.isArray(this.resultadoNormalizadoActivo?.objects)
+        ? this.resultadoNormalizadoActivo.objects
+        : [];
+
+      return objects
+        .filter(object => object.geometry?.type === "polygon")
+        .map(object => ({
+          object,
+          label: object.label || "desconocido",
+          points: this.scalePolygonPoints(object.geometry?.points),
+        }))
+        .filter(item => item.points.length >= 3);
+    },
+
+    overlayLabelNames() {
+      return [...new Set(
+        this.overlayDrawableObjects.map(item => item.label)
+      )].sort();
+    },
+
+    overlayLabels() {
+      return this.overlayLabelNames.map(label => {
+        const color = this.overlayColorForLabel(label);
+        return {
+          label,
+          count: this.overlayDrawableObjects.filter(
+            item => item.label === label
+          ).length,
+          visible: this.overlayLabelVisibility[label] !== false,
+          fill: color.fill,
+          stroke: color.stroke,
+        };
+      });
     },
   },
 
@@ -705,6 +774,7 @@ export default {
       this.historialError = "";
       this.historialLoading = false;
       this.resetImageMeasurements();
+      this.overlayLabelVisibility = {};
 
       if (muestra) {
         this.cargarHistorialSegmentacion(muestra.id_muestra);
@@ -723,6 +793,7 @@ export default {
           this.historialSegmentacion = Array.isArray(response.data)
             ? response.data
             : [];
+          this.syncOverlayLabelVisibility();
         }
       } catch (error) {
         console.error("Error al cargar historial de segmentacion:", error);
@@ -749,6 +820,7 @@ export default {
       try {
         const response = await segmentarMuestra(this.imagenSeleccionada.id_muestra);
         this.segmentacionResultado = response.data;
+        this.syncOverlayLabelVisibility();
         await this.cargarHistorialSegmentacion(this.imagenSeleccionada.id_muestra);
       } catch (error) {
         console.error("Error al segmentar muestra:", error);
@@ -838,6 +910,28 @@ export default {
 
     formatOffset(offsetX, offsetY) {
       return `${Math.round(offsetX)}, ${Math.round(offsetY)}`;
+    },
+
+    overlayColorForLabel(label) {
+      const index = Math.max(this.overlayLabelNames.indexOf(label), 0);
+      return this.overlayPalette[index % this.overlayPalette.length];
+    },
+
+    syncOverlayLabelVisibility() {
+      const nextVisibility = {};
+
+      this.overlayLabelNames.forEach(label => {
+        nextVisibility[label] = true;
+      });
+
+      this.overlayLabelVisibility = nextVisibility;
+    },
+
+    toggleOverlayLabel(label) {
+      this.overlayLabelVisibility = {
+        ...this.overlayLabelVisibility,
+        [label]: this.overlayLabelVisibility[label] === false,
+      };
     },
   },
 
@@ -1477,6 +1571,55 @@ export default {
   color: #374151;
   font-size: 11px;
   padding: 3px 7px;
+}
+
+.overlay-label-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.overlay-label-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.overlay-label-item {
+  align-items: center;
+  background: #f8f9fa;
+  border: 1px solid #d9e2ec;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  gap: 6px;
+  padding: 6px 8px;
+}
+
+.overlay-label-item input {
+  cursor: pointer;
+  margin: 0;
+}
+
+.overlay-color {
+  border: 2px solid;
+  border-radius: 50%;
+  height: 12px;
+  width: 12px;
+}
+
+.overlay-label-name {
+  color: #2c3e50;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.overlay-label-count {
+  background: white;
+  border-radius: 8px;
+  color: #666;
+  font-size: 11px;
+  padding: 1px 6px;
 }
 
 .normalized-panel {

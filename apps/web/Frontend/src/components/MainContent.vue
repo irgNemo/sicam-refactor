@@ -210,6 +210,76 @@
                   </div>
                 </div>
 
+                <div v-if="resultadoSegmentacionActivo" class="normalized-panel">
+                  <div class="history-title">
+                    Resultado normalizado
+                    <span v-if="resultadoNormalizadoActivo">
+                      v{{ resultadoNormalizadoActivo.version }}
+                    </span>
+                  </div>
+
+                  <div v-if="resultadoNormalizadoActivo" class="segmentation-status neutral">
+                    <div class="status-grid">
+                      <span>Tipo</span>
+                      <strong>{{ resultadoNormalizadoActivo.sample_type }}</strong>
+                      <span>Total</span>
+                      <strong>{{ totalObjetosNormalizados }}</strong>
+                    </div>
+
+                    <div class="normalized-section">
+                      <div class="normalized-subtitle">Conteo por etiqueta</div>
+                      <div v-if="conteosNormalizados.length" class="label-counts">
+                        <span
+                          v-for="conteo in conteosNormalizados"
+                          :key="conteo.label"
+                          class="label-count"
+                        >
+                          {{ conteo.label }}: {{ conteo.count }}
+                        </span>
+                      </div>
+                      <div v-else class="empty-normalized">
+                        Sin etiquetas
+                      </div>
+                    </div>
+
+                    <div class="normalized-section">
+                      <div class="normalized-subtitle">Objetos</div>
+                      <table v-if="objetosNormalizadosVisibles.length" class="normalized-table">
+                        <thead>
+                          <tr>
+                            <th>ID</th>
+                            <th>Etiqueta</th>
+                            <th>Geometria</th>
+                            <th>Puntos</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr
+                            v-for="objeto in objetosNormalizadosVisibles"
+                            :key="objeto.id"
+                          >
+                            <td>{{ objeto.id }}</td>
+                            <td>{{ objeto.label }}</td>
+                            <td>{{ geometryType(objeto) }}</td>
+                            <td>{{ geometryPointsCount(objeto) }}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                      <div v-else class="empty-normalized">
+                        Sin objetos normalizados
+                      </div>
+                    </div>
+                  </div>
+
+                  <div v-else class="segmentation-status neutral">
+                    Este resultado no tiene representacion normalizada.
+                    <div class="status-grid legacy-count">
+                      <span>Objetos heredados</span>
+                      <strong>{{ conteoObjetosHeredadoActivo }}</strong>
+                    </div>
+                  </div>
+                </div>
+
                 <div class="segmentation-history">
                   <div class="history-title">
                     Historial persistido
@@ -414,6 +484,39 @@ export default {
       const objetos = this.ultimoResultadoSegmentacion?.respuesta_json?.objetos;
       return Array.isArray(objetos) ? objetos.length : 0;
     },
+
+    resultadoSegmentacionActivo() {
+      return this.ultimoResultadoSegmentacion || this.segmentacionResultado || null;
+    },
+
+    resultadoNormalizadoActivo() {
+      return this.resultadoSegmentacionActivo?.resultado_normalizado || null;
+    },
+
+    totalObjetosNormalizados() {
+      return this.resultadoNormalizadoActivo?.summary?.total_objects || 0;
+    },
+
+    conteosNormalizados() {
+      const counts = this.resultadoNormalizadoActivo?.summary?.counts_by_label || {};
+      return Object.entries(counts).map(([label, count]) => ({ label, count }));
+    },
+
+    objetosNormalizadosVisibles() {
+      const objects = this.resultadoNormalizadoActivo?.objects;
+      return Array.isArray(objects) ? objects.slice(0, 5) : [];
+    },
+
+    conteoObjetosHeredadoActivo() {
+      const historicalObjects = this.resultadoSegmentacionActivo
+        ?.respuesta_json
+        ?.objetos;
+      const immediateObjects = this.resultadoSegmentacionActivo?.objetos;
+
+      if (Array.isArray(historicalObjects)) return historicalObjects.length;
+      if (Array.isArray(immediateObjects)) return immediateObjects.length;
+      return 0;
+    },
   },
 
   watch: {
@@ -487,6 +590,15 @@ export default {
     formatearFechaResultado(fecha) {
       if (!fecha) return "";
       return new Date(fecha).toLocaleString("es-MX");
+    },
+
+    geometryType(objeto) {
+      return objeto.geometry?.type || "Sin geometria";
+    },
+
+    geometryPointsCount(objeto) {
+      const points = objeto.geometry?.points;
+      return Array.isArray(points) ? points.length : 0;
     },
   },
 
@@ -1085,6 +1197,66 @@ export default {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.normalized-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.normalized-section {
+  margin-top: 10px;
+}
+
+.normalized-subtitle {
+  color: #666;
+  font-size: 11px;
+  font-weight: 700;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+}
+
+.label-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.label-count {
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 10px;
+  color: #374151;
+  font-size: 11px;
+  padding: 3px 8px;
+}
+
+.normalized-table {
+  border-collapse: collapse;
+  font-size: 11px;
+  width: 100%;
+}
+
+.normalized-table th,
+.normalized-table td {
+  border-bottom: 1px solid #e0e0e0;
+  padding: 6px 4px;
+  text-align: left;
+}
+
+.normalized-table th {
+  color: #666;
+  font-weight: 700;
+}
+
+.empty-normalized {
+  color: #777;
+  font-size: 11px;
+}
+
+.legacy-count {
+  margin-top: 8px;
 }
 
 .history-title {

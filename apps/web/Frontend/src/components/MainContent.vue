@@ -104,9 +104,11 @@
               <div class="img-placeholder">
                 <img
                   v-if="imagenSeleccionada"
+                  ref="mainImage"
                   :src="imagenSeleccionada.imagen"
                   class="main-image"
                   alt="Muestra microscópica"
+                  @load="onMainImageLoad"
                 />
                 <div
                   v-else
@@ -280,6 +282,48 @@
                   </div>
                 </div>
 
+                <div class="overlay-diagnostics">
+                  <div class="history-title">
+                    Diagnostico de overlay
+                  </div>
+
+                  <div v-if="!resultadoNormalizadoActivo" class="segmentation-status neutral">
+                    Sin resultado normalizado para diagnosticar coordenadas.
+                  </div>
+
+                  <div v-else class="segmentation-status neutral">
+                    <div class="status-grid">
+                      <span>Natural</span>
+                      <strong>{{ formatImageSize(imageNaturalSize) }}</strong>
+                      <span>Render</span>
+                      <strong>{{ formatImageSize(imageRenderedSize) }}</strong>
+                      <span>Escala X</span>
+                      <strong>{{ formatScale(overlayDiagnostics.scaleX) }}</strong>
+                      <span>Escala Y</span>
+                      <strong>{{ formatScale(overlayDiagnostics.scaleY) }}</strong>
+                      <span>Poligonos</span>
+                      <strong>{{ overlayDiagnostics.polygonObjects }}</strong>
+                      <span>Con puntos validos</span>
+                      <strong>{{ overlayDiagnostics.validPointObjects }}</strong>
+                    </div>
+
+                    <div
+                      v-if="overlayDiagnostics.previewScaledPoints.length"
+                      class="normalized-section"
+                    >
+                      <div class="normalized-subtitle">Primeros puntos escalados</div>
+                      <div class="scaled-points">
+                        <span
+                          v-for="(point, index) in overlayDiagnostics.previewScaledPoints"
+                          :key="index"
+                        >
+                          [{{ point[0] }}, {{ point[1] }}]
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 <div class="segmentation-history">
                   <div class="history-title">
                     Historial persistido
@@ -444,6 +488,8 @@ export default {
       historialSegmentacion: [],
       historialLoading: false,
       historialError: "",
+      imageNaturalSize: { width: 0, height: 0 },
+      imageRenderedSize: { width: 0, height: 0 },
     };
   },
 
@@ -517,6 +563,39 @@ export default {
       if (Array.isArray(immediateObjects)) return immediateObjects.length;
       return 0;
     },
+
+    overlayDiagnostics() {
+      const naturalWidth = this.imageNaturalSize.width;
+      const naturalHeight = this.imageNaturalSize.height;
+      const renderedWidth = this.imageRenderedSize.width;
+      const renderedHeight = this.imageRenderedSize.height;
+      const canScale = (
+        naturalWidth > 0 &&
+        naturalHeight > 0 &&
+        renderedWidth > 0 &&
+        renderedHeight > 0
+      );
+      const objects = Array.isArray(this.resultadoNormalizadoActivo?.objects)
+        ? this.resultadoNormalizadoActivo.objects
+        : [];
+      const polygonObjects = objects.filter(
+        object => object.geometry?.type === "polygon"
+      );
+      const validPointObjects = polygonObjects.filter(
+        object => this.validPolygonPoints(object.geometry?.points).length > 0
+      );
+      const firstValidPolygon = validPointObjects[0];
+
+      return {
+        scaleX: canScale ? renderedWidth / naturalWidth : null,
+        scaleY: canScale ? renderedHeight / naturalHeight : null,
+        polygonObjects: polygonObjects.length,
+        validPointObjects: validPointObjects.length,
+        previewScaledPoints: firstValidPolygon && canScale
+          ? this.scalePolygonPoints(firstValidPolygon.geometry.points).slice(0, 3)
+          : [],
+      };
+    },
   },
 
   watch: {
@@ -534,9 +613,11 @@ export default {
       this.historialSegmentacion = [];
       this.historialError = "";
       this.historialLoading = false;
+      this.resetImageMeasurements();
 
       if (muestra) {
         this.cargarHistorialSegmentacion(muestra.id_muestra);
+        this.$nextTick(this.updateImageMeasurements);
       }
     },
 
@@ -600,9 +681,87 @@ export default {
       const points = objeto.geometry?.points;
       return Array.isArray(points) ? points.length : 0;
     },
+
+    onMainImageLoad() {
+      this.updateImageMeasurements();
+    },
+
+    resetImageMeasurements() {
+      this.imageNaturalSize = { width: 0, height: 0 };
+      this.imageRenderedSize = { width: 0, height: 0 };
+    },
+
+    updateImageMeasurements() {
+      const image = this.$refs.mainImage;
+      if (!image) return;
+
+      const rect = image.getBoundingClientRect();
+      this.imageNaturalSize = {
+        width: image.naturalWidth || 0,
+        height: image.naturalHeight || 0,
+      };
+      this.imageRenderedSize = {
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+      };
+    },
+
+    validPolygonPoints(points) {
+      if (!Array.isArray(points)) return [];
+
+      return points.filter(point => (
+        Array.isArray(point) &&
+        point.length >= 2 &&
+        Number.isFinite(Number(point[0])) &&
+        Number.isFinite(Number(point[1]))
+      ));
+    },
+
+    scalePoint(point) {
+      const naturalWidth = this.imageNaturalSize.width;
+      const naturalHeight = this.imageNaturalSize.height;
+      const renderedWidth = this.imageRenderedSize.width;
+      const renderedHeight = this.imageRenderedSize.height;
+
+      if (
+        !naturalWidth ||
+        !naturalHeight ||
+        !renderedWidth ||
+        !renderedHeight
+      ) {
+        return null;
+      }
+      if (!this.validPolygonPoints([point]).length) return null;
+
+      const scaleX = renderedWidth / naturalWidth;
+      const scaleY = renderedHeight / naturalHeight;
+
+      return [
+        Math.round(Number(point[0]) * scaleX),
+        Math.round(Number(point[1]) * scaleY),
+      ];
+    },
+
+    scalePolygonPoints(points) {
+      return this.validPolygonPoints(points)
+        .map(point => this.scalePoint(point))
+        .filter(Boolean);
+    },
+
+    formatImageSize(size) {
+      if (!size.width || !size.height) return "No disponible";
+      return `${size.width} x ${size.height}`;
+    },
+
+    formatScale(scale) {
+      if (scale === null) return "No disponible";
+      return scale.toFixed(4);
+    },
   },
 
   mounted() {
+    window.addEventListener("resize", this.updateImageMeasurements);
+
     apiClient
       .get("/api/analisis/")
       .then((response) => {
@@ -614,6 +773,10 @@ export default {
       .finally(() => {
         this.loading = false;
       });
+  },
+
+  beforeUnmount() {
+    window.removeEventListener("resize", this.updateImageMeasurements);
   },
 };
 </script>
@@ -1197,6 +1360,27 @@ export default {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.overlay-diagnostics {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.scaled-points {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.scaled-points span {
+  background: #f0f4f8;
+  border: 1px solid #d9e2ec;
+  border-radius: 8px;
+  color: #374151;
+  font-size: 11px;
+  padding: 3px 7px;
 }
 
 .normalized-panel {

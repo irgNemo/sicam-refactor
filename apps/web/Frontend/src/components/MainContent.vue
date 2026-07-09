@@ -111,12 +111,28 @@
                   @load="onMainImageLoad"
                 />
                 <svg
-                  v-if="overlayPolygons.length"
+                  v-if="shouldShowSegmentationOverlay"
                   class="segmentation-svg-overlay"
                   :width="imageRenderedSize.width"
                   :height="imageRenderedSize.height"
                   :viewBox="`0 0 ${imageRenderedSize.width} ${imageRenderedSize.height}`"
                 >
+                  <rect
+                    v-if="overlayDebugVisible"
+                    class="overlay-debug-base"
+                    x="0"
+                    y="0"
+                    :width="imageRenderedSize.width"
+                    :height="imageRenderedSize.height"
+                  />
+                  <rect
+                    v-if="overlayDebugVisible && overlayContainment.canProject"
+                    class="overlay-debug-image-box"
+                    :x="overlayContainment.offsetX"
+                    :y="overlayContainment.offsetY"
+                    :width="overlayContainment.displayedSize.width"
+                    :height="overlayContainment.displayedSize.height"
+                  />
                   <polygon
                     v-for="polygon in overlayPolygons"
                     :key="polygon.key"
@@ -124,9 +140,17 @@
                     class="segmentation-polygon"
                     :style="{ fill: polygon.fill, stroke: polygon.stroke }"
                   />
+                  <rect
+                    v-if="overlayDebugVisible && overlayPolygonBounds"
+                    class="overlay-debug-polygon-box"
+                    :x="overlayPolygonBounds.x"
+                    :y="overlayPolygonBounds.y"
+                    :width="overlayPolygonBounds.width"
+                    :height="overlayPolygonBounds.height"
+                  />
                 </svg>
                 <div
-                  v-else
+                  v-if="!imagenSeleccionada"
                   class="empty-image-state"
                 >
                   <div class="empty-image-icon">🔬</div>
@@ -327,6 +351,14 @@
                       <span>Dibujables</span>
                       <strong>{{ overlayPolygons.length }}</strong>
                     </div>
+
+                    <label class="overlay-debug-toggle">
+                      <input
+                        v-model="overlayDebugVisible"
+                        type="checkbox"
+                      />
+                      Diagnostico visual
+                    </label>
 
                     <div
                       v-if="overlayDiagnostics.previewScaledPoints.length"
@@ -537,6 +569,7 @@ export default {
       historialError: "",
       imageNaturalSize: { width: 0, height: 0 },
       imageRenderedSize: { width: 0, height: 0 },
+      overlayDebugVisible: false,
       overlayLabelVisibility: {},
       overlayPalette: [
         { stroke: "rgba(30, 136, 229, 0.92)", fill: "rgba(30, 136, 229, 0.16)" },
@@ -702,8 +735,7 @@ export default {
         return [];
       }
 
-      return this.overlayDrawableObjects
-        .filter(item => this.overlayLabelVisibility[item.label] !== false)
+      return this.overlayVisibleDrawableObjects
         .map((item, index) => {
           const color = this.overlayColorForLabel(item.label);
           return {
@@ -721,6 +753,14 @@ export default {
         }));
     },
 
+    shouldShowSegmentationOverlay() {
+      return Boolean(
+        this.imagenSeleccionada &&
+        this.overlayContainment.canProject &&
+        (this.overlayPolygons.length || this.overlayDebugVisible)
+      );
+    },
+
     overlayDrawableObjects() {
       const objects = Array.isArray(this.resultadoNormalizadoActivo?.objects)
         ? this.resultadoNormalizadoActivo.objects
@@ -734,6 +774,34 @@ export default {
           points: this.scalePolygonPoints(object.geometry?.points),
         }))
         .filter(item => item.points.length >= 3);
+    },
+
+    overlayVisibleDrawableObjects() {
+      return this.overlayDrawableObjects.filter(
+        item => this.overlayLabelVisibility[item.label] !== false
+      );
+    },
+
+    overlayPolygonBounds() {
+      const points = this.overlayVisibleDrawableObjects.flatMap(
+        item => item.points
+      );
+
+      if (!points.length) return null;
+
+      const xs = points.map(point => point[0]);
+      const ys = points.map(point => point[1]);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys);
+
+      return {
+        x: minX,
+        y: minY,
+        width: Math.max(maxX - minX, 1),
+        height: Math.max(maxY - minY, 1),
+      };
     },
 
     overlayLabelNames() {
@@ -775,6 +843,7 @@ export default {
       this.historialLoading = false;
       this.resetImageMeasurements();
       this.overlayLabelVisibility = {};
+      this.overlayDebugVisible = false;
 
       if (muestra) {
         this.cargarHistorialSegmentacion(muestra.id_muestra);
@@ -1318,9 +1387,12 @@ export default {
 }
 
 .segmentation-svg-overlay {
+  display: block;
+  height: 100%;
   inset: 0;
   pointer-events: none;
   position: absolute;
+  width: 100%;
   z-index: 2;
 }
 
@@ -1328,6 +1400,32 @@ export default {
   fill: rgba(30, 136, 229, 0.16);
   stroke: rgba(30, 136, 229, 0.92);
   stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.overlay-debug-base,
+.overlay-debug-image-box,
+.overlay-debug-polygon-box {
+  fill: transparent;
+  pointer-events: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.overlay-debug-base {
+  stroke: rgba(33, 150, 243, 0.75);
+  stroke-dasharray: 6 4;
+  stroke-width: 2;
+}
+
+.overlay-debug-image-box {
+  stroke: rgba(76, 175, 80, 0.85);
+  stroke-dasharray: 8 5;
+  stroke-width: 2;
+}
+
+.overlay-debug-polygon-box {
+  stroke: rgba(255, 152, 0, 0.9);
+  stroke-dasharray: 4 4;
   stroke-width: 2;
 }
 
@@ -1571,6 +1669,22 @@ export default {
   color: #374151;
   font-size: 11px;
   padding: 3px 7px;
+}
+
+.overlay-debug-toggle {
+  align-items: center;
+  color: #374151;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.overlay-debug-toggle input {
+  cursor: pointer;
+  margin: 0;
 }
 
 .overlay-label-controls {

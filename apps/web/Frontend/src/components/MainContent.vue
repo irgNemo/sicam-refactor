@@ -110,6 +110,20 @@
                   alt="Muestra microscópica"
                   @load="onMainImageLoad"
                 />
+                <svg
+                  v-if="overlayPolygons.length"
+                  class="segmentation-svg-overlay"
+                  :width="imageRenderedSize.width"
+                  :height="imageRenderedSize.height"
+                  :viewBox="`0 0 ${imageRenderedSize.width} ${imageRenderedSize.height}`"
+                >
+                  <polygon
+                    v-for="polygon in overlayPolygons"
+                    :key="polygon.key"
+                    :points="polygon.points"
+                    class="segmentation-polygon"
+                  />
+                </svg>
                 <div
                   v-else
                   class="empty-image-state"
@@ -301,10 +315,16 @@
                       <strong>{{ formatScale(overlayDiagnostics.scaleX) }}</strong>
                       <span>Escala Y</span>
                       <strong>{{ formatScale(overlayDiagnostics.scaleY) }}</strong>
+                      <span>Caja visible</span>
+                      <strong>{{ formatImageSize(overlayContainment.displayedSize) }}</strong>
+                      <span>Offset</span>
+                      <strong>{{ formatOffset(overlayContainment.offsetX, overlayContainment.offsetY) }}</strong>
                       <span>Poligonos</span>
                       <strong>{{ overlayDiagnostics.polygonObjects }}</strong>
                       <span>Con puntos validos</span>
                       <strong>{{ overlayDiagnostics.validPointObjects }}</strong>
+                      <span>Dibujables</span>
+                      <strong>{{ overlayPolygons.length }}</strong>
                     </div>
 
                     <div
@@ -565,16 +585,6 @@ export default {
     },
 
     overlayDiagnostics() {
-      const naturalWidth = this.imageNaturalSize.width;
-      const naturalHeight = this.imageNaturalSize.height;
-      const renderedWidth = this.imageRenderedSize.width;
-      const renderedHeight = this.imageRenderedSize.height;
-      const canScale = (
-        naturalWidth > 0 &&
-        naturalHeight > 0 &&
-        renderedWidth > 0 &&
-        renderedHeight > 0
-      );
       const objects = Array.isArray(this.resultadoNormalizadoActivo?.objects)
         ? this.resultadoNormalizadoActivo.objects
         : [];
@@ -587,14 +597,95 @@ export default {
       const firstValidPolygon = validPointObjects[0];
 
       return {
-        scaleX: canScale ? renderedWidth / naturalWidth : null,
-        scaleY: canScale ? renderedHeight / naturalHeight : null,
+        scaleX: this.overlayContainment.scaleX,
+        scaleY: this.overlayContainment.scaleY,
         polygonObjects: polygonObjects.length,
         validPointObjects: validPointObjects.length,
-        previewScaledPoints: firstValidPolygon && canScale
+        previewScaledPoints: firstValidPolygon && this.overlayContainment.canProject
           ? this.scalePolygonPoints(firstValidPolygon.geometry.points).slice(0, 3)
           : [],
       };
+    },
+
+    overlayContainment() {
+      const naturalWidth = this.imageNaturalSize.width;
+      const naturalHeight = this.imageNaturalSize.height;
+      const containerWidth = this.imageRenderedSize.width;
+      const containerHeight = this.imageRenderedSize.height;
+
+      if (
+        !naturalWidth ||
+        !naturalHeight ||
+        !containerWidth ||
+        !containerHeight
+      ) {
+        return {
+          canProject: false,
+          displayedSize: { width: 0, height: 0 },
+          offsetX: 0,
+          offsetY: 0,
+          scaleX: null,
+          scaleY: null,
+        };
+      }
+
+      const imageAspect = naturalWidth / naturalHeight;
+      const containerAspect = containerWidth / containerHeight;
+      let displayedImageWidth;
+      let displayedImageHeight;
+      let offsetX;
+      let offsetY;
+
+      if (containerAspect > imageAspect) {
+        displayedImageHeight = containerHeight;
+        displayedImageWidth = containerHeight * imageAspect;
+        offsetX = (containerWidth - displayedImageWidth) / 2;
+        offsetY = 0;
+      } else {
+        displayedImageWidth = containerWidth;
+        displayedImageHeight = containerWidth / imageAspect;
+        offsetX = 0;
+        offsetY = (containerHeight - displayedImageHeight) / 2;
+      }
+
+      return {
+        canProject: true,
+        displayedSize: {
+          width: Math.round(displayedImageWidth),
+          height: Math.round(displayedImageHeight),
+        },
+        offsetX,
+        offsetY,
+        scaleX: displayedImageWidth / naturalWidth,
+        scaleY: displayedImageHeight / naturalHeight,
+      };
+    },
+
+    overlayPolygons() {
+      const objects = Array.isArray(this.resultadoNormalizadoActivo?.objects)
+        ? this.resultadoNormalizadoActivo.objects
+        : [];
+
+      if (!this.imagenSeleccionada || !this.overlayContainment.canProject) {
+        return [];
+      }
+
+      return objects
+        .filter(object => object.geometry?.type === "polygon")
+        .map((object, index) => {
+          const points = this.scalePolygonPoints(object.geometry?.points);
+          return {
+            key: `${object.id || index}-${object.label || "polygon"}`,
+            points,
+          };
+        })
+        .filter(polygon => polygon.points.length >= 3)
+        .map(polygon => ({
+          ...polygon,
+          points: polygon.points
+            .map(point => point.join(","))
+            .join(" "),
+        }));
     },
   },
 
@@ -718,27 +809,14 @@ export default {
     },
 
     scalePoint(point) {
-      const naturalWidth = this.imageNaturalSize.width;
-      const naturalHeight = this.imageNaturalSize.height;
-      const renderedWidth = this.imageRenderedSize.width;
-      const renderedHeight = this.imageRenderedSize.height;
+      const containment = this.overlayContainment;
 
-      if (
-        !naturalWidth ||
-        !naturalHeight ||
-        !renderedWidth ||
-        !renderedHeight
-      ) {
-        return null;
-      }
+      if (!containment.canProject) return null;
       if (!this.validPolygonPoints([point]).length) return null;
 
-      const scaleX = renderedWidth / naturalWidth;
-      const scaleY = renderedHeight / naturalHeight;
-
       return [
-        Math.round(Number(point[0]) * scaleX),
-        Math.round(Number(point[1]) * scaleY),
+        Math.round(containment.offsetX + Number(point[0]) * containment.scaleX),
+        Math.round(containment.offsetY + Number(point[1]) * containment.scaleY),
       ];
     },
 
@@ -756,6 +834,10 @@ export default {
     formatScale(scale) {
       if (scale === null) return "No disponible";
       return scale.toFixed(4);
+    },
+
+    formatOffset(offsetX, offsetY) {
+      return `${Math.round(offsetX)}, ${Math.round(offsetY)}`;
     },
   },
 
@@ -1139,6 +1221,20 @@ export default {
   height: 100%;
   object-fit: contain;
   object-position: center;
+}
+
+.segmentation-svg-overlay {
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  z-index: 2;
+}
+
+.segmentation-polygon {
+  fill: rgba(30, 136, 229, 0.16);
+  stroke: rgba(30, 136, 229, 0.92);
+  stroke-linejoin: round;
+  stroke-width: 2;
 }
 
 .empty-image-state {

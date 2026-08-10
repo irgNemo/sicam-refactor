@@ -166,7 +166,7 @@ Comprobaciones:
 
 ```text
 http://127.0.0.1:8000/api/
-http://127.0.0.1:8000/api/pacientes/
+http://127.0.0.1:8000/api/palscientes/
 http://127.0.0.1:8000/api/analisis/
 ```
 
@@ -303,6 +303,28 @@ Directorio:
 cd "C:\Users\israe\OneDrive - Universidad de Guadalajara\Documents\SICAM\sicam-refactor\apps\web\Frontend"
 ```
 
+Crear el archivo local de variables antes de arrancar Vite:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Vite no carga `.env.example` automaticamente. El archivo `.env` debe existir localmente y debe permanecer fuera de Git.
+
+Verificar que `.env` tenga:
+
+```text
+VITE_API_BASE_URL=http://127.0.0.1:8000
+```
+
+`VITE_API_BASE_URL` debe apuntar al backend Django. En desarrollo local, el valor esperado es:
+
+```text
+http://127.0.0.1:8000
+```
+
+Si se crea o modifica `.env` mientras Vite ya esta corriendo, detener y reiniciar `npm run dev`.
+
 Instalar dependencias si hace falta:
 
 ```powershell
@@ -319,12 +341,6 @@ Puerto esperado:
 
 ```text
 http://127.0.0.1:5173
-```
-
-Verificar que `.env` o `.env.local` tenga:
-
-```text
-VITE_API_BASE_URL=http://127.0.0.1:8000
 ```
 
 ## Orden recomendado de arranque

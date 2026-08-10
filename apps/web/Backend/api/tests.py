@@ -1,9 +1,13 @@
 import shutil
 import tempfile
 from datetime import date
+from io import StringIO
+from pathlib import Path
 from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import override_settings
 from django.urls import reverse
 from rest_framework import status
@@ -23,6 +27,73 @@ from .services.segmentation.exceptions import (
     SegmentationTimeoutError,
 )
 from .services.segmentation.normalizers import normalize_segmentation_result
+from .management.commands.seed_demo_data import DEMO_IDENTIFICACION
+
+
+class SeedDemoDataCommandTests(APITestCase):
+    def setUp(self):
+        self.media_root = tempfile.mkdtemp()
+        self.override = override_settings(MEDIA_ROOT=self.media_root)
+        self.override.enable()
+
+    def tearDown(self):
+        self.override.disable()
+        shutil.rmtree(self.media_root, ignore_errors=True)
+
+    def _call_command(self, **options):
+        output = StringIO()
+        call_command('seed_demo_data', stdout=output, **options)
+        return output.getvalue()
+
+    def test_seed_demo_data_creates_minimum_flow(self):
+        output = self._call_command()
+
+        paciente = Paciente.objects.get(identificacion=DEMO_IDENTIFICACION)
+        caso = Caso.objects.get(paciente=paciente)
+        analisis = AnalisisPred.objects.get(
+            id_paciente_fk=paciente,
+            id_caso_fk=caso,
+        )
+        muestra = MuestraSaliva.objects.get(analisis=analisis)
+
+        assert muestra.imagen.name
+        assert muestra.imagen.storage.exists(muestra.imagen.name)
+        assert 'Paciente creado' in output
+        assert 'MuestraSaliva creado' in output
+
+    def test_seed_demo_data_is_safe_to_run_twice(self):
+        self._call_command()
+        second_output = self._call_command()
+
+        assert Paciente.objects.filter(identificacion=DEMO_IDENTIFICACION).count() == 1
+        assert Caso.objects.count() == 1
+        assert AnalisisPred.objects.count() == 1
+        assert MuestraSaliva.objects.count() == 1
+        assert 'Paciente existente' in second_output
+        assert 'MuestraSaliva existente' in second_output
+
+    def test_seed_demo_data_rejects_missing_image_path(self):
+        missing_path = str(Path(self.media_root) / 'missing-demo-image.png')
+
+        with self.assertRaises(CommandError):
+            self._call_command(image_path=missing_path)
+
+        assert not Paciente.objects.filter(
+            identificacion=DEMO_IDENTIFICACION
+        ).exists()
+
+    def test_seed_demo_data_does_not_delete_existing_data(self):
+        existing = Paciente.objects.create(
+            nombre='Paciente',
+            apellido='Existente',
+            fecha_nacimiento=date(1985, 5, 20),
+            identificacion='NO-BORRAR-001',
+        )
+
+        self._call_command()
+
+        assert Paciente.objects.filter(pk=existing.pk).exists()
+        assert Paciente.objects.filter(identificacion=DEMO_IDENTIFICACION).exists()
 
 
 class SegmentationResultNormalizerTests(APITestCase):

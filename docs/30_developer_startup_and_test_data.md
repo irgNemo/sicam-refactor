@@ -200,7 +200,33 @@ Para usar una imagen local propia de prueba:
 & "C:\Users\israe\miniconda3\envs\sicam\python.exe" manage.py seed_demo_data --image "C:\ruta\local\imagen_demo.png"
 ```
 
-La imagen se copia a `apps/web/Backend/media/` mediante `ImageField`. La carpeta `media/` esta ignorada por Git.
+Para poblar la galeria con varias imagenes locales de saliva:
+
+```powershell
+& "C:\Users\israe\miniconda3\envs\sicam\python.exe" manage.py seed_demo_data --image-dir "C:\DatosSICAM\saliva"
+```
+
+Tambien se pueden combinar `--image` y `--image-dir`:
+
+```powershell
+& "C:\Users\israe\miniconda3\envs\sicam\python.exe" manage.py seed_demo_data --image "C:\DatosSICAM\saliva\extra.png" --image-dir "C:\DatosSICAM\saliva"
+```
+
+`--image-dir` procesa archivos directos del directorio, sin busqueda recursiva, en orden alfabetico. Extensiones soportadas:
+
+```text
+.jpg
+.jpeg
+.png
+.tif
+.tiff
+```
+
+El comando mantiene idempotencia por nombre base de archivo dentro del `AnalisisPred` demo. Si se ejecuta otra vez con la misma carpeta, no crea duplicados. Si se agrega una imagen nueva al directorio, solo crea la nueva `MuestraSaliva`.
+
+Archivos con extensiones no soportadas se ignoran y se contabilizan en el resumen. Una carpeta vacia no produce error.
+
+Las imagenes se copian a `apps/web/Backend/media/` mediante `ImageField`. La carpeta `media/` es local, esta ignorada por Git y no debe versionarse. No agregar imagenes clinicas reales al repositorio.
 
 ## Carga manual desde frontend
 

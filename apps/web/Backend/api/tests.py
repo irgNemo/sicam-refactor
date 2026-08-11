@@ -27,7 +27,10 @@ from .services.segmentation.exceptions import (
     SegmentationTimeoutError,
 )
 from .services.segmentation.normalizers import normalize_segmentation_result
-from .management.commands.seed_demo_data import DEMO_IDENTIFICACION
+from .management.commands.seed_demo_data import (
+    DEMO_IDENTIFICACION,
+    DEMO_IMAGE_NAME,
+)
 
 
 class SeedDemoDataCommandTests(APITestCase):
@@ -45,6 +48,19 @@ class SeedDemoDataCommandTests(APITestCase):
         call_command('seed_demo_data', stdout=output, **options)
         return output.getvalue()
 
+    def _write_image(self, directory, filename, content=b'demo image bytes'):
+        path = Path(directory) / filename
+        path.write_bytes(content)
+        return path
+
+    def _get_demo_analisis(self):
+        paciente = Paciente.objects.get(identificacion=DEMO_IDENTIFICACION)
+        caso = Caso.objects.get(paciente=paciente)
+        return AnalisisPred.objects.get(
+            id_paciente_fk=paciente,
+            id_caso_fk=caso,
+        )
+
     def test_seed_demo_data_creates_minimum_flow(self):
         output = self._call_command()
 
@@ -59,7 +75,7 @@ class SeedDemoDataCommandTests(APITestCase):
         assert muestra.imagen.name
         assert muestra.imagen.storage.exists(muestra.imagen.name)
         assert 'Paciente creado' in output
-        assert 'MuestraSaliva creado' in output
+        assert 'Muestras creadas: 1' in output
 
     def test_seed_demo_data_is_safe_to_run_twice(self):
         self._call_command()
@@ -70,7 +86,7 @@ class SeedDemoDataCommandTests(APITestCase):
         assert AnalisisPred.objects.count() == 1
         assert MuestraSaliva.objects.count() == 1
         assert 'Paciente existente' in second_output
-        assert 'MuestraSaliva existente' in second_output
+        assert 'Muestras existentes: 1' in second_output
 
     def test_seed_demo_data_rejects_missing_image_path(self):
         missing_path = str(Path(self.media_root) / 'missing-demo-image.png')
@@ -94,6 +110,116 @@ class SeedDemoDataCommandTests(APITestCase):
 
         assert Paciente.objects.filter(pk=existing.pk).exists()
         assert Paciente.objects.filter(identificacion=DEMO_IDENTIFICACION).exists()
+
+    def test_seed_demo_data_image_dir_creates_multiple_muestras(self):
+        image_dir = Path(self.media_root) / 'source-images'
+        image_dir.mkdir()
+        self._write_image(image_dir, 'b.png')
+        self._write_image(image_dir, 'a.jpg')
+        self._write_image(image_dir, 'c.tiff')
+
+        output = self._call_command(image_dir=str(image_dir))
+
+        analisis = self._get_demo_analisis()
+        image_names = sorted(
+            Path(muestra.imagen.name).name
+            for muestra in MuestraSaliva.objects.filter(analisis=analisis)
+        )
+        assert image_names == ['a.jpg', 'b.png', 'c.tiff']
+        assert 'Muestras creadas: 3' in output
+
+    def test_seed_demo_data_image_dir_second_run_does_not_duplicate(self):
+        image_dir = Path(self.media_root) / 'source-images'
+        image_dir.mkdir()
+        self._write_image(image_dir, 'a.jpg')
+        self._write_image(image_dir, 'b.png')
+
+        self._call_command(image_dir=str(image_dir))
+        output = self._call_command(image_dir=str(image_dir))
+
+        assert MuestraSaliva.objects.count() == 2
+        assert 'Muestras creadas: 0' in output
+        assert 'Muestras existentes: 2' in output
+
+    def test_seed_demo_data_image_dir_new_file_creates_only_new_muestra(self):
+        image_dir = Path(self.media_root) / 'source-images'
+        image_dir.mkdir()
+        self._write_image(image_dir, 'a.jpg')
+        self._write_image(image_dir, 'b.png')
+
+        self._call_command(image_dir=str(image_dir))
+        self._write_image(image_dir, 'c.tif')
+        output = self._call_command(image_dir=str(image_dir))
+
+        assert MuestraSaliva.objects.count() == 3
+        assert 'Muestras creadas: 1' in output
+        assert 'Muestras existentes: 2' in output
+
+    def test_seed_demo_data_rejects_missing_image_dir(self):
+        missing_dir = str(Path(self.media_root) / 'missing-dir')
+
+        with self.assertRaises(CommandError):
+            self._call_command(image_dir=missing_dir)
+
+        assert not Paciente.objects.filter(
+            identificacion=DEMO_IDENTIFICACION
+        ).exists()
+
+    def test_seed_demo_data_empty_image_dir_does_not_break(self):
+        image_dir = Path(self.media_root) / 'empty-source'
+        image_dir.mkdir()
+
+        output = self._call_command(image_dir=str(image_dir))
+
+        assert Paciente.objects.filter(identificacion=DEMO_IDENTIFICACION).exists()
+        assert MuestraSaliva.objects.count() == 0
+        assert 'Muestras creadas: 0' in output
+        assert 'Archivos ignorados: 0' in output
+
+    def test_seed_demo_data_unsupported_file_is_ignored(self):
+        image_dir = Path(self.media_root) / 'source-images'
+        image_dir.mkdir()
+        self._write_image(image_dir, 'notes.txt')
+
+        output = self._call_command(image_dir=str(image_dir))
+
+        assert MuestraSaliva.objects.count() == 0
+        assert 'Archivos ignorados: 1' in output
+
+    def test_seed_demo_data_image_option_still_works(self):
+        image_path = self._write_image(self.media_root, 'single.jpeg')
+
+        output = self._call_command(image_path=str(image_path))
+
+        muestra = MuestraSaliva.objects.get()
+        assert Path(muestra.imagen.name).name == 'single.jpeg'
+        assert 'Muestras creadas: 1' in output
+
+    def test_seed_demo_data_image_and_image_dir_are_deduplicated_by_basename(self):
+        image_dir = Path(self.media_root) / 'source-images'
+        image_dir.mkdir()
+        image_path = self._write_image(self.media_root, 'same.png')
+        self._write_image(image_dir, 'same.png')
+        self._write_image(image_dir, 'other.png')
+
+        output = self._call_command(
+            image_path=str(image_path),
+            image_dir=str(image_dir),
+        )
+
+        image_names = sorted(
+            Path(muestra.imagen.name).name
+            for muestra in MuestraSaliva.objects.all()
+        )
+        assert image_names == ['other.png', 'same.png']
+        assert 'Muestras creadas: 2' in output
+        assert 'Archivos ignorados: 1' in output
+
+    def test_seed_demo_data_deduplicates_synthetic_image_by_basename(self):
+        self._call_command()
+        muestra = MuestraSaliva.objects.get()
+
+        assert Path(muestra.imagen.name).name == DEMO_IMAGE_NAME
 
 
 class SegmentationResultNormalizerTests(APITestCase):

@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <main class="content">
 
     <!-- HEADER -->
@@ -101,54 +101,59 @@
 
             <!-- IMAGEN -->
             <div class="image-container">
-              <div class="img-placeholder">
-                <img
+              <div ref="imageFrame" class="img-placeholder">
+                <div
                   v-if="imagenSeleccionada"
-                  ref="mainImage"
-                  :src="imagenSeleccionada.imagen"
-                  class="main-image"
-                  alt="Muestra microscópica"
-                  @load="onMainImageLoad"
-                />
-                <svg
-                  v-if="shouldShowSegmentationOverlay"
-                  class="segmentation-svg-overlay"
-                  :width="imageRenderedSize.width"
-                  :height="imageRenderedSize.height"
-                  :viewBox="`0 0 ${imageRenderedSize.width} ${imageRenderedSize.height}`"
+                  class="image-transform-layer"
+                  :style="imageTransformStyle"
                 >
-                  <rect
-                    v-if="overlayDebugVisible"
-                    class="overlay-debug-base"
-                    x="0"
-                    y="0"
+                  <img
+                    ref="mainImage"
+                    :src="imagenSeleccionada.imagen"
+                    class="main-image"
+                    alt="Muestra microscópica"
+                    @load="onMainImageLoad"
+                  />
+                  <svg
+                    v-if="shouldShowSegmentationOverlay"
+                    class="segmentation-svg-overlay"
                     :width="imageRenderedSize.width"
                     :height="imageRenderedSize.height"
-                  />
-                  <rect
-                    v-if="overlayDebugVisible && overlayContainment.canProject"
-                    class="overlay-debug-image-box"
-                    :x="overlayContainment.offsetX"
-                    :y="overlayContainment.offsetY"
-                    :width="overlayContainment.displayedSize.width"
-                    :height="overlayContainment.displayedSize.height"
-                  />
-                  <polygon
-                    v-for="polygon in overlayPolygons"
-                    :key="polygon.key"
-                    :points="polygon.points"
-                    class="segmentation-polygon"
-                    :style="{ fill: polygon.fill, stroke: polygon.stroke }"
-                  />
-                  <rect
-                    v-if="overlayDebugVisible && overlayPolygonBounds"
-                    class="overlay-debug-polygon-box"
-                    :x="overlayPolygonBounds.x"
-                    :y="overlayPolygonBounds.y"
-                    :width="overlayPolygonBounds.width"
-                    :height="overlayPolygonBounds.height"
-                  />
-                </svg>
+                    :viewBox="`0 0 ${imageRenderedSize.width} ${imageRenderedSize.height}`"
+                  >
+                    <rect
+                      v-if="overlayDebugVisible"
+                      class="overlay-debug-base"
+                      x="0"
+                      y="0"
+                      :width="imageRenderedSize.width"
+                      :height="imageRenderedSize.height"
+                    />
+                    <rect
+                      v-if="overlayDebugVisible && overlayContainment.canProject"
+                      class="overlay-debug-image-box"
+                      :x="overlayContainment.offsetX"
+                      :y="overlayContainment.offsetY"
+                      :width="overlayContainment.displayedSize.width"
+                      :height="overlayContainment.displayedSize.height"
+                    />
+                    <polygon
+                      v-for="polygon in overlayPolygons"
+                      :key="polygon.key"
+                      :points="polygon.points"
+                      class="segmentation-polygon"
+                      :style="{ fill: polygon.fill, stroke: polygon.stroke }"
+                    />
+                    <rect
+                      v-if="overlayDebugVisible && overlayPolygonBounds"
+                      class="overlay-debug-polygon-box"
+                      :x="overlayPolygonBounds.x"
+                      :y="overlayPolygonBounds.y"
+                      :width="overlayPolygonBounds.width"
+                      :height="overlayPolygonBounds.height"
+                    />
+                  </svg>
+                </div>
                 <div
                   v-if="!imagenSeleccionada"
                   class="empty-image-state"
@@ -164,13 +169,13 @@
               </div>
 
               <div v-if="imagenSeleccionada" class="image-controls">
-                <button class="control-btn">
-                  <span>🔍</span> Zoom
+                <button class="control-btn" @click="zoomImage">
+                  <span>🔍</span> Zoom {{ Math.round(imageZoom * 100) }}%
                 </button>
-                <button class="control-btn">
+                <button class="control-btn" @click="rotateImage">
                   <span>↻</span> Rotar
                 </button>
-                <button class="control-btn">
+                <button class="control-btn" @click="resetImageView">
                   <span>⊟</span> Ajustar
                 </button>
               </div>
@@ -296,8 +301,8 @@
                         </thead>
                         <tbody>
                           <tr
-                            v-for="objeto in objetosNormalizadosVisibles"
-                            :key="objeto.id"
+                            v-for="(objeto, index) in objetosNormalizadosVisibles"
+                            :key="normalizedObjectKey(objeto, index)"
                           >
                             <td>{{ objeto.id }}</td>
                             <td>{{ objeto.label }}</td>
@@ -377,32 +382,6 @@
                   </div>
                 </div>
 
-                <div v-if="overlayLabels.length" class="overlay-label-controls">
-                  <div class="history-title">
-                    Etiquetas del overlay
-                  </div>
-
-                  <div class="overlay-label-list">
-                    <label
-                      v-for="label in overlayLabels"
-                      :key="label.label"
-                      class="overlay-label-item"
-                    >
-                      <input
-                        type="checkbox"
-                        :checked="label.visible"
-                        @change="toggleOverlayLabel(label.label)"
-                      />
-                      <span
-                        class="overlay-color"
-                        :style="{ background: label.fill, borderColor: label.stroke }"
-                      ></span>
-                      <span class="overlay-label-name">{{ label.label }}</span>
-                      <span class="overlay-label-count">{{ label.count }}</span>
-                    </label>
-                  </div>
-                </div>
-
                 <div class="segmentation-history">
                   <div class="history-title">
                     Historial persistido
@@ -454,7 +433,7 @@
         <div class="card objects-card">
           <div class="card-header-simple">
             <h3>Objetos Detectados</h3>
-            <span class="objects-count">3 tipos</span>
+            <span class="objects-count">{{ overlayLabels.length }} tipos</span>
           </div>
 
           <div class="objects-layout">
@@ -465,53 +444,39 @@
                   <tr>
                     <th>Visible</th>
                     <th>Tipo de Objeto</th>
-                    <th>Acciones</th>
+                    <th>Conteo</th>
                   </tr>
                 </thead>
-                <tbody>
-                  <tr class="obj-row">
+                <tbody v-if="overlayLabels.length">
+                  <tr
+                    v-for="label in overlayLabels"
+                    :key="label.label"
+                    class="obj-row"
+                  >
                     <td>
-                      <input type="checkbox" class="checkbox-custom" checked />
+                      <input
+                        type="checkbox"
+                        class="checkbox-custom"
+                        :checked="label.visible"
+                        @change="setOverlayLabelVisibility(label.label, $event.target.checked)"
+                      />
                     </td>
                     <td class="obj-type">
-                      <span class="obj-icon nucleos">●</span>
-                      Núcleos
+                      <span
+                        class="obj-icon"
+                        :style="{ color: label.stroke }"
+                      >●</span>
+                      {{ overlayLabelDisplayName(label.label) }}
                     </td>
                     <td>
-                      <div class="obj-actions">
-                        <button class="obj-btn" title="Editar">✏️</button>
-                        <button class="obj-btn" title="Limpiar">🧹</button>
-                      </div>
+                      <span class="objects-count">{{ label.count }}</span>
                     </td>
                   </tr>
+                </tbody>
+                <tbody v-else>
                   <tr class="obj-row">
-                    <td>
-                      <input type="checkbox" class="checkbox-custom" checked />
-                    </td>
-                    <td class="obj-type">
-                      <span class="obj-icon micronucleos">●</span>
-                      Micronúcleos
-                    </td>
-                    <td>
-                      <div class="obj-actions">
-                        <button class="obj-btn" title="Editar">✏️</button>
-                        <button class="obj-btn" title="Limpiar">🧹</button>
-                      </div>
-                    </td>
-                  </tr>
-                  <tr class="obj-row">
-                    <td>
-                      <input type="checkbox" class="checkbox-custom" checked />
-                    </td>
-                    <td class="obj-type">
-                      <span class="obj-icon membranas">●</span>
-                      Membranas
-                    </td>
-                    <td>
-                      <div class="obj-actions">
-                        <button class="obj-btn" title="Editar">✏️</button>
-                        <button class="obj-btn" title="Limpiar">🧹</button>
-                      </div>
+                    <td colspan="3" class="empty-normalized">
+                      Sin objetos dibujables
                     </td>
                   </tr>
                 </tbody>
@@ -552,8 +517,14 @@ export default {
   name: "MainContent",
 
   props: {
-    patientId: String,
-    caseId: String,
+    patientId: {
+      type: Number,
+      default: null,
+    },
+    caseId: {
+      type: Number,
+      default: null,
+    },
   },
 
   data() {
@@ -569,6 +540,8 @@ export default {
       historialError: "",
       imageNaturalSize: { width: 0, height: 0 },
       imageRenderedSize: { width: 0, height: 0 },
+      imageZoom: 1,
+      imageRotation: 0,
       overlayDebugVisible: false,
       overlayLabelVisibility: {},
       overlayPalette: [
@@ -640,6 +613,12 @@ export default {
     objetosNormalizadosVisibles() {
       const objects = this.resultadoNormalizadoActivo?.objects;
       return Array.isArray(objects) ? objects.slice(0, 5) : [];
+    },
+
+    imageTransformStyle() {
+      return {
+        transform: `scale(${this.imageZoom}) rotate(${this.imageRotation}deg)`,
+      };
     },
 
     conteoObjetosHeredadoActivo() {
@@ -739,7 +718,7 @@ export default {
         .map((item, index) => {
           const color = this.overlayColorForLabel(item.label);
           return {
-            key: `${item.object.id || index}-${item.label}`,
+            key: this.overlayPolygonKey(item, index),
             points: item.points,
             fill: color.fill,
             stroke: color.stroke,
@@ -768,8 +747,9 @@ export default {
 
       return objects
         .filter(object => object.geometry?.type === "polygon")
-        .map(object => ({
+        .map((object, index) => ({
           object,
+          objectIndex: index,
           label: object.label || "desconocido",
           points: this.scalePolygonPoints(object.geometry?.points),
         }))
@@ -842,6 +822,7 @@ export default {
       this.historialError = "";
       this.historialLoading = false;
       this.resetImageMeasurements();
+      this.resetImageView();
       this.overlayLabelVisibility = {};
       this.overlayDebugVisible = false;
 
@@ -925,16 +906,16 @@ export default {
 
     updateImageMeasurements() {
       const image = this.$refs.mainImage;
-      if (!image) return;
+      const frame = this.$refs.imageFrame;
+      if (!image || !frame) return;
 
-      const rect = image.getBoundingClientRect();
       this.imageNaturalSize = {
         width: image.naturalWidth || 0,
         height: image.naturalHeight || 0,
       };
       this.imageRenderedSize = {
-        width: Math.round(rect.width),
-        height: Math.round(rect.height),
+        width: Math.round(frame.clientWidth),
+        height: Math.round(frame.clientHeight),
       };
     },
 
@@ -981,9 +962,41 @@ export default {
       return `${Math.round(offsetX)}, ${Math.round(offsetY)}`;
     },
 
+    normalizedObjectKey(objeto, index) {
+      return `${index}-${objeto?.id ?? "sin-id"}-${objeto?.label || "sin-etiqueta"}`;
+    },
+
+    overlayPolygonKey(item, index) {
+      const normalizedId = item.object?.id ?? "sin-id";
+      return `${item.objectIndex}-${index}-${normalizedId}-${item.label}`;
+    },
+
+    zoomImage() {
+      this.imageZoom = Math.min(Number((this.imageZoom + 0.25).toFixed(2)), 2);
+    },
+
+    rotateImage() {
+      this.imageRotation = (this.imageRotation + 90) % 360;
+    },
+
+    resetImageView() {
+      this.imageZoom = 1;
+      this.imageRotation = 0;
+    },
+
     overlayColorForLabel(label) {
       const index = Math.max(this.overlayLabelNames.indexOf(label), 0);
       return this.overlayPalette[index % this.overlayPalette.length];
+    },
+
+    overlayLabelDisplayName(label) {
+      const displayNames = {
+        membrana: "Membranas",
+        nucleo: "Núcleos",
+        micronucleo: "Micronúcleos",
+      };
+
+      return displayNames[label] || label;
     },
 
     syncOverlayLabelVisibility() {
@@ -996,10 +1009,10 @@ export default {
       this.overlayLabelVisibility = nextVisibility;
     },
 
-    toggleOverlayLabel(label) {
+    setOverlayLabelVisibility(label, visible) {
       this.overlayLabelVisibility = {
         ...this.overlayLabelVisibility,
-        [label]: this.overlayLabelVisibility[label] === false,
+        [label]: visible,
       };
     },
   },
@@ -1386,6 +1399,14 @@ export default {
   object-position: center;
 }
 
+.image-transform-layer {
+  height: 100%;
+  inset: 0;
+  position: absolute;
+  transform-origin: center center;
+  width: 100%;
+}
+
 .segmentation-svg-overlay {
   display: block;
   height: 100%;
@@ -1685,55 +1706,6 @@ export default {
 .overlay-debug-toggle input {
   cursor: pointer;
   margin: 0;
-}
-
-.overlay-label-controls {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.overlay-label-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.overlay-label-item {
-  align-items: center;
-  background: #f8f9fa;
-  border: 1px solid #d9e2ec;
-  border-radius: 8px;
-  cursor: pointer;
-  display: flex;
-  gap: 6px;
-  padding: 6px 8px;
-}
-
-.overlay-label-item input {
-  cursor: pointer;
-  margin: 0;
-}
-
-.overlay-color {
-  border: 2px solid;
-  border-radius: 50%;
-  height: 12px;
-  width: 12px;
-}
-
-.overlay-label-name {
-  color: #2c3e50;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.overlay-label-count {
-  background: white;
-  border-radius: 8px;
-  color: #666;
-  font-size: 11px;
-  padding: 1px 6px;
 }
 
 .normalized-panel {

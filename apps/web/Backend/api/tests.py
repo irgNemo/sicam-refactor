@@ -1,5 +1,6 @@
 import shutil
 import tempfile
+from copy import deepcopy
 from datetime import date
 from io import StringIO
 from pathlib import Path
@@ -234,13 +235,69 @@ class SegmentationResultNormalizerTests(APITestCase):
 
         result = normalize_segmentation_result(raw_result, sample_type='SALIVA')
 
-        assert result['version'] == '1.0'
+        assert result['version'] == '1.1'
         assert result['sample_type'] == 'SALIVA'
         assert result['summary']['total_objects'] == 3
         assert result['summary']['counts_by_label'] == {
             'membrana': 2,
             'nucleo': 1,
         }
+
+    def test_normalizer_uses_unique_sequential_ids_and_preserves_raw_ids(self):
+        raw_result = {
+            'objetos': [
+                {'id': 255, 'tipo': 'nucleo', 'puntos': [[10, 20]]},
+                {'id': 255, 'tipo': 'nucleo', 'puntos': [[30, 40]]},
+                {'id': 255, 'tipo': 'micronucleo', 'puntos': [[50, 60]]},
+            ]
+        }
+
+        result = normalize_segmentation_result(raw_result, sample_type='SALIVA')
+        normalized_objects = result['objects']
+
+        assert [obj['id'] for obj in normalized_objects] == [1, 2, 3]
+        assert len({obj['id'] for obj in normalized_objects}) == 3
+        assert [obj['source']['raw_id'] for obj in normalized_objects] == [
+            255,
+            255,
+            255,
+        ]
+        assert [obj['source']['raw_type'] for obj in normalized_objects] == [
+            'nucleo',
+            'nucleo',
+            'micronucleo',
+        ]
+
+    def test_normalizer_preserves_summary_when_raw_ids_are_duplicated(self):
+        raw_result = {
+            'objetos': [
+                {'id': 255, 'tipo': 'membrana', 'puntos': []},
+                {'id': 255, 'tipo': 'membrana', 'puntos': []},
+                {'id': 255, 'tipo': 'nucleo', 'puntos': []},
+                {'id': 255, 'tipo': 'micronucleo', 'puntos': []},
+            ]
+        }
+
+        result = normalize_segmentation_result(raw_result, sample_type='SALIVA')
+
+        assert result['summary']['total_objects'] == 4
+        assert result['summary']['counts_by_label'] == {
+            'membrana': 2,
+            'nucleo': 1,
+            'micronucleo': 1,
+        }
+
+    def test_normalizer_does_not_mutate_raw_result(self):
+        raw_result = {
+            'objetos': [
+                {'id': 255, 'tipo': 'nucleo', 'puntos': [[10, 20]]}
+            ]
+        }
+        original = deepcopy(raw_result)
+
+        normalize_segmentation_result(raw_result, sample_type='SALIVA')
+
+        assert raw_result == original
 
     def test_normalizer_without_objects_returns_empty_objects(self):
         result = normalize_segmentation_result({}, sample_type='SALIVA')
@@ -261,6 +318,8 @@ class SegmentationResultNormalizerTests(APITestCase):
         assert result['objects'][0]['id'] == 1
         assert result['objects'][0]['label'] == 'membrana'
         assert result['objects'][0]['geometry'] is None
+        assert result['objects'][0]['source']['raw_id'] == 1
+        assert result['objects'][0]['source']['raw_type'] == 'membrana'
         assert result['summary']['total_objects'] == 1
 
     def test_normalizer_requires_dict_raw_result(self):
@@ -324,6 +383,7 @@ class MuestraSalivaSegmentationEndpointTests(APITestCase):
 
         assert response.status_code == status.HTTP_200_OK
         assert response.data['objetos'] == expected_response['objetos']
+        assert response.data['resultado_normalizado']['version'] == '1.1'
         assert response.data['resultado_normalizado']['sample_type'] == 'SALIVA'
         assert response.data['resultado_normalizado']['summary'] == {
             'total_objects': 1,
@@ -341,6 +401,7 @@ class MuestraSalivaSegmentationEndpointTests(APITestCase):
         assert resultado.tipo_muestra == 'SALIVA'
         assert resultado.estado == 'COMPLETADO'
         assert resultado.respuesta_json == expected_response
+        assert resultado.resultado_normalizado['version'] == '1.1'
         assert resultado.resultado_normalizado == response.data['resultado_normalizado']
 
     @patch('api.views.segment_image')

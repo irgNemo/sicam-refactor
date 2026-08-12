@@ -23,7 +23,7 @@ def normalize_segmentation_result(raw_result, sample_type="SALIVA"):
         counts_by_label[label] = counts_by_label.get(label, 0) + 1
 
     return {
-        "version": "1.0",
+        "version": "1.1",
         "sample_type": sample_type,
         "objects": normalized_objects,
         "summary": {
@@ -40,6 +40,7 @@ def _normalize_saliva_object(raw_object, fallback_id):
             "label": "desconocido",
             "geometry": None,
             "source": {
+                "raw_id": None,
                 "raw_type": None,
                 "raw_object": raw_object,
             },
@@ -56,10 +57,11 @@ def _normalize_saliva_object(raw_object, fallback_id):
         }
 
     return {
-        "id": raw_object.get("id", fallback_id),
+        "id": fallback_id,
         "label": label,
         "geometry": geometry,
         "source": {
+            "raw_id": raw_object.get("id"),
             "raw_type": raw_object.get("tipo"),
         },
     }

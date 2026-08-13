@@ -123,6 +123,24 @@ Se retiraron elementos visuales duplicados o sin uso directo:
 
 No se hizo refactor amplio de `MainContent.vue`.
 
+## Hotfix visual posterior
+
+Tambien se retiraron las etiquetas visuales legacy:
+
+```text
+Original
+Segmentacion
+```
+
+Estas etiquetas estaban superpuestas sobre el visor de imagen, pero no eran controles, no modificaban estado y ya no aportaban informacion operativa adicional. La imagen original sigue siendo la base del visor y la segmentacion se controla mediante `Capas visibles`.
+
+Se eliminaron tambien sus estilos dedicados:
+
+- `.img-overlay`
+- `.overlay-badge`
+- `.overlay-badge.original`
+- `.overlay-badge.segmented`
+
 ## Validacion automatica
 
 Comando:

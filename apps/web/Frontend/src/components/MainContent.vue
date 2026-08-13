@@ -137,11 +137,6 @@
                   <div class="empty-image-icon">🔬</div>
                   <p>Seleccione una imagen de la galería</p>
                 </div>
-
-                <div v-if="imagenSeleccionada" class="img-overlay">
-                  <span class="overlay-badge original">Original</span>
-                  <span class="overlay-badge segmented">Segmentación</span>
-                </div>
               </div>
 
               <div v-if="imagenSeleccionada" class="image-controls">
@@ -1254,34 +1249,6 @@ export default {
 .empty-image-state p {
   margin: 0;
   font-size: 14px;
-}
-
-.img-overlay {
-  position: absolute;
-  bottom: 12px;
-  left: 12px;
-  right: 12px;
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.overlay-badge {
-  font-size: 11px;
-  padding: 6px 12px;
-  border-radius: 8px;
-  font-weight: 600;
-  backdrop-filter: blur(10px);
-}
-
-.overlay-badge.original {
-  background: rgba(66, 165, 245, 0.9);
-  color: white;
-}
-
-.overlay-badge.segmented {
-  background: rgba(255, 152, 0, 0.9);
-  color: white;
 }
 
 .image-controls {

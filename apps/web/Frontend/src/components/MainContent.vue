@@ -105,14 +105,22 @@
                 <div
                   v-if="imagenSeleccionada"
                   class="image-transform-layer"
+                  :class="imagePanClass"
                   :style="imageTransformStyle"
+                  @pointerdown="startImagePan"
+                  @pointermove="moveImagePan"
+                  @pointerup="endImagePan"
+                  @pointercancel="endImagePan"
+                  @lostpointercapture="endImagePan"
                 >
                   <img
                     ref="mainImage"
                     :src="imagenSeleccionada.imagen"
                     class="main-image"
                     alt="Muestra microscópica"
+                    draggable="false"
                     @load="onMainImageLoad"
+                    @dragstart.prevent
                   />
                   <svg
                     v-if="shouldShowSegmentationOverlay"
@@ -140,13 +148,36 @@
               </div>
 
               <div v-if="imagenSeleccionada" class="image-controls">
-                <button class="control-btn" @click="zoomImage">
-                  <span>🔍</span> Zoom {{ Math.round(imageZoom * 100) }}%
+                <button
+                  class="control-btn"
+                  title="Aumentar zoom"
+                  aria-label="Aumentar zoom"
+                  @click="zoomImage"
+                >
+                  <span>＋</span> Zoom {{ Math.round(imageZoom * 100) }}%
                 </button>
-                <button class="control-btn" @click="rotateImage">
+                <button
+                  class="control-btn"
+                  title="Reducir zoom"
+                  aria-label="Reducir zoom"
+                  @click="zoomOutImage"
+                >
+                  <span>－</span> Zoom
+                </button>
+                <button
+                  class="control-btn"
+                  title="Rotar imagen"
+                  aria-label="Rotar imagen"
+                  @click="rotateImage"
+                >
                   <span>↻</span> Rotar
                 </button>
-                <button class="control-btn" @click="resetImageView">
+                <button
+                  class="control-btn"
+                  title="Ajustar vista"
+                  aria-label="Ajustar vista"
+                  @click="resetImageView"
+                >
                   <span>⊟</span> Ajustar
                 </button>
               </div>
@@ -391,6 +422,13 @@ export default {
       imageRenderedSize: { width: 0, height: 0 },
       imageZoom: 1,
       imageRotation: 0,
+      panX: 0,
+      panY: 0,
+      isPanning: false,
+      panStartPointerX: 0,
+      panStartPointerY: 0,
+      panStartX: 0,
+      panStartY: 0,
       overlayLabelVisibility: {},
       segmentationLabelPalette: {
         membrana: {
@@ -488,7 +526,33 @@ export default {
 
     imageTransformStyle() {
       return {
-        transform: `scale(${this.imageZoom}) rotate(${this.imageRotation}deg)`,
+        transform: `translate(${this.panX}px, ${this.panY}px) scale(${this.imageZoom}) rotate(${this.imageRotation}deg)`,
+      };
+    },
+
+    imagePanClass() {
+      return {
+        "is-pannable": this.imageZoom > 1,
+        "is-panning": this.isPanning,
+      };
+    },
+
+    imagePanLimits() {
+      const width = this.imageRenderedSize.width;
+      const height = this.imageRenderedSize.height;
+
+      if (!width || !height || this.imageZoom <= 1) {
+        return { maxX: 0, maxY: 0 };
+      }
+
+      const rotation = ((this.imageRotation % 360) + 360) % 360;
+      const rotatedSideways = rotation === 90 || rotation === 270;
+      const transformedWidth = (rotatedSideways ? height : width) * this.imageZoom;
+      const transformedHeight = (rotatedSideways ? width : height) * this.imageZoom;
+
+      return {
+        maxX: Math.max(0, Math.round((transformedWidth - width) / 2)),
+        maxY: Math.max(0, Math.round((transformedHeight - height) / 2)),
       };
     },
 
@@ -726,6 +790,7 @@ export default {
         width: Math.round(frame.clientWidth),
         height: Math.round(frame.clientHeight),
       };
+      this.clampImagePan();
     },
 
     validPolygonPoints(points) {
@@ -764,15 +829,73 @@ export default {
 
     zoomImage() {
       this.imageZoom = Math.min(Number((this.imageZoom + 0.25).toFixed(2)), 2);
+      this.clampImagePan();
+    },
+
+    zoomOutImage() {
+      this.imageZoom = Math.max(Number((this.imageZoom - 0.25).toFixed(2)), 1);
+      this.clampImagePan();
     },
 
     rotateImage() {
       this.imageRotation = (this.imageRotation + 90) % 360;
+      this.clampImagePan();
     },
 
     resetImageView() {
       this.imageZoom = 1;
       this.imageRotation = 0;
+      this.panX = 0;
+      this.panY = 0;
+      this.isPanning = false;
+    },
+
+    clampImagePan() {
+      if (this.imageZoom <= 1) {
+        this.panX = 0;
+        this.panY = 0;
+        this.isPanning = false;
+        return;
+      }
+
+      const { maxX, maxY } = this.imagePanLimits;
+      this.panX = Math.min(Math.max(this.panX, -maxX), maxX);
+      this.panY = Math.min(Math.max(this.panY, -maxY), maxY);
+    },
+
+    startImagePan(event) {
+      if (this.imageZoom <= 1 || event.button !== 0) return;
+
+      event.preventDefault();
+      this.isPanning = true;
+      this.panStartPointerX = event.clientX;
+      this.panStartPointerY = event.clientY;
+      this.panStartX = this.panX;
+      this.panStartY = this.panY;
+      event.currentTarget?.setPointerCapture?.(event.pointerId);
+    },
+
+    moveImagePan(event) {
+      if (!this.isPanning) return;
+
+      event.preventDefault();
+      const nextPanX = this.panStartX + event.clientX - this.panStartPointerX;
+      const nextPanY = this.panStartY + event.clientY - this.panStartPointerY;
+      const { maxX, maxY } = this.imagePanLimits;
+
+      this.panX = Math.min(Math.max(nextPanX, -maxX), maxX);
+      this.panY = Math.min(Math.max(nextPanY, -maxY), maxY);
+    },
+
+    endImagePan(event) {
+      if (!this.isPanning) return;
+
+      try {
+        event?.currentTarget?.releasePointerCapture?.(event.pointerId);
+      } catch {
+        // Pointer capture may already be released after pointercancel/lostpointercapture.
+      }
+      this.isPanning = false;
     },
 
     overlayColorForLabel(label) {
@@ -1206,6 +1329,8 @@ export default {
   height: 100%;
   object-fit: contain;
   object-position: center;
+  pointer-events: none;
+  user-select: none;
 }
 
 .image-transform-layer {
@@ -1213,7 +1338,16 @@ export default {
   inset: 0;
   position: absolute;
   transform-origin: center center;
+  user-select: none;
   width: 100%;
+}
+
+.image-transform-layer.is-pannable {
+  cursor: grab;
+}
+
+.image-transform-layer.is-panning {
+  cursor: grabbing;
 }
 
 .segmentation-svg-overlay {

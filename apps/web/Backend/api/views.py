@@ -1,3 +1,4 @@
+from django.db.models import OuterRef, Subquery
 from django.shortcuts import render
 
 from rest_framework.decorators import api_view
@@ -38,6 +39,51 @@ from .services.segmentation.exceptions import (
 from .services.segmentation.factory import segment_image
 from .services.segmentation.normalizers import normalize_segmentation_result
 
+
+SUMMARY_LABELS = ('membrana', 'nucleo', 'micronucleo')
+
+
+def _is_valid_number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _extract_valid_segmentation_summary(resultado_normalizado):
+    if not isinstance(resultado_normalizado, dict):
+        return None
+
+    summary = resultado_normalizado.get('summary')
+    if not isinstance(summary, dict):
+        return None
+
+    counts_by_label = summary.get('counts_by_label')
+    if not isinstance(counts_by_label, dict):
+        return None
+
+    normalized_counts = {}
+    for label, count in counts_by_label.items():
+        if not _is_valid_number(count):
+            return None
+        normalized_counts[label] = count
+
+    calculated_total = sum(normalized_counts.values())
+    total_objects = summary.get('total_objects')
+
+    if total_objects is None:
+        total_objects = calculated_total
+    elif not _is_valid_number(total_objects):
+        return None
+    elif total_objects != calculated_total:
+        return None
+
+    return {
+        'counts_by_label': {
+            label: normalized_counts.get(label, 0)
+            for label in SUMMARY_LABELS
+        },
+        'total_objects': total_objects,
+    }
+
+
 class PacienteViewSet(viewsets.ModelViewSet):
     queryset = Paciente.objects.all()
     serializer_class = PacienteSerializer
@@ -61,6 +107,74 @@ class CasoViewSet(viewsets.ModelViewSet):
         analisis = caso.analisis.all()
         serializer = AnalisisSerializer(analisis, many=True)
         return Response(serializer.data)
+
+    @action(detail=True, methods=['get'], url_path='resumen-segmentacion')
+    def resumen_segmentacion(self, request, pk=None):
+        """Resumen operativo de segmentacion para todas las muestras del caso."""
+        caso = self.get_object()
+        latest_completed = ResultadoSegmentacion.objects.filter(
+            muestra=OuterRef('pk'),
+            estado='COMPLETADO',
+        ).order_by('-creado_en', '-id_resultado_segmentacion')
+
+        muestras = list(
+            MuestraSaliva.objects.filter(
+                analisis__id_caso_fk=caso
+            ).annotate(
+                latest_result_id=Subquery(
+                    latest_completed.values('id_resultado_segmentacion')[:1]
+                )
+            ).values('id_muestra', 'latest_result_id')
+        )
+        result_ids = [
+            muestra['latest_result_id']
+            for muestra in muestras
+            if muestra['latest_result_id'] is not None
+        ]
+        resultados = {
+            resultado.id_resultado_segmentacion: resultado
+            for resultado in ResultadoSegmentacion.objects.filter(
+                id_resultado_segmentacion__in=result_ids
+            )
+        }
+
+        summary = {
+            'caso_id': caso.id_caso,
+            'total_muestras': len(muestras),
+            'muestras_segmentadas': 0,
+            'muestras_pendientes': 0,
+            'muestras_resultado_invalido': 0,
+            'counts_by_label': {
+                'membrana': 0,
+                'nucleo': 0,
+                'micronucleo': 0,
+            },
+            'total_objects': 0,
+        }
+
+        for muestra in muestras:
+            latest_result_id = muestra['latest_result_id']
+            if latest_result_id is None:
+                summary['muestras_pendientes'] += 1
+                continue
+
+            resultado = resultados.get(latest_result_id)
+            normalized_summary = _extract_valid_segmentation_summary(
+                resultado.resultado_normalizado if resultado else None
+            )
+
+            if normalized_summary is None:
+                summary['muestras_resultado_invalido'] += 1
+                continue
+
+            summary['muestras_segmentadas'] += 1
+            summary['total_objects'] += normalized_summary['total_objects']
+            for label in summary['counts_by_label']:
+                summary['counts_by_label'][label] += (
+                    normalized_summary['counts_by_label'].get(label, 0)
+                )
+
+        return Response(summary)
 
 class AnalisisViewSet(viewsets.ModelViewSet):
     queryset = AnalisisPred.objects.all()

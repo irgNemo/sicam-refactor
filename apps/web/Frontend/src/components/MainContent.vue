@@ -121,36 +121,12 @@
                     :height="imageRenderedSize.height"
                     :viewBox="`0 0 ${imageRenderedSize.width} ${imageRenderedSize.height}`"
                   >
-                    <rect
-                      v-if="overlayDebugVisible"
-                      class="overlay-debug-base"
-                      x="0"
-                      y="0"
-                      :width="imageRenderedSize.width"
-                      :height="imageRenderedSize.height"
-                    />
-                    <rect
-                      v-if="overlayDebugVisible && overlayContainment.canProject"
-                      class="overlay-debug-image-box"
-                      :x="overlayContainment.offsetX"
-                      :y="overlayContainment.offsetY"
-                      :width="overlayContainment.displayedSize.width"
-                      :height="overlayContainment.displayedSize.height"
-                    />
                     <polygon
                       v-for="polygon in overlayPolygons"
                       :key="polygon.key"
                       :points="polygon.points"
                       class="segmentation-polygon"
                       :style="{ fill: polygon.fill, stroke: polygon.stroke }"
-                    />
-                    <rect
-                      v-if="overlayDebugVisible && overlayPolygonBounds"
-                      class="overlay-debug-polygon-box"
-                      :x="overlayPolygonBounds.x"
-                      :y="overlayPolygonBounds.y"
-                      :width="overlayPolygonBounds.width"
-                      :height="overlayPolygonBounds.height"
                     />
                   </svg>
                 </div>
@@ -195,27 +171,43 @@
                   </tr>
                 </thead>
 
-                <tbody v-if="resultadoImagenSeleccionada">
-                  <tr class="data-row nucleos">
-                    <td>
-                      <span class="structure-icon">🟢</span>
-                      Núcleos
-                    </td>
-                    <td class="count">{{ resultadoImagenSeleccionada.nucleos }}</td>
-                  </tr>
+                <tbody v-if="resumenConteoActivo">
                   <tr class="data-row membranas">
                     <td>
-                      <span class="structure-icon">🟤</span>
+                      <span
+                        class="structure-dot"
+                        :style="{ color: overlayColorForLabel('membrana').stroke }"
+                      >●</span>
                       Membranas
                     </td>
-                    <td class="count">{{ resultadoImagenSeleccionada.membranas }}</td>
+                    <td class="count">{{ resumenConteoActivo.membranas }}</td>
+                  </tr>
+                  <tr class="data-row nucleos">
+                    <td>
+                      <span
+                        class="structure-dot"
+                        :style="{ color: overlayColorForLabel('nucleo').stroke }"
+                      >●</span>
+                      Núcleos
+                    </td>
+                    <td class="count">{{ resumenConteoActivo.nucleos }}</td>
                   </tr>
                   <tr class="data-row micronucleos highlight">
                     <td>
-                      <span class="structure-icon">🔴</span>
+                      <span
+                        class="structure-dot"
+                        :style="{ color: overlayColorForLabel('micronucleo').stroke }"
+                      >●</span>
                       Micronúcleos
                     </td>
-                    <td class="count critical">{{ resultadoImagenSeleccionada.micronucleos }}</td>
+                    <td class="count">{{ resumenConteoActivo.micronucleos }}</td>
+                  </tr>
+                  <tr class="data-row total">
+                    <td>
+                      <span class="structure-total-symbol">Σ</span>
+                      Total
+                    </td>
+                    <td class="count">{{ resumenConteoActivo.total }}</td>
                   </tr>
                 </tbody>
 
@@ -256,137 +248,11 @@
                   </div>
                 </div>
 
-                <div v-if="resultadoSegmentacionActivo" class="normalized-panel">
-                  <div class="history-title">
-                    Resultado normalizado
-                    <span v-if="resultadoNormalizadoActivo">
-                      v{{ resultadoNormalizadoActivo.version }}
-                    </span>
-                  </div>
-
-                  <div v-if="resultadoNormalizadoActivo" class="segmentation-status neutral">
-                    <div class="status-grid">
-                      <span>Tipo</span>
-                      <strong>{{ resultadoNormalizadoActivo.sample_type }}</strong>
-                      <span>Total</span>
-                      <strong>{{ totalObjetosNormalizados }}</strong>
-                    </div>
-
-                    <div class="normalized-section">
-                      <div class="normalized-subtitle">Conteo por etiqueta</div>
-                      <div v-if="conteosNormalizados.length" class="label-counts">
-                        <span
-                          v-for="conteo in conteosNormalizados"
-                          :key="conteo.label"
-                          class="label-count"
-                        >
-                          {{ conteo.label }}: {{ conteo.count }}
-                        </span>
-                      </div>
-                      <div v-else class="empty-normalized">
-                        Sin etiquetas
-                      </div>
-                    </div>
-
-                    <div class="normalized-section">
-                      <div class="normalized-subtitle">Objetos</div>
-                      <table v-if="objetosNormalizadosVisibles.length" class="normalized-table">
-                        <thead>
-                          <tr>
-                            <th>ID</th>
-                            <th>Etiqueta</th>
-                            <th>Geometria</th>
-                            <th>Puntos</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <tr
-                            v-for="(objeto, index) in objetosNormalizadosVisibles"
-                            :key="normalizedObjectKey(objeto, index)"
-                          >
-                            <td>{{ objeto.id }}</td>
-                            <td>{{ objeto.label }}</td>
-                            <td>{{ geometryType(objeto) }}</td>
-                            <td>{{ geometryPointsCount(objeto) }}</td>
-                          </tr>
-                        </tbody>
-                      </table>
-                      <div v-else class="empty-normalized">
-                        Sin objetos normalizados
-                      </div>
-                    </div>
-                  </div>
-
-                  <div v-else class="segmentation-status neutral">
-                    Este resultado no tiene representacion normalizada.
-                    <div class="status-grid legacy-count">
-                      <span>Objetos heredados</span>
-                      <strong>{{ conteoObjetosHeredadoActivo }}</strong>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="overlay-diagnostics">
-                  <div class="history-title">
-                    Diagnostico de overlay
-                  </div>
-
-                  <div v-if="!resultadoNormalizadoActivo" class="segmentation-status neutral">
-                    Sin resultado normalizado para diagnosticar coordenadas.
-                  </div>
-
-                  <div v-else class="segmentation-status neutral">
-                    <div class="status-grid">
-                      <span>Natural</span>
-                      <strong>{{ formatImageSize(imageNaturalSize) }}</strong>
-                      <span>Render</span>
-                      <strong>{{ formatImageSize(imageRenderedSize) }}</strong>
-                      <span>Escala X</span>
-                      <strong>{{ formatScale(overlayDiagnostics.scaleX) }}</strong>
-                      <span>Escala Y</span>
-                      <strong>{{ formatScale(overlayDiagnostics.scaleY) }}</strong>
-                      <span>Caja visible</span>
-                      <strong>{{ formatImageSize(overlayContainment.displayedSize) }}</strong>
-                      <span>Offset</span>
-                      <strong>{{ formatOffset(overlayContainment.offsetX, overlayContainment.offsetY) }}</strong>
-                      <span>Poligonos</span>
-                      <strong>{{ overlayDiagnostics.polygonObjects }}</strong>
-                      <span>Con puntos validos</span>
-                      <strong>{{ overlayDiagnostics.validPointObjects }}</strong>
-                      <span>Dibujables</span>
-                      <strong>{{ overlayPolygons.length }}</strong>
-                    </div>
-
-                    <label class="overlay-debug-toggle">
-                      <input
-                        v-model="overlayDebugVisible"
-                        type="checkbox"
-                      />
-                      Diagnostico visual
-                    </label>
-
-                    <div
-                      v-if="overlayDiagnostics.previewScaledPoints.length"
-                      class="normalized-section"
-                    >
-                      <div class="normalized-subtitle">Primeros puntos escalados</div>
-                      <div class="scaled-points">
-                        <span
-                          v-for="(point, index) in overlayDiagnostics.previewScaledPoints"
-                          :key="index"
-                        >
-                          [{{ point[0] }}, {{ point[1] }}]
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
                 <div class="segmentation-history">
                   <div class="history-title">
-                    Historial persistido
+                    Ultima segmentacion
                     <span v-if="historialSegmentacion.length">
-                      {{ historialSegmentacion.length }}
+                      {{ historialSegmentacion.length }} resultados
                     </span>
                   </div>
 
@@ -402,20 +268,11 @@
                     Sin resultados historicos
                   </div>
 
-                  <div v-else class="segmentation-status neutral">
-                    <div class="status-title">
-                      Ultimo resultado #{{ ultimoResultadoSegmentacion.id }}
-                    </div>
-                    <div class="status-grid">
-                      <span>Estado</span>
-                      <strong>{{ ultimoResultadoSegmentacion.estado }}</strong>
-                      <span>Tipo</span>
-                      <strong>{{ ultimoResultadoSegmentacion.tipo_muestra }}</strong>
-                      <span>Fecha</span>
-                      <strong>{{ formatearFechaResultado(ultimoResultadoSegmentacion.creado_en) }}</strong>
-                      <span>Objetos</span>
-                      <strong>{{ ultimoHistorialObjetosCount }}</strong>
-                    </div>
+                  <div v-else class="history-compact-card">
+                    <strong>{{ formatearFechaResultado(ultimoResultadoSegmentacion.creado_en) }}</strong>
+                    <span>
+                      {{ ultimoHistorialObjetosCount }} objetos · {{ ultimoResultadoSegmentacion.estado }}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -429,10 +286,10 @@
           </div>
         </div>
 
-        <!-- TARJETA OBJETOS -->
+        <!-- TARJETA CAPAS -->
         <div class="card objects-card">
           <div class="card-header-simple">
-            <h3>Objetos Detectados</h3>
+            <h3>Capas visibles</h3>
             <span class="objects-count">{{ overlayLabels.length }} tipos</span>
           </div>
 
@@ -443,8 +300,7 @@
                 <thead>
                   <tr>
                     <th>Visible</th>
-                    <th>Tipo de Objeto</th>
-                    <th>Conteo</th>
+                    <th>Capa</th>
                   </tr>
                 </thead>
                 <tbody v-if="overlayLabels.length">
@@ -468,14 +324,11 @@
                       >●</span>
                       {{ overlayLabelDisplayName(label.label) }}
                     </td>
-                    <td>
-                      <span class="objects-count">{{ label.count }}</span>
-                    </td>
                   </tr>
                 </tbody>
                 <tbody v-else>
                   <tr class="obj-row">
-                    <td colspan="3" class="empty-normalized">
+                    <td colspan="2" class="empty-normalized">
                       Sin objetos dibujables
                     </td>
                   </tr>
@@ -486,7 +339,7 @@
             <div class="objects-tools-panel">
               <div class="info-box">
                 <div class="info-icon">💡</div>
-                <p>Seleccione un objeto de la lista para editarlo o modificar su visibilidad</p>
+                <p>Active u oculte capas sin modificar los conteos del resultado</p>
               </div>
               <button class="btn-tool-large review">
                 <span>✏️</span>
@@ -515,6 +368,7 @@ import {
 
 export default {
   name: "MainContent",
+  emits: ["segmentation-completed"],
 
   props: {
     patientId: {
@@ -542,9 +396,22 @@ export default {
       imageRenderedSize: { width: 0, height: 0 },
       imageZoom: 1,
       imageRotation: 0,
-      overlayDebugVisible: false,
       overlayLabelVisibility: {},
-      overlayPalette: [
+      segmentationLabelPalette: {
+        membrana: {
+          stroke: "rgba(30, 136, 229, 0.92)",
+          fill: "rgba(30, 136, 229, 0.16)",
+        },
+        micronucleo: {
+          stroke: "rgba(67, 160, 71, 0.92)",
+          fill: "rgba(67, 160, 71, 0.16)",
+        },
+        nucleo: {
+          stroke: "rgba(239, 83, 80, 0.92)",
+          fill: "rgba(239, 83, 80, 0.16)",
+        },
+      },
+      overlayFallbackPalette: [
         { stroke: "rgba(30, 136, 229, 0.92)", fill: "rgba(30, 136, 229, 0.16)" },
         { stroke: "rgba(67, 160, 71, 0.92)", fill: "rgba(67, 160, 71, 0.16)" },
         { stroke: "rgba(239, 83, 80, 0.92)", fill: "rgba(239, 83, 80, 0.16)" },
@@ -568,11 +435,6 @@ export default {
 
     imagenes() {
       return this.analisisActual?.muestras_saliva || [];
-    },
-
-    resultadoImagenSeleccionada() {
-      if (!this.imagenSeleccionada) return null;
-      return this.imagenSeleccionada.resultados?.[0] || null;
     },
 
     segmentacionMetadata() {
@@ -601,57 +463,37 @@ export default {
       return this.resultadoSegmentacionActivo?.resultado_normalizado || null;
     },
 
-    totalObjetosNormalizados() {
-      return this.resultadoNormalizadoActivo?.summary?.total_objects || 0;
-    },
+    resumenConteoActivo() {
+      const summary = this.resultadoNormalizadoActivo?.summary;
+      if (!summary || typeof summary !== "object") return null;
 
-    conteosNormalizados() {
-      const counts = this.resultadoNormalizadoActivo?.summary?.counts_by_label || {};
-      return Object.entries(counts).map(([label, count]) => ({ label, count }));
-    },
+      const counts = summary.counts_by_label;
+      if (!counts || typeof counts !== "object") return null;
 
-    objetosNormalizadosVisibles() {
-      const objects = this.resultadoNormalizadoActivo?.objects;
-      return Array.isArray(objects) ? objects.slice(0, 5) : [];
+      const countFor = (label) => {
+        const value = Number(counts[label]);
+        return Number.isFinite(value) ? value : 0;
+      };
+
+      const membranas = countFor("membrana");
+      const nucleos = countFor("nucleo");
+      const micronucleos = countFor("micronucleo");
+      const totalValue = Number(summary.total_objects);
+      const total = Number.isFinite(totalValue)
+        ? totalValue
+        : membranas + nucleos + micronucleos;
+
+      return {
+        membranas,
+        nucleos,
+        micronucleos,
+        total,
+      };
     },
 
     imageTransformStyle() {
       return {
         transform: `scale(${this.imageZoom}) rotate(${this.imageRotation}deg)`,
-      };
-    },
-
-    conteoObjetosHeredadoActivo() {
-      const historicalObjects = this.resultadoSegmentacionActivo
-        ?.respuesta_json
-        ?.objetos;
-      const immediateObjects = this.resultadoSegmentacionActivo?.objetos;
-
-      if (Array.isArray(historicalObjects)) return historicalObjects.length;
-      if (Array.isArray(immediateObjects)) return immediateObjects.length;
-      return 0;
-    },
-
-    overlayDiagnostics() {
-      const objects = Array.isArray(this.resultadoNormalizadoActivo?.objects)
-        ? this.resultadoNormalizadoActivo.objects
-        : [];
-      const polygonObjects = objects.filter(
-        object => object.geometry?.type === "polygon"
-      );
-      const validPointObjects = polygonObjects.filter(
-        object => this.validPolygonPoints(object.geometry?.points).length > 0
-      );
-      const firstValidPolygon = validPointObjects[0];
-
-      return {
-        scaleX: this.overlayContainment.scaleX,
-        scaleY: this.overlayContainment.scaleY,
-        polygonObjects: polygonObjects.length,
-        validPointObjects: validPointObjects.length,
-        previewScaledPoints: firstValidPolygon && this.overlayContainment.canProject
-          ? this.scalePolygonPoints(firstValidPolygon.geometry.points).slice(0, 3)
-          : [],
       };
     },
 
@@ -736,7 +578,7 @@ export default {
       return Boolean(
         this.imagenSeleccionada &&
         this.overlayContainment.canProject &&
-        (this.overlayPolygons.length || this.overlayDebugVisible)
+        this.overlayPolygons.length
       );
     },
 
@@ -760,28 +602,6 @@ export default {
       return this.overlayDrawableObjects.filter(
         item => this.overlayLabelVisibility[item.label] !== false
       );
-    },
-
-    overlayPolygonBounds() {
-      const points = this.overlayVisibleDrawableObjects.flatMap(
-        item => item.points
-      );
-
-      if (!points.length) return null;
-
-      const xs = points.map(point => point[0]);
-      const ys = points.map(point => point[1]);
-      const minX = Math.min(...xs);
-      const maxX = Math.max(...xs);
-      const minY = Math.min(...ys);
-      const maxY = Math.max(...ys);
-
-      return {
-        x: minX,
-        y: minY,
-        width: Math.max(maxX - minX, 1),
-        height: Math.max(maxY - minY, 1),
-      };
     },
 
     overlayLabelNames() {
@@ -824,7 +644,6 @@ export default {
       this.resetImageMeasurements();
       this.resetImageView();
       this.overlayLabelVisibility = {};
-      this.overlayDebugVisible = false;
 
       if (muestra) {
         this.cargarHistorialSegmentacion(muestra.id_muestra);
@@ -872,6 +691,10 @@ export default {
         this.segmentacionResultado = response.data;
         this.syncOverlayLabelVisibility();
         await this.cargarHistorialSegmentacion(this.imagenSeleccionada.id_muestra);
+        this.$emit("segmentation-completed", {
+          caseId: this.caseId,
+          muestraId: this.imagenSeleccionada.id_muestra,
+        });
       } catch (error) {
         console.error("Error al segmentar muestra:", error);
         this.segmentacionError =
@@ -884,15 +707,6 @@ export default {
     formatearFechaResultado(fecha) {
       if (!fecha) return "";
       return new Date(fecha).toLocaleString("es-MX");
-    },
-
-    geometryType(objeto) {
-      return objeto.geometry?.type || "Sin geometria";
-    },
-
-    geometryPointsCount(objeto) {
-      const points = objeto.geometry?.points;
-      return Array.isArray(points) ? points.length : 0;
     },
 
     onMainImageLoad() {
@@ -948,24 +762,6 @@ export default {
         .filter(Boolean);
     },
 
-    formatImageSize(size) {
-      if (!size.width || !size.height) return "No disponible";
-      return `${size.width} x ${size.height}`;
-    },
-
-    formatScale(scale) {
-      if (scale === null) return "No disponible";
-      return scale.toFixed(4);
-    },
-
-    formatOffset(offsetX, offsetY) {
-      return `${Math.round(offsetX)}, ${Math.round(offsetY)}`;
-    },
-
-    normalizedObjectKey(objeto, index) {
-      return `${index}-${objeto?.id ?? "sin-id"}-${objeto?.label || "sin-etiqueta"}`;
-    },
-
     overlayPolygonKey(item, index) {
       const normalizedId = item.object?.id ?? "sin-id";
       return `${item.objectIndex}-${index}-${normalizedId}-${item.label}`;
@@ -985,8 +781,12 @@ export default {
     },
 
     overlayColorForLabel(label) {
+      if (this.segmentationLabelPalette[label]) {
+        return this.segmentationLabelPalette[label];
+      }
+
       const index = Math.max(this.overlayLabelNames.indexOf(label), 0);
-      return this.overlayPalette[index % this.overlayPalette.length];
+      return this.overlayFallbackPalette[index % this.overlayFallbackPalette.length];
     },
 
     overlayLabelDisplayName(label) {
@@ -1041,13 +841,14 @@ export default {
 
 <style scoped>
 .content {
-  flex: 1;
+  flex: 1 1 auto;
   padding: 16px;
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
   background: #f8f9fa;
-  height: 100vh;
+  min-height: 0;
+  min-width: 0;
+  overflow: visible;
 }
 
 /* HEADER */
@@ -1063,6 +864,7 @@ export default {
 
 .header-left {
   flex: 1;
+  min-width: 0;
 }
 
 .page-title {
@@ -1142,16 +944,24 @@ export default {
 
 /* LAYOUT */
 .layout-grid {
-  display: flex;
+  align-items: start;
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
   gap: 16px;
+  flex: 1 1 auto;
   height: auto;
   min-height: 0;
+  min-width: 0;
   overflow: visible;
+  width: 100%;
 }
 
 /* GALERÍA */
 .gallery-column {
-  width: 240px;
+  align-self: start;
+  width: 100%;
+  max-height: clamp(420px, 58vh, 620px);
+  min-width: 0;
   display: flex;
   flex-direction: column;
   background: white;
@@ -1162,6 +972,7 @@ export default {
 
 .gallery-header {
   display: flex;
+  flex-shrink: 0;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 12px;
@@ -1190,6 +1001,8 @@ export default {
   grid-template-columns: repeat(3, 1fr);
   grid-auto-rows: 68px;
   gap: 10px;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
 }
 
@@ -1276,13 +1089,13 @@ export default {
 
 /* VISOR */
 .viewer-column {
-  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 16px;
   height: auto;
-  min-height: 700px;
-  overflow: hidden;
+  min-height: 0;
+  overflow: visible;
 }
 
 /* TARJETAS */
@@ -1296,11 +1109,10 @@ export default {
 }
 
 .main-card {
-  flex: 1;
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   min-height: 0;
-  overflow: hidden;
 }
 
 .card-header {
@@ -1361,26 +1173,29 @@ export default {
 
 /* VISTA DIVIDIDA */
 .split-view {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 0.62fr);
   gap: 20px;
   padding: 16px;
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
-  overflow: hidden;
+  min-width: 0;
+  overflow: visible;
 }
 
 .image-container {
-  flex: 1.6;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  height: 100%;
+  height: auto;
   min-height: 0;
 }
 
 .img-placeholder {
   position: relative;
-  flex: 1;
+  flex: 0 0 auto;
+  height: clamp(380px, 50vh, 560px);
   background: #f8f9fa;
   border: 2px dashed #e0e0e0;
   border-radius: 12px;
@@ -1388,8 +1203,7 @@ export default {
   display: flex;
   align-items: center;
   justify-content: center;
-  /*height: 100%;*/
-  min-height: 0px;
+  min-height: 0;
 }
 
 .main-image {
@@ -1421,32 +1235,6 @@ export default {
   fill: rgba(30, 136, 229, 0.16);
   stroke: rgba(30, 136, 229, 0.92);
   stroke-linejoin: round;
-  stroke-width: 2;
-}
-
-.overlay-debug-base,
-.overlay-debug-image-box,
-.overlay-debug-polygon-box {
-  fill: transparent;
-  pointer-events: none;
-  vector-effect: non-scaling-stroke;
-}
-
-.overlay-debug-base {
-  stroke: rgba(33, 150, 243, 0.75);
-  stroke-dasharray: 6 4;
-  stroke-width: 2;
-}
-
-.overlay-debug-image-box {
-  stroke: rgba(76, 175, 80, 0.85);
-  stroke-dasharray: 8 5;
-  stroke-width: 2;
-}
-
-.overlay-debug-polygon-box {
-  stroke: rgba(255, 152, 0, 0.9);
-  stroke-dasharray: 4 4;
   stroke-width: 2;
 }
 
@@ -1524,7 +1312,7 @@ export default {
 
 /* DATOS */
 .data-container {
-  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -1582,9 +1370,23 @@ export default {
   background: #ffe0b2;
 }
 
-.structure-icon {
+.structure-dot,
+.structure-total-symbol {
+  display: inline-block;
   margin-right: 8px;
-  font-size: 14px;
+  text-align: center;
+  width: 14px;
+}
+
+.structure-dot {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.structure-total-symbol {
+  color: #2c3e50;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .count {
@@ -1592,10 +1394,6 @@ export default {
   font-size: 16px;
   text-align: right;
   color: #2c3e50;
-}
-
-.count.critical {
-  color: #ef5350;
 }
 
 .no-data {
@@ -1671,101 +1469,9 @@ export default {
   gap: 8px;
 }
 
-.overlay-diagnostics {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.scaled-points {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.scaled-points span {
-  background: #f0f4f8;
-  border: 1px solid #d9e2ec;
-  border-radius: 8px;
-  color: #374151;
-  font-size: 11px;
-  padding: 3px 7px;
-}
-
-.overlay-debug-toggle {
-  align-items: center;
-  color: #374151;
-  cursor: pointer;
-  display: inline-flex;
-  font-size: 12px;
-  font-weight: 600;
-  gap: 6px;
-  margin-top: 10px;
-}
-
-.overlay-debug-toggle input {
-  cursor: pointer;
-  margin: 0;
-}
-
-.normalized-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.normalized-section {
-  margin-top: 10px;
-}
-
-.normalized-subtitle {
-  color: #666;
-  font-size: 11px;
-  font-weight: 700;
-  margin-bottom: 6px;
-  text-transform: uppercase;
-}
-
-.label-counts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.label-count {
-  background: #eef2ff;
-  border: 1px solid #c7d2fe;
-  border-radius: 10px;
-  color: #374151;
-  font-size: 11px;
-  padding: 3px 8px;
-}
-
-.normalized-table {
-  border-collapse: collapse;
-  font-size: 11px;
-  width: 100%;
-}
-
-.normalized-table th,
-.normalized-table td {
-  border-bottom: 1px solid #e0e0e0;
-  padding: 6px 4px;
-  text-align: left;
-}
-
-.normalized-table th {
-  color: #666;
-  font-weight: 700;
-}
-
 .empty-normalized {
   color: #777;
   font-size: 11px;
-}
-
-.legacy-count {
-  margin-top: 8px;
 }
 
 .history-title {
@@ -1794,6 +1500,26 @@ export default {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 6px 10px;
+}
+
+.history-compact-card {
+  border: 1px solid #d9e2ec;
+  border-radius: 8px;
+  background: #f8f9fa;
+  color: #2c3e50;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+}
+
+.history-compact-card strong {
+  font-size: 12px;
+}
+
+.history-compact-card span {
+  color: #666;
+  font-size: 11px;
 }
 
 .btn-review {
@@ -1825,7 +1551,8 @@ export default {
 
 /* OBJETOS */
 .objects-card {
-  height: 250px;
+  height: auto;
+  min-height: 170px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -1871,16 +1598,17 @@ export default {
   display: flex;
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  min-width: 0;
+  overflow: visible;
 }
 
 .objects-table-wrapper {
   flex: 1;
   padding: 16px;
-  padding-bottom: 100px;
   border-right: 2px solid #f0f0f0;
   overflow-y: auto;
   min-height: 0;
+  min-width: 0;
 }
 
 .obj-table {
@@ -1935,18 +1663,6 @@ export default {
   font-size: 16px;
 }
 
-.obj-icon.nucleos {
-  color: #66bb6a;
-}
-
-.obj-icon.micronucleos {
-  color: #ef5350;
-}
-
-.obj-icon.membranas {
-  color: #8d6e63;
-}
-
 .obj-actions {
   display: flex;
   gap: 6px;
@@ -1973,7 +1689,7 @@ export default {
 .objects-tools-panel {
   width: 240px;
   padding: 16px;
-  padding-bottom: 100px;
+  flex: 0 0 240px;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -2032,5 +1748,165 @@ export default {
 
 .btn-tool-large span {
   font-size: 16px;
+}
+
+@media (max-width: 1439px) and (min-width: 1024px) {
+  .content {
+    padding: 12px;
+  }
+
+  .page-header {
+    height: auto;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+  }
+
+  .page-title {
+    font-size: 20px;
+  }
+
+  .header-actions {
+    gap: 8px;
+  }
+
+  .btn-action {
+    padding: 8px 12px;
+  }
+
+  .layout-grid {
+    gap: 12px;
+    grid-template-columns: minmax(176px, 196px) minmax(0, 1fr);
+  }
+
+  .gallery-column {
+    max-height: clamp(360px, 56vh, 500px);
+    padding: 12px;
+  }
+
+  .gallery-grid {
+    gap: 8px;
+    grid-auto-rows: 64px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .viewer-column {
+    gap: 12px;
+  }
+
+  .main-card {
+    min-height: 0;
+  }
+
+  .img-placeholder {
+    height: clamp(320px, 46vh, 460px);
+  }
+
+  .card-header,
+  .card-header-simple {
+    padding: 10px 14px;
+  }
+
+  .split-view {
+    gap: 12px;
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 320px);
+    padding: 12px;
+  }
+
+  .data-container,
+  .segmentation-panel {
+    gap: 10px;
+  }
+
+  .segmentation-status {
+    padding: 8px 10px;
+  }
+
+  .objects-card {
+    min-height: 150px;
+  }
+
+  .objects-table-wrapper,
+  .objects-tools-panel {
+    padding: 12px;
+  }
+
+  .objects-tools-panel {
+    flex-basis: 200px;
+    width: 200px;
+  }
+}
+
+@media (max-width: 1023px) {
+  .content {
+    padding: 12px;
+  }
+
+  .page-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+    height: auto;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+  }
+
+  .header-actions {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+
+  .layout-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .gallery-column {
+    max-height: 260px;
+    padding: 12px;
+  }
+
+  .gallery-grid {
+    grid-auto-rows: 72px;
+    grid-template-columns: repeat(auto-fill, minmax(86px, 1fr));
+    max-height: 190px;
+  }
+
+  .viewer-column {
+    gap: 12px;
+  }
+
+  .main-card {
+    min-height: 0;
+  }
+
+  .split-view {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 12px;
+  }
+
+  .image-container {
+    min-height: 0;
+  }
+
+  .img-placeholder {
+    height: clamp(300px, 50vh, 420px);
+  }
+
+  .data-container {
+    gap: 12px;
+  }
+
+  .objects-layout {
+    flex-direction: column;
+  }
+
+  .objects-table-wrapper {
+    border-right: 0;
+    padding: 12px;
+  }
+
+  .objects-tools-panel {
+    flex-basis: auto;
+    width: 100%;
+  }
 }
 </style>

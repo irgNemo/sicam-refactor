@@ -11,6 +11,7 @@
     <!-- SIDEBAR (solo en segmentación) -->
     <SideBar
       v-if="seccion === 'segmentacion'"
+      ref="sideBar"
       @select-patient="onSelectPatient"
       @select-case="onSelectCase"
     />
@@ -20,6 +21,7 @@
       v-if="seccion === 'segmentacion'"
       :patientId="selectedPatientId"
       :caseId="selectedCaseId"
+      @segmentation-completed="onSegmentationCompleted"
     />
 
     <div v-if="seccion === 'analisis'" class="placeholder-view">
@@ -84,6 +86,12 @@ export default {
     onSelectCase(caseId) {
       this.selectedCaseId = caseId;
     },
+
+    onSegmentationCompleted(payload) {
+      if (payload?.caseId !== this.selectedCaseId) return;
+
+      this.$refs.sideBar?.refrescarResumenCaso?.(payload.caseId);
+    },
   },
 
   watch: {
@@ -108,12 +116,16 @@ export default {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
+html {
+    min-height: 100%;
+}
+
 body {
     margin: 0;
     background: #f0f2f5;
     color: #2c3e50;
-    height: 100vh;
-    overflow: hidden;
+    min-height: 100vh;
+    overflow: auto;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
 }
@@ -123,8 +135,17 @@ body {
    ========================================= */
 .app {
     display: flex;
-    height: calc(100vh - 60px);
+    align-items: stretch;
     background: #f0f2f5;
+    min-height: calc(100vh - 60px);
+    min-width: 0;
+    width: 100%;
+}
+
+@media (max-width: 1023px) {
+    .app {
+        flex-direction: column;
+    }
 }
 
 /* =========================================

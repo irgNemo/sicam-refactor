@@ -670,3 +670,338 @@ class MuestraSalivaSegmentationResultsReadTests(APITestCase):
         response = self.client.get(self._url(999999))
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+class CasoSegmentationSummaryTests(APITestCase):
+    def setUp(self):
+        self.media_root = tempfile.mkdtemp()
+        self.override = override_settings(MEDIA_ROOT=self.media_root)
+        self.override.enable()
+
+        self.paciente = Paciente.objects.create(
+            nombre='Paciente',
+            apellido='Resumen',
+            fecha_nacimiento=date(1990, 1, 1),
+            identificacion='PAC-SUM-001',
+        )
+        self.caso = Caso.objects.create(
+            paciente=self.paciente,
+            titulo='Caso resumen',
+        )
+        self.analisis = AnalisisPred.objects.create(
+            id_paciente_fk=self.paciente,
+            id_caso_fk=self.caso,
+        )
+
+    def tearDown(self):
+        self.override.disable()
+        shutil.rmtree(self.media_root, ignore_errors=True)
+
+    def _url(self, caso_id=None):
+        return reverse(
+            'caso-resumen-segmentacion',
+            kwargs={'pk': caso_id or self.caso.id_caso}
+        )
+
+    def _create_muestra(self, filename='sample.jpg'):
+        return MuestraSaliva.objects.create(
+            analisis=self.analisis,
+            imagen=SimpleUploadedFile(
+                filename,
+                b'fake image bytes',
+                content_type='image/jpeg',
+            ),
+        )
+
+    def _normalized_result(self, counts=None, total=None, version='1.1'):
+        counts = counts or {}
+        if total is None:
+            total = sum(counts.values())
+
+        return {
+            'version': version,
+            'sample_type': 'SALIVA',
+            'objects': [],
+            'summary': {
+                'total_objects': total,
+                'counts_by_label': counts,
+            },
+        }
+
+    def _create_result(
+        self,
+        muestra,
+        *,
+        estado='COMPLETADO',
+        counts=None,
+        total=None,
+        normalized=None,
+        version='1.1'
+    ):
+        if normalized is None:
+            normalized = self._normalized_result(
+                counts=counts,
+                total=total,
+                version=version,
+            )
+
+        return ResultadoSegmentacion.objects.create(
+            muestra=muestra,
+            tipo_muestra='SALIVA',
+            estado=estado,
+            respuesta_json={'objetos': []},
+            resultado_normalizado=normalized,
+        )
+
+    def _assert_invariant(self, data):
+        assert (
+            data['muestras_segmentadas']
+            + data['muestras_pendientes']
+            + data['muestras_resultado_invalido']
+            == data['total_muestras']
+        )
+
+    def test_resumen_segmentacion_not_found(self):
+        response = self.client.get(self._url(999999))
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_resumen_segmentacion_case_without_samples(self):
+        response = self.client.get(self._url())
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data == {
+            'caso_id': self.caso.id_caso,
+            'total_muestras': 0,
+            'muestras_segmentadas': 0,
+            'muestras_pendientes': 0,
+            'muestras_resultado_invalido': 0,
+            'counts_by_label': {
+                'membrana': 0,
+                'nucleo': 0,
+                'micronucleo': 0,
+            },
+            'total_objects': 0,
+        }
+
+    def test_resumen_segmentacion_samples_without_results_are_pending(self):
+        self._create_muestra('one.jpg')
+        self._create_muestra('two.jpg')
+
+        response = self.client.get(self._url())
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['total_muestras'] == 2
+        assert response.data['muestras_segmentadas'] == 0
+        assert response.data['muestras_pendientes'] == 2
+        assert response.data['muestras_resultado_invalido'] == 0
+        self._assert_invariant(response.data)
+
+    def test_resumen_segmentacion_one_valid_completed_sample(self):
+        muestra = self._create_muestra()
+        self._create_result(
+            muestra,
+            counts={'membrana': 3, 'nucleo': 2, 'micronucleo': 1},
+        )
+
+        response = self.client.get(self._url())
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['muestras_segmentadas'] == 1
+        assert response.data['muestras_pendientes'] == 0
+        assert response.data['muestras_resultado_invalido'] == 0
+        assert response.data['counts_by_label'] == {
+            'membrana': 3,
+            'nucleo': 2,
+            'micronucleo': 1,
+        }
+        assert response.data['total_objects'] == 6
+        self._assert_invariant(response.data)
+
+    def test_resumen_segmentacion_aggregates_multiple_valid_samples(self):
+        first = self._create_muestra('first.jpg')
+        second = self._create_muestra('second.jpg')
+        self._create_result(first, counts={'membrana': 3, 'nucleo': 2})
+        self._create_result(second, counts={'membrana': 4, 'micronucleo': 5})
+
+        response = self.client.get(self._url())
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['muestras_segmentadas'] == 2
+        assert response.data['counts_by_label'] == {
+            'membrana': 7,
+            'nucleo': 2,
+            'micronucleo': 5,
+        }
+        assert response.data['total_objects'] == 14
+        self._assert_invariant(response.data)
+
+    def test_resumen_segmentacion_uses_only_latest_completed_per_sample(self):
+        muestra = self._create_muestra()
+        self._create_result(muestra, counts={'membrana': 100})
+        self._create_result(muestra, counts={'membrana': 1, 'nucleo': 2})
+
+        response = self.client.get(self._url())
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['counts_by_label'] == {
+            'membrana': 1,
+            'nucleo': 2,
+            'micronucleo': 0,
+        }
+        assert response.data['total_objects'] == 3
+
+    def test_resumen_segmentacion_uses_previous_completed_when_latest_is_error(self):
+        muestra = self._create_muestra()
+        self._create_result(muestra, counts={'nucleo': 4})
+        self._create_result(
+            muestra,
+            estado='ERROR',
+            counts={'nucleo': 999},
+        )
+
+        response = self.client.get(self._url())
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['muestras_segmentadas'] == 1
+        assert response.data['counts_by_label']['nucleo'] == 4
+        assert response.data['total_objects'] == 4
+
+    def test_resumen_segmentacion_latest_completed_invalid_does_not_fallback(self):
+        muestra = self._create_muestra()
+        self._create_result(muestra, counts={'membrana': 5})
+        self._create_result(
+            muestra,
+            normalized={
+                'version': '1.1',
+                'summary': None,
+            },
+        )
+
+        response = self.client.get(self._url())
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['muestras_segmentadas'] == 0
+        assert response.data['muestras_resultado_invalido'] == 1
+        assert response.data['counts_by_label'] == {
+            'membrana': 0,
+            'nucleo': 0,
+            'micronucleo': 0,
+        }
+        self._assert_invariant(response.data)
+
+    def test_resumen_segmentacion_accepts_valid_version_1_0(self):
+        muestra = self._create_muestra()
+        self._create_result(
+            muestra,
+            counts={'micronucleo': 3},
+            version='1.0',
+        )
+
+        response = self.client.get(self._url())
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['muestras_segmentadas'] == 1
+        assert response.data['counts_by_label']['micronucleo'] == 3
+
+    def test_resumen_segmentacion_accepts_valid_version_1_1(self):
+        muestra = self._create_muestra()
+        self._create_result(
+            muestra,
+            counts={'membrana': 2},
+            version='1.1',
+        )
+
+        response = self.client.get(self._url())
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['muestras_segmentadas'] == 1
+        assert response.data['counts_by_label']['membrana'] == 2
+
+    def test_resumen_segmentacion_missing_label_defaults_to_zero(self):
+        muestra = self._create_muestra()
+        self._create_result(muestra, counts={'membrana': 2})
+
+        response = self.client.get(self._url())
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['counts_by_label'] == {
+            'membrana': 2,
+            'nucleo': 0,
+            'micronucleo': 0,
+        }
+
+    def test_resumen_segmentacion_calculates_missing_total_objects(self):
+        muestra = self._create_muestra()
+        self._create_result(
+            muestra,
+            normalized={
+                'version': '1.0',
+                'summary': {
+                    'counts_by_label': {
+                        'membrana': 2,
+                        'nucleo': 3,
+                    },
+                },
+            },
+        )
+
+        response = self.client.get(self._url())
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['muestras_segmentadas'] == 1
+        assert response.data['total_objects'] == 5
+        assert response.data['counts_by_label'] == {
+            'membrana': 2,
+            'nucleo': 3,
+            'micronucleo': 0,
+        }
+
+    def test_resumen_segmentacion_invalid_summary_does_not_break_endpoint(self):
+        muestra = self._create_muestra()
+        self._create_result(
+            muestra,
+            normalized={
+                'version': '1.1',
+                'summary': 'invalid',
+            },
+        )
+
+        response = self.client.get(self._url())
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['muestras_resultado_invalido'] == 1
+        assert response.data['total_objects'] == 0
+        self._assert_invariant(response.data)
+
+    def test_resumen_segmentacion_non_numeric_counts_are_invalid(self):
+        muestra = self._create_muestra()
+        self._create_result(
+            muestra,
+            normalized=self._normalized_result(
+                counts={'membrana': 'many'},
+                total=1,
+            ),
+        )
+
+        response = self.client.get(self._url())
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['muestras_segmentadas'] == 0
+        assert response.data['muestras_resultado_invalido'] == 1
+        self._assert_invariant(response.data)
+
+    def test_resumen_segmentacion_incoherent_total_objects_is_invalid(self):
+        muestra = self._create_muestra()
+        self._create_result(
+            muestra,
+            counts={'membrana': 2},
+            total=5,
+        )
+
+        response = self.client.get(self._url())
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['muestras_resultado_invalido'] == 1
+        assert response.data['total_objects'] == 0
+        self._assert_invariant(response.data)

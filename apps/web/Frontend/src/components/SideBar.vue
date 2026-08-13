@@ -93,10 +93,28 @@
     <div v-if="casoSeleccionado" class="summary-panel">
       <h3>Resumen del Caso</h3>
 
+      <div v-if="resumenLoading" class="summary-status">
+        Cargando resumen...
+      </div>
+
+      <div v-else-if="resumenError" class="summary-status error">
+        {{ resumenError }}
+      </div>
+
       <div class="summary-grid">
         <div class="summary-card images">
           <b>{{ resumen.imagenes }}</b>
           <span>Imágenes</span>
+        </div>
+
+        <div class="summary-card segmented">
+          <b>{{ resumen.segmentadas }}</b>
+          <span>Segmentadas</span>
+        </div>
+
+        <div class="summary-card pending">
+          <b>{{ resumen.pendientes }}</b>
+          <span>Pendientes</span>
         </div>
 
         <div class="summary-card membranes">
@@ -114,12 +132,20 @@
           <span>Micronúcleos</span>
         </div>
       </div>
+
+      <div
+        v-if="resumen.resultadoInvalido > 0"
+        class="summary-invalid"
+      >
+        {{ resumen.resultadoInvalido }} con resultado no utilizable
+      </div>
     </div>
   </aside>
 </template>
 
 <script>
 import apiClient from "../services/apiClient";
+import { obtenerResumenSegmentacionCaso } from "../services/segmentationService";
 
 export default {
   name: "SideBar",
@@ -137,10 +163,15 @@ export default {
       pacientesFiltrados: [],
       pacienteSeleccionado: null,
       casoSeleccionado: null,
+      resumenLoading: false,
+      resumenError: "",
 
       // Resumen
       resumen: {
         imagenes: 0,
+        segmentadas: 0,
+        pendientes: 0,
+        resultadoInvalido: 0,
         membranas: 0,
         nucleos: 0,
         micronucleos: 0,
@@ -209,7 +240,7 @@ export default {
       this.busquedaPaciente = "";
       this.pacientesFiltrados = [];
       this.casoSeleccionado = null;
-      this.resumen = { imagenes: 0, membranas: 0, nucleos: 0, micronucleos: 0 };
+      this.resetResumen();
       
       this.$emit("select-patient", paciente.id_paciente);
     },
@@ -218,12 +249,13 @@ export default {
       this.pacienteSeleccionado = null;
       this.casoSeleccionado = null;
       this.busquedaPaciente = "";
-      this.resumen = { imagenes: 0, membranas: 0, nucleos: 0, micronucleos: 0 };
+      this.resetResumen();
     },
 
     seleccionarCaso(caso) {
       this.casoSeleccionado = caso.id_caso;
-      this.calcularResumen(caso.analisis);
+      this.resetResumen();
+      this.refrescarResumenCaso(caso.id_caso);
       this.$emit("select-case", caso.id_caso);
     },
 
@@ -232,31 +264,53 @@ export default {
       console.log("Ver análisis del caso:", this.casoSeleccionado);
     },
 
-    calcularResumen(analisisArray) {
-      const resumen = {
+    resetResumen() {
+      this.resumenLoading = false;
+      this.resumenError = "";
+      this.resumen = {
         imagenes: 0,
+        segmentadas: 0,
+        pendientes: 0,
+        resultadoInvalido: 0,
         membranas: 0,
         nucleos: 0,
         micronucleos: 0,
       };
+    },
 
-      analisisArray.forEach(analisis => {
-        if (analisis.muestras_saliva) {
-          resumen.imagenes += analisis.muestras_saliva.length;
+    async refrescarResumenCaso(casoId = this.casoSeleccionado) {
+      if (!casoId) return;
 
-          analisis.muestras_saliva.forEach(muestra => {
-            if (muestra.resultados) {
-              muestra.resultados.forEach(r => {
-                resumen.nucleos += r.nucleos || 0;
-                resumen.membranas += r.membranas || 0;
-                resumen.micronucleos += r.micronucleos || 0;
-              });
-            }
-          });
+      this.resumenLoading = true;
+      this.resumenError = "";
+
+      try {
+        const response = await obtenerResumenSegmentacionCaso(casoId);
+        const data = response.data || {};
+        const counts = data.counts_by_label || {};
+
+        if (this.casoSeleccionado !== casoId) return;
+
+        this.resumen = {
+          imagenes: data.total_muestras || 0,
+          segmentadas: data.muestras_segmentadas || 0,
+          pendientes: data.muestras_pendientes || 0,
+          resultadoInvalido: data.muestras_resultado_invalido || 0,
+          membranas: counts.membrana || 0,
+          nucleos: counts.nucleo || 0,
+          micronucleos: counts.micronucleo || 0,
+        };
+      } catch (error) {
+        console.error("Error al cargar resumen de segmentacion:", error);
+
+        if (this.casoSeleccionado === casoId) {
+          this.resumenError = "No fue posible cargar el resumen del caso";
         }
-      });
-
-      this.resumen = resumen;
+      } finally {
+        if (this.casoSeleccionado === casoId) {
+          this.resumenLoading = false;
+        }
+      }
     },
 
     calcularEdad(fechaNacimiento) {
@@ -295,12 +349,14 @@ export default {
 
 <style scoped>
 .sidebar {
-  width: 340px;
+  width: clamp(300px, 24vw, 340px);
+  flex: 0 0 clamp(300px, 24vw, 340px);
   background: #ffffff;
   padding: 20px;
   border-right: 1px solid #e0e0e0;
   overflow-y: auto;
-  height: 100%;
+  min-height: calc(100vh - 60px);
+  min-width: 0;
 }
 
 .sidebar h2 {
@@ -589,6 +645,21 @@ export default {
   text-align: center;
 }
 
+.summary-status {
+  background: #eef4ff;
+  border-radius: 8px;
+  color: #3b5b8a;
+  font-size: 12px;
+  margin-bottom: 10px;
+  padding: 8px;
+  text-align: center;
+}
+
+.summary-status.error {
+  background: #ffebee;
+  color: #c62828;
+}
+
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -629,5 +700,73 @@ export default {
 
 .summary-card.micro {
   background: linear-gradient(135deg, #ef5350, #e53935);
+}
+
+.summary-card.segmented {
+  background: linear-gradient(135deg, #26a69a, #00897b);
+}
+
+.summary-card.pending {
+  background: linear-gradient(135deg, #ffb74d, #fb8c00);
+}
+
+.summary-invalid {
+  background: #fff8e1;
+  border: 1px solid #ffe082;
+  border-radius: 8px;
+  color: #8a6d1d;
+  font-size: 12px;
+  margin-top: 10px;
+  padding: 8px;
+  text-align: center;
+}
+
+@media (max-width: 1439px) and (min-width: 1024px) {
+  .sidebar {
+    width: clamp(260px, 22vw, 280px);
+    flex-basis: clamp(260px, 22vw, 280px);
+    padding: 16px;
+  }
+
+  .sidebar h2 {
+    font-size: 16px;
+    margin-bottom: 14px;
+  }
+
+  .search-section,
+  .paciente-card,
+  .casos-section,
+  .btn-primary {
+    margin-bottom: 14px;
+  }
+
+  .paciente-card,
+  .summary-panel {
+    padding: 12px;
+  }
+
+  .summary-grid {
+    gap: 8px;
+  }
+
+  .summary-card {
+    padding: 10px 8px;
+  }
+}
+
+@media (max-width: 1023px) {
+  .sidebar {
+    border-bottom: 1px solid #e0e0e0;
+    border-right: 0;
+    flex: 0 0 auto;
+    max-height: 45vh;
+    min-height: 0;
+    padding: 12px;
+    width: 100%;
+  }
+
+  .summary-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
 </style>

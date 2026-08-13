@@ -7,3 +7,7 @@ export function segmentarMuestra(muestraId) {
 export function obtenerResultadosSegmentacion(muestraId) {
   return apiClient.get(`/api/muestras/${muestraId}/resultados-segmentacion/`);
 }
+
+export function obtenerResumenSegmentacionCaso(casoId) {
+  return apiClient.get(`/api/casos/${casoId}/resumen-segmentacion/`);
+}

@@ -101,6 +101,43 @@
 
             <!-- IMAGEN -->
             <div class="image-container">
+              <div v-if="imagenSeleccionada" class="viewer-mode-bar">
+                <div class="viewer-mode-buttons">
+                  <button
+                    class="mode-btn"
+                    :class="{ active: viewerMode === 'NAVIGATE' }"
+                    title="Navegar por la imagen"
+                    :aria-pressed="viewerMode === 'NAVIGATE'"
+                    @click="setViewerMode('NAVIGATE')"
+                  >
+                    Navegar
+                  </button>
+                  <button
+                    class="mode-btn"
+                    :class="{ active: viewerMode === 'EDIT' }"
+                    :disabled="revisionLoading"
+                    title="Editar revision experta"
+                    :aria-pressed="viewerMode === 'EDIT'"
+                    @click="setViewerMode('EDIT')"
+                  >
+                    {{ revisionLoading ? 'Cargando...' : 'Editar' }}
+                  </button>
+                </div>
+                <span
+                  v-if="isEditMode && activeRevision"
+                  class="revision-badge"
+                >
+                  Revisión #{{ activeRevision.numero_revision }} · {{ activeRevision.estado }}
+                </span>
+              </div>
+
+              <div
+                v-if="revisionError"
+                class="segmentation-status error"
+              >
+                {{ revisionError }}
+              </div>
+
               <div ref="imageFrame" class="img-placeholder">
                 <div
                   v-if="imagenSeleccionada"
@@ -125,6 +162,7 @@
                   <svg
                     v-if="shouldShowSegmentationOverlay"
                     class="segmentation-svg-overlay"
+                    :class="{ 'is-editable': isEditMode }"
                     :width="imageRenderedSize.width"
                     :height="imageRenderedSize.height"
                     :viewBox="`0 0 ${imageRenderedSize.width} ${imageRenderedSize.height}`"
@@ -134,7 +172,13 @@
                       :key="polygon.key"
                       :points="polygon.points"
                       class="segmentation-polygon"
+                      :class="{
+                        selected: polygon.selected,
+                        manual: polygon.origin === 'manual'
+                      }"
                       :style="{ fill: polygon.fill, stroke: polygon.stroke }"
+                      @pointerdown="handleOverlayPolygonPointerDown"
+                      @click="handleOverlayPolygonClick(polygon.selectionKey, $event)"
                     />
                   </svg>
                 </div>
@@ -246,6 +290,37 @@
                   </tr>
                 </tbody>
               </table>
+
+              <div
+                v-if="isEditMode"
+                class="selected-object-panel"
+              >
+                <div class="selected-object-header">
+                  <h4>Objeto seleccionado</h4>
+                  <span v-if="isSpacePressed" class="editor-hint">
+                    Pan temporal
+                  </span>
+                </div>
+
+                <div v-if="selectedObject" class="selected-object-grid">
+                  <span>Tipo</span>
+                  <strong>{{ overlayLabelDisplayName(selectedObject.label) }}</strong>
+                  <span>ID</span>
+                  <strong>#{{ selectedObject.id }}</strong>
+                  <span>Origen</span>
+                  <strong>{{ provenanceDisplayName(selectedObject.provenance?.origin) }}</strong>
+                  <span v-if="selectedObject.provenance?.base_object_id">
+                    ID base
+                  </span>
+                  <strong v-if="selectedObject.provenance?.base_object_id">
+                    #{{ selectedObject.provenance.base_object_id }}
+                  </strong>
+                </div>
+
+                <div v-else class="selected-object-empty">
+                  Seleccione una máscara sobre la imagen.
+                </div>
+              </div>
 
               <div v-if="imagenSeleccionada" class="segmentation-panel">
                 <button
@@ -391,6 +466,9 @@ import {
   obtenerResultadosSegmentacion,
   segmentarMuestra,
 } from "../services/segmentationService";
+import {
+  getOrCreateSegmentationDraft,
+} from "../services/segmentationRevisionService";
 
 export default {
   name: "MainContent",
@@ -418,6 +496,14 @@ export default {
       historialSegmentacion: [],
       historialLoading: false,
       historialError: "",
+      viewerMode: "NAVIGATE",
+      activeRevision: null,
+      activeRevisionId: null,
+      revisionLoading: false,
+      revisionError: "",
+      selectedObjectKey: null,
+      isSpacePressed: false,
+      suppressNextOverlayClick: false,
       imageNaturalSize: { width: 0, height: 0 },
       imageRenderedSize: { width: 0, height: 0 },
       imageZoom: 1,
@@ -492,12 +578,55 @@ export default {
       return this.ultimoResultadoSegmentacion || this.segmentacionResultado || null;
     },
 
+    activeResultadoSegmentacionId() {
+      return (
+        this.resultadoSegmentacionActivo?.id ||
+        this.resultadoSegmentacionActivo?.resultado_segmentacion?.id ||
+        null
+      );
+    },
+
     resultadoNormalizadoActivo() {
       return this.resultadoSegmentacionActivo?.resultado_normalizado || null;
     },
 
+    isEditMode() {
+      return this.viewerMode === "EDIT";
+    },
+
+    activeRevisionSummary() {
+      return this.isEditMode ? this.activeRevision?.resumen || null : null;
+    },
+
+    activeOverlaySummary() {
+      return this.activeRevisionSummary || this.resultadoNormalizadoActivo?.summary || null;
+    },
+
+    activeOverlayObjects() {
+      if (
+        this.isEditMode &&
+        Array.isArray(this.activeRevision?.resultado_editado?.objects)
+      ) {
+        return this.activeRevision.resultado_editado.objects;
+      }
+
+      return Array.isArray(this.resultadoNormalizadoActivo?.objects)
+        ? this.resultadoNormalizadoActivo.objects
+        : [];
+    },
+
+    selectedObject() {
+      if (!this.isEditMode || this.selectedObjectKey === null) return null;
+
+      const selectedItem = this.overlayDrawableObjects.find(
+        item => item.selectionKey === this.selectedObjectKey
+      );
+
+      return selectedItem?.object || null;
+    },
+
     resumenConteoActivo() {
-      const summary = this.resultadoNormalizadoActivo?.summary;
+      const summary = this.activeOverlaySummary;
       if (!summary || typeof summary !== "object") return null;
 
       const counts = summary.counts_by_label;
@@ -532,8 +661,9 @@ export default {
 
     imagePanClass() {
       return {
-        "is-pannable": this.imageZoom > 1,
+        "is-pannable": this.imageZoom > 1 && (!this.isEditMode || this.isSpacePressed),
         "is-panning": this.isPanning,
+        "is-edit-mode": this.isEditMode,
       };
     },
 
@@ -615,11 +745,15 @@ export default {
         return [];
       }
 
-      return this.overlayVisibleDrawableObjects
+      const polygons = this.overlayVisibleDrawableObjects
         .map((item, index) => {
           const color = this.overlayColorForLabel(item.label);
           return {
             key: this.overlayPolygonKey(item, index),
+            selectionKey: item.selectionKey,
+            objectId: item.object.id,
+            origin: item.object.provenance?.origin,
+            selected: this.isEditMode && item.selectionKey === this.selectedObjectKey,
             points: item.points,
             fill: color.fill,
             stroke: color.stroke,
@@ -631,6 +765,11 @@ export default {
             .map(point => point.join(","))
             .join(" "),
         }));
+
+      return [
+        ...polygons.filter(polygon => !polygon.selected),
+        ...polygons.filter(polygon => polygon.selected),
+      ];
     },
 
     shouldShowSegmentationOverlay() {
@@ -642,15 +781,12 @@ export default {
     },
 
     overlayDrawableObjects() {
-      const objects = Array.isArray(this.resultadoNormalizadoActivo?.objects)
-        ? this.resultadoNormalizadoActivo.objects
-        : [];
-
-      return objects
+      return this.activeOverlayObjects
         .filter(object => object.geometry?.type === "polygon")
         .map((object, index) => ({
           object,
           objectIndex: index,
+          selectionKey: this.overlayObjectKey(object, index),
           label: object.label || "desconocido",
           points: this.scalePolygonPoints(object.geometry?.points),
         }))
@@ -689,6 +825,12 @@ export default {
     imagenes(nuevas) {
       this.selectImagen(nuevas[0] || null);
     },
+
+    activeResultadoSegmentacionId(newId, oldId) {
+      if (newId !== oldId) {
+        this.resetEditorState({ clearRevision: true });
+      }
+    },
   },
 
   methods: {
@@ -702,6 +844,7 @@ export default {
       this.historialLoading = false;
       this.resetImageMeasurements();
       this.resetImageView();
+      this.resetEditorState({ clearRevision: true });
       this.overlayLabelVisibility = {};
 
       if (muestra) {
@@ -722,6 +865,7 @@ export default {
             ? response.data
             : [];
           this.syncOverlayLabelVisibility();
+          this.ensureRevisionBelongsToActiveResult();
         }
       } catch (error) {
         console.error("Error al cargar historial de segmentacion:", error);
@@ -761,6 +905,157 @@ export default {
       } finally {
         this.segmentacionLoading = false;
       }
+    },
+
+    setViewerMode(mode) {
+      if (mode === "NAVIGATE") {
+        this.viewerMode = "NAVIGATE";
+        this.selectedObjectKey = null;
+        this.isSpacePressed = false;
+        this.suppressNextOverlayClick = false;
+        this.endImagePan();
+        return;
+      }
+
+      if (mode === "EDIT") {
+        this.enterEditMode();
+      }
+    },
+
+    async enterEditMode() {
+      if (this.revisionLoading) return;
+
+      this.revisionError = "";
+      const resultadoId = this.activeResultadoSegmentacionId;
+
+      if (!resultadoId) {
+        this.viewerMode = "NAVIGATE";
+        this.activeRevision = null;
+        this.activeRevisionId = null;
+        this.selectedObjectKey = null;
+        this.revisionError = "No hay resultado de segmentacion para editar.";
+        return;
+      }
+
+      if (
+        this.activeRevision &&
+        this.activeRevision.resultado_segmentacion === resultadoId
+      ) {
+        this.viewerMode = "EDIT";
+        this.syncOverlayLabelVisibility();
+        return;
+      }
+
+      this.revisionLoading = true;
+      this.activeRevision = null;
+      this.activeRevisionId = null;
+      this.selectedObjectKey = null;
+
+      try {
+        const response = await getOrCreateSegmentationDraft(resultadoId);
+
+        if (this.activeResultadoSegmentacionId !== resultadoId) return;
+
+        this.activeRevision = response.data;
+        this.activeRevisionId = response.data.id_revision_segmentacion;
+        this.viewerMode = "EDIT";
+        this.syncOverlayLabelVisibility();
+      } catch (error) {
+        console.error("Error al cargar borrador de revision:", error);
+
+        if (this.activeResultadoSegmentacionId === resultadoId) {
+          this.viewerMode = "NAVIGATE";
+          this.activeRevision = null;
+          this.activeRevisionId = null;
+          this.selectedObjectKey = null;
+          this.revisionError =
+            error.response?.data?.error || "No fue posible cargar el borrador experto.";
+        }
+      } finally {
+        if (this.activeResultadoSegmentacionId === resultadoId) {
+          this.revisionLoading = false;
+        }
+      }
+    },
+
+    resetEditorState({ clearRevision } = { clearRevision: true }) {
+      this.viewerMode = "NAVIGATE";
+      this.selectedObjectKey = null;
+      this.revisionError = "";
+      this.revisionLoading = false;
+      this.isSpacePressed = false;
+      this.suppressNextOverlayClick = false;
+      this.endImagePan();
+
+      if (clearRevision) {
+        this.activeRevision = null;
+        this.activeRevisionId = null;
+      }
+    },
+
+    ensureRevisionBelongsToActiveResult() {
+      if (
+        this.activeRevision &&
+        this.activeRevision.resultado_segmentacion !== this.activeResultadoSegmentacionId
+      ) {
+        this.resetEditorState({ clearRevision: true });
+      }
+    },
+
+    handleOverlayPolygonPointerDown(event) {
+      if (!this.isEditMode) return;
+
+      if (this.isSpacePressed) {
+        this.suppressNextOverlayClick = true;
+        return;
+      }
+
+      event.stopPropagation();
+    },
+
+    handleOverlayPolygonClick(selectionKey, event) {
+      if (!this.isEditMode || this.isSpacePressed || this.suppressNextOverlayClick) {
+        this.suppressNextOverlayClick = false;
+        return;
+      }
+
+      event.stopPropagation();
+      this.selectedObjectKey = selectionKey;
+    },
+
+    provenanceDisplayName(origin) {
+      const displayNames = {
+        automatic: "Automático",
+        manual: "Manual",
+      };
+
+      return displayNames[origin] || "No especificado";
+    },
+
+    handleEditorKeyDown(event) {
+      if (event.code !== "Space" || !this.isEditMode || this.isTypingTarget(event.target)) {
+        return;
+      }
+
+      this.isSpacePressed = true;
+      event.preventDefault();
+    },
+
+    handleEditorKeyUp(event) {
+      if (event.code !== "Space") return;
+
+      this.isSpacePressed = false;
+      this.endImagePan();
+    },
+
+    isTypingTarget(target) {
+      const tagName = target?.tagName?.toLowerCase();
+      return (
+        tagName === "input" ||
+        tagName === "textarea" ||
+        tagName === "select" ||
+        target?.isContentEditable
+      );
     },
 
     formatearFechaResultado(fecha) {
@@ -822,9 +1117,15 @@ export default {
         .filter(Boolean);
     },
 
+    overlayObjectKey(object, index) {
+      const normalizedId = object?.id ?? "sin-id";
+      const label = object?.label || "desconocido";
+      return `${index}-${normalizedId}-${label}`;
+    },
+
     overlayPolygonKey(item, index) {
       const normalizedId = item.object?.id ?? "sin-id";
-      return `${item.objectIndex}-${index}-${normalizedId}-${item.label}`;
+      return `${item.selectionKey}-${index}-${normalizedId}-${item.label}`;
     },
 
     zoomImage() {
@@ -864,6 +1165,7 @@ export default {
     },
 
     startImagePan(event) {
+      if (this.isEditMode && !this.isSpacePressed) return;
       if (this.imageZoom <= 1 || event.button !== 0) return;
 
       event.preventDefault();
@@ -932,11 +1234,17 @@ export default {
         ...this.overlayLabelVisibility,
         [label]: visible,
       };
+
+      if (!visible && this.selectedObject?.label === label) {
+        this.selectedObjectKey = null;
+      }
     },
   },
 
   mounted() {
     window.addEventListener("resize", this.updateImageMeasurements);
+    window.addEventListener("keydown", this.handleEditorKeyDown);
+    window.addEventListener("keyup", this.handleEditorKeyUp);
 
     apiClient
       .get("/api/analisis/")
@@ -953,6 +1261,8 @@ export default {
 
   beforeUnmount() {
     window.removeEventListener("resize", this.updateImageMeasurements);
+    window.removeEventListener("keydown", this.handleEditorKeyDown);
+    window.removeEventListener("keyup", this.handleEditorKeyUp);
   },
 };
 </script>
@@ -1310,6 +1620,50 @@ export default {
   min-height: 0;
 }
 
+.viewer-mode-bar {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.viewer-mode-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.mode-btn {
+  background: #ffffff;
+  border: 2px solid #d9e2ec;
+  border-radius: 8px;
+  color: #2c3e50;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 8px 12px;
+}
+
+.mode-btn.active {
+  background: #e3f2fd;
+  border-color: #1e88e5;
+  color: #1565c0;
+}
+
+.mode-btn:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.revision-badge {
+  background: #f0f4f8;
+  border-radius: 999px;
+  color: #52606d;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+
 .img-placeholder {
   position: relative;
   flex: 0 0 auto;
@@ -1350,6 +1704,14 @@ export default {
   cursor: grabbing;
 }
 
+.image-transform-layer.is-edit-mode {
+  cursor: default;
+}
+
+.image-transform-layer.is-edit-mode.is-pannable {
+  cursor: grab;
+}
+
 .segmentation-svg-overlay {
   display: block;
   height: 100%;
@@ -1360,11 +1722,29 @@ export default {
   z-index: 2;
 }
 
+.segmentation-svg-overlay.is-editable {
+  pointer-events: auto;
+}
+
 .segmentation-polygon {
   fill: rgba(30, 136, 229, 0.16);
   stroke: rgba(30, 136, 229, 0.92);
   stroke-linejoin: round;
   stroke-width: 2;
+}
+
+.segmentation-svg-overlay.is-editable .segmentation-polygon {
+  cursor: pointer;
+  pointer-events: visiblePainted;
+}
+
+.segmentation-polygon.manual {
+  stroke-dasharray: 7 4;
+}
+
+.segmentation-polygon.selected {
+  filter: drop-shadow(0 0 5px rgba(0, 0, 0, 0.55));
+  stroke-width: 5;
 }
 
 .empty-image-state {
@@ -1507,6 +1887,57 @@ export default {
   font-size: 48px;
   margin-bottom: 12px;
   opacity: 0.3;
+}
+
+.selected-object-panel {
+  background: #f8f9fa;
+  border: 1px solid #d9e2ec;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.selected-object-header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.selected-object-header h4 {
+  color: #2c3e50;
+  font-size: 13px;
+  margin: 0;
+}
+
+.editor-hint {
+  background: #fff8e1;
+  border: 1px solid #ffe082;
+  border-radius: 999px;
+  color: #8a6d1d;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+}
+
+.selected-object-grid {
+  display: grid;
+  font-size: 12px;
+  gap: 6px 10px;
+  grid-template-columns: auto 1fr;
+}
+
+.selected-object-grid span {
+  color: #667;
+}
+
+.selected-object-grid strong {
+  color: #2c3e50;
+}
+
+.selected-object-empty {
+  color: #667;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .segmentation-panel {

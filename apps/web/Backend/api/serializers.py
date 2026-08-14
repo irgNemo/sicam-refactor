@@ -6,6 +6,11 @@ from .models import (
     Paciente,
     ResultadoAnalisis,
     ResultadoSegmentacion,
+    RevisionSegmentacion,
+)
+from .services.segmentation.revisions import (
+    calculate_revision_summary,
+    validate_revision_snapshot,
 )
 
 class PacienteSerializer(serializers.ModelSerializer):
@@ -46,6 +51,54 @@ class ResultadoSegmentacionSerializer(serializers.ModelSerializer):
             'actualizado_en',
         )
         read_only_fields = fields
+
+
+class RevisionSegmentacionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RevisionSegmentacion
+        fields = (
+            'id_revision_segmentacion',
+            'resultado_segmentacion',
+            'numero_revision',
+            'estado',
+            'resultado_editado',
+            'resumen',
+            'creado_en',
+            'actualizado_en',
+            'validado_en',
+        )
+        read_only_fields = (
+            'id_revision_segmentacion',
+            'resultado_segmentacion',
+            'numero_revision',
+            'estado',
+            'resumen',
+            'creado_en',
+            'actualizado_en',
+            'validado_en',
+        )
+
+    def validate_resultado_editado(self, value):
+        validate_revision_snapshot(value)
+        return value
+
+    def update(self, instance, validated_data):
+        if instance.estado == RevisionSegmentacion.ESTADO_VALIDADA:
+            raise serializers.ValidationError(
+                'Una revision VALIDADA es inmutable'
+            )
+
+        resultado_editado = validated_data.get('resultado_editado')
+        if resultado_editado is not None:
+            instance.resultado_editado = resultado_editado
+            instance.resumen = calculate_revision_summary(resultado_editado)
+            instance.save(update_fields=[
+                'resultado_editado',
+                'resumen',
+                'actualizado_en',
+            ])
+
+        return instance
 
 class AnalisisSerializer(serializers.ModelSerializer):
     muestras_saliva = MuestraSalivaSerializer(many=True, read_only=True)

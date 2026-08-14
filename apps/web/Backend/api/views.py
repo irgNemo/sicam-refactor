@@ -1,5 +1,7 @@
+from django.db import transaction
 from django.db.models import OuterRef, Subquery
 from django.shortcuts import render
+from django.utils import timezone
 
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
@@ -12,7 +14,7 @@ def saludo(request):
     })
 
 # CARGA DE DATOS
-from rest_framework import viewsets, status
+from rest_framework import mixins, viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
@@ -22,6 +24,7 @@ from .models import (
     MuestraSaliva,
     Paciente,
     ResultadoSegmentacion,
+    RevisionSegmentacion,
 )
 from .serializers import (
     PacienteSerializer, 
@@ -29,6 +32,7 @@ from .serializers import (
     AnalisisSerializer,
     MuestraSalivaSerializer,
     ResultadoSegmentacionSerializer,
+    RevisionSegmentacionSerializer,
 )
 from .services.segmentation.exceptions import (
     InvalidSegmentationResponseError,
@@ -38,6 +42,12 @@ from .services.segmentation.exceptions import (
 )
 from .services.segmentation.factory import segment_image
 from .services.segmentation.normalizers import normalize_segmentation_result
+from .services.segmentation.revisions import (
+    build_revision_snapshot_from_normalized,
+    calculate_revision_summary,
+    clone_revision_snapshot,
+    validate_revision_snapshot,
+)
 
 
 SUMMARY_LABELS = ('membrana', 'nucleo', 'micronucleo')
@@ -82,6 +92,47 @@ def _extract_valid_segmentation_summary(resultado_normalizado):
         },
         'total_objects': total_objects,
     }
+
+
+def _get_or_create_revision_draft(resultado_segmentacion_id):
+    with transaction.atomic():
+        resultado = ResultadoSegmentacion.objects.select_for_update().get(
+            pk=resultado_segmentacion_id
+        )
+
+        borrador = resultado.revisiones.filter(
+            estado=RevisionSegmentacion.ESTADO_BORRADOR
+        ).order_by('-numero_revision').first()
+        if borrador:
+            return borrador, False
+
+        ultima_revision = resultado.revisiones.order_by(
+            '-numero_revision'
+        ).first()
+        ultima_validada = resultado.revisiones.filter(
+            estado=RevisionSegmentacion.ESTADO_VALIDADA
+        ).order_by('-numero_revision').first()
+
+        numero_revision = (
+            ultima_revision.numero_revision + 1
+            if ultima_revision
+            else 1
+        )
+
+        if ultima_validada:
+            resultado_editado = clone_revision_snapshot(ultima_validada)
+        else:
+            resultado_editado = build_revision_snapshot_from_normalized(resultado)
+
+        resumen = calculate_revision_summary(resultado_editado)
+        revision = RevisionSegmentacion.objects.create(
+            resultado_segmentacion=resultado,
+            numero_revision=numero_revision,
+            estado=RevisionSegmentacion.ESTADO_BORRADOR,
+            resultado_editado=resultado_editado,
+            resumen=resumen,
+        )
+        return revision, True
 
 
 class PacienteViewSet(viewsets.ModelViewSet):
@@ -322,3 +373,86 @@ class MuestraSalivaViewSet(viewsets.ModelViewSet):
         }
 
         return Response(response_data, status=status.HTTP_200_OK)
+
+
+class ResultadoSegmentacionViewSet(viewsets.GenericViewSet):
+    queryset = ResultadoSegmentacion.objects.all()
+    serializer_class = ResultadoSegmentacionSerializer
+
+    @action(detail=True, methods=['get', 'post'], url_path='revisiones')
+    def revisiones(self, request, pk=None):
+        resultado = self.get_object()
+
+        if request.method == 'GET':
+            revisiones = resultado.revisiones.order_by('numero_revision')
+            serializer = RevisionSegmentacionSerializer(revisiones, many=True)
+            return Response(serializer.data)
+
+        revision, created = _get_or_create_revision_draft(
+            resultado.id_resultado_segmentacion
+        )
+        serializer = RevisionSegmentacionSerializer(revision)
+        return Response(
+            serializer.data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK
+        )
+
+
+class RevisionSegmentacionViewSet(
+    viewsets.GenericViewSet,
+    mixins.RetrieveModelMixin,
+):
+    queryset = RevisionSegmentacion.objects.select_related(
+        'resultado_segmentacion'
+    ).all()
+    serializer_class = RevisionSegmentacionSerializer
+
+    def partial_update(self, request, *args, **kwargs):
+        revision = self.get_object()
+        if revision.estado == RevisionSegmentacion.ESTADO_VALIDADA:
+            return Response(
+                {'error': 'Una revision VALIDADA es inmutable'},
+                status=status.HTTP_409_CONFLICT
+            )
+
+        serializer = self.get_serializer(
+            revision,
+            data=request.data,
+            partial=True,
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'])
+    def validar(self, request, pk=None):
+        revision = self.get_object()
+
+        if revision.estado == RevisionSegmentacion.ESTADO_VALIDADA:
+            return Response(
+                {'error': 'La revision ya esta VALIDADA'},
+                status=status.HTTP_409_CONFLICT
+            )
+
+        try:
+            validate_revision_snapshot(revision.resultado_editado)
+            revision.resumen = calculate_revision_summary(
+                revision.resultado_editado
+            )
+        except Exception as exc:
+            return Response(
+                {'error': str(exc)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        revision.estado = RevisionSegmentacion.ESTADO_VALIDADA
+        revision.validado_en = timezone.now()
+        revision.save(update_fields=[
+            'estado',
+            'validado_en',
+            'resumen',
+            'actualizado_en',
+        ])
+
+        serializer = self.get_serializer(revision)
+        return Response(serializer.data)

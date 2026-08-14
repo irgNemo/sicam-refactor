@@ -115,6 +115,54 @@ class ResultadoSegmentacion(models.Model):
 
 
 # Modelo de Máscara
+class RevisionSegmentacion(models.Model):
+    ESTADO_BORRADOR = 'BORRADOR'
+    ESTADO_VALIDADA = 'VALIDADA'
+    ESTADO_CHOICES = [
+        (ESTADO_BORRADOR, 'Borrador'),
+        (ESTADO_VALIDADA, 'Validada'),
+    ]
+
+    id_revision_segmentacion = models.AutoField(primary_key=True)
+    resultado_segmentacion = models.ForeignKey(
+        ResultadoSegmentacion,
+        on_delete=models.CASCADE,
+        related_name='revisiones'
+    )
+    numero_revision = models.PositiveIntegerField()
+    estado = models.CharField(
+        max_length=20,
+        choices=ESTADO_CHOICES,
+        default=ESTADO_BORRADOR
+    )
+    resultado_editado = models.JSONField()
+    resumen = models.JSONField()
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+    validado_en = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['resultado_segmentacion', 'numero_revision'],
+                name='unique_revision_per_resultado_segmentacion'
+            ),
+            models.UniqueConstraint(
+                fields=['resultado_segmentacion'],
+                condition=models.Q(estado='BORRADOR'),
+                name='unique_active_draft_per_resultado_segmentacion'
+            )
+        ]
+        ordering = ['numero_revision']
+
+    def __str__(self):
+        return (
+            f"Revision Segmentacion {self.id_revision_segmentacion} - "
+            f"Resultado {self.resultado_segmentacion_id} - "
+            f"Revision {self.numero_revision} - {self.estado}"
+        )
+
+
 class AnalisisMascara(models.Model):
     id_mascara_analisis = models.AutoField(primary_key=True)
     resultado = models.ForeignKey(

@@ -1,11 +1,13 @@
 import shutil
 import tempfile
+import json
 from copy import deepcopy
 from datetime import date
 from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
+from django.db import IntegrityError, transaction
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.core.management.base import CommandError
@@ -20,6 +22,7 @@ from .models import (
     MuestraSaliva,
     Paciente,
     ResultadoSegmentacion,
+    RevisionSegmentacion,
 )
 from .services.segmentation.exceptions import (
     InvalidSegmentationResponseError,
@@ -1005,3 +1008,470 @@ class CasoSegmentationSummaryTests(APITestCase):
         assert response.data['muestras_resultado_invalido'] == 1
         assert response.data['total_objects'] == 0
         self._assert_invariant(response.data)
+
+
+
+class RevisionSegmentacionTests(APITestCase):
+    def setUp(self):
+        self.media_root = tempfile.mkdtemp()
+        self.override = override_settings(MEDIA_ROOT=self.media_root)
+        self.override.enable()
+
+        self.paciente = Paciente.objects.create(
+            nombre='Paciente',
+            apellido='Revision',
+            fecha_nacimiento=date(1991, 3, 10),
+            identificacion='PAC-REV-001',
+        )
+        self.caso = Caso.objects.create(
+            paciente=self.paciente,
+            titulo='Caso revision',
+        )
+        self.analisis = AnalisisPred.objects.create(
+            id_paciente_fk=self.paciente,
+            id_caso_fk=self.caso,
+        )
+        self.muestra = MuestraSaliva.objects.create(
+            analisis=self.analisis,
+            imagen=SimpleUploadedFile(
+                'revision.jpg',
+                b'fake image bytes',
+                content_type='image/jpeg',
+            ),
+        )
+        self.resultado = self._create_resultado()
+
+    def tearDown(self):
+        self.override.disable()
+        shutil.rmtree(self.media_root, ignore_errors=True)
+
+    def _resultado_revisiones_url(self, resultado_id=None):
+        return reverse(
+            'resultado-segmentacion-revisiones',
+            kwargs={
+                'pk': resultado_id or self.resultado.id_resultado_segmentacion
+            }
+        )
+
+    def _revision_url(self, revision_id):
+        return reverse(
+            'revision-segmentacion-detail',
+            kwargs={'pk': revision_id}
+        )
+
+    def _validar_url(self, revision_id):
+        return reverse(
+            'revision-segmentacion-validar',
+            kwargs={'pk': revision_id}
+        )
+
+    def _normalized(self, version='1.1'):
+        return {
+            'version': version,
+            'sample_type': 'SALIVA',
+            'objects': [
+                {
+                    'id': 1,
+                    'label': 'membrana',
+                    'geometry': {
+                        'type': 'polygon',
+                        'points': [[0, 0], [10, 0], [10, 10]],
+                    },
+                    'source': {
+                        'raw_id': 255,
+                        'raw_type': 'membrana',
+                    },
+                },
+                {
+                    'id': 2,
+                    'label': 'nucleo',
+                    'geometry': {
+                        'type': 'polygon',
+                        'points': [[1, 1], [5, 1], [5, 5]],
+                    },
+                    'source': {
+                        'raw_id': 255,
+                        'raw_type': 'nucleo',
+                    },
+                },
+            ],
+            'summary': {
+                'total_objects': 2,
+                'counts_by_label': {
+                    'membrana': 1,
+                    'nucleo': 1,
+                },
+            },
+        }
+
+    def _create_resultado(self, normalized=None):
+        return ResultadoSegmentacion.objects.create(
+            muestra=self.muestra,
+            tipo_muestra='SALIVA',
+            respuesta_json={'objetos': [{'id': 255}]},
+            resultado_normalizado=normalized or self._normalized(),
+            estado='COMPLETADO',
+        )
+
+    def _create_draft(self):
+        response = self.client.post(self._resultado_revisiones_url())
+        assert response.status_code == status.HTTP_201_CREATED
+        return RevisionSegmentacion.objects.get(
+            pk=response.data['id_revision_segmentacion']
+        )
+
+    def _manual_object(self, object_id=3, label='micronucleo'):
+        return {
+            'id': object_id,
+            'label': label,
+            'geometry': {
+                'type': 'polygon',
+                'points': [[2, 2], [6, 2], [6, 6]],
+            },
+            'provenance': {
+                'origin': 'manual',
+                'base_object_id': None,
+            },
+        }
+
+    def _patch_snapshot(self, revision, snapshot):
+        return self.client.patch(
+            self._revision_url(revision.id_revision_segmentacion),
+            {'resultado_editado': snapshot},
+            format='json',
+        )
+
+    def test_model_unique_revision_number_per_resultado(self):
+        draft = self._create_draft()
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                RevisionSegmentacion.objects.create(
+                    resultado_segmentacion=self.resultado,
+                    numero_revision=draft.numero_revision,
+                    estado=RevisionSegmentacion.ESTADO_VALIDADA,
+                    resultado_editado=draft.resultado_editado,
+                    resumen=draft.resumen,
+                )
+
+    def test_model_unique_active_draft_per_resultado(self):
+        draft = self._create_draft()
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                RevisionSegmentacion.objects.create(
+                    resultado_segmentacion=self.resultado,
+                    numero_revision=2,
+                    estado=RevisionSegmentacion.ESTADO_BORRADOR,
+                    resultado_editado=draft.resultado_editado,
+                    resumen=draft.resumen,
+                )
+
+    def test_revision_has_valid_state_and_timestamps(self):
+        revision = self._create_draft()
+
+        assert revision.estado == RevisionSegmentacion.ESTADO_BORRADOR
+        assert revision.creado_en is not None
+        assert revision.actualizado_en is not None
+        assert revision.validado_en is None
+
+    def test_first_draft_is_created_from_automatic_result(self):
+        revision = self._create_draft()
+
+        assert revision.numero_revision == 1
+        assert revision.resultado_editado['version'] == '1.0'
+        assert (
+            revision.resultado_editado['base_result_id']
+            == self.resultado.id_resultado_segmentacion
+        )
+        assert revision.resultado_editado['objects'][0]['id'] == 1
+        assert revision.resultado_editado['objects'][0]['provenance'] == {
+            'origin': 'automatic',
+            'base_object_id': 1,
+        }
+        assert revision.resumen == {
+            'counts_by_label': {
+                'membrana': 1,
+                'nucleo': 1,
+                'micronucleo': 0,
+            },
+            'total_objects': 2,
+        }
+
+    def test_create_draft_twice_returns_same_active_draft(self):
+        first = self.client.post(self._resultado_revisiones_url())
+        second = self.client.post(self._resultado_revisiones_url())
+
+        assert first.status_code == status.HTTP_201_CREATED
+        assert second.status_code == status.HTTP_200_OK
+        assert (
+            first.data['id_revision_segmentacion']
+            == second.data['id_revision_segmentacion']
+        )
+        assert RevisionSegmentacion.objects.count() == 1
+
+    def test_automatic_original_remains_intact_when_draft_is_created(self):
+        original_raw = deepcopy(self.resultado.respuesta_json)
+        original_normalized = deepcopy(self.resultado.resultado_normalizado)
+
+        self._create_draft()
+        self.resultado.refresh_from_db()
+
+        assert self.resultado.respuesta_json == original_raw
+        assert self.resultado.resultado_normalizado == original_normalized
+
+    def test_validating_revision_one_allows_revision_two_from_validated(self):
+        revision_one = self._create_draft()
+        edited = deepcopy(revision_one.resultado_editado)
+        edited['objects'].append(self._manual_object())
+
+        patch_response = self._patch_snapshot(revision_one, edited)
+        assert patch_response.status_code == status.HTTP_200_OK
+
+        validate_response = self.client.post(
+            self._validar_url(revision_one.id_revision_segmentacion)
+        )
+        assert validate_response.status_code == status.HTTP_200_OK
+
+        second_response = self.client.post(self._resultado_revisiones_url())
+        assert second_response.status_code == status.HTTP_201_CREATED
+        assert second_response.data['numero_revision'] == 2
+        assert len(second_response.data['resultado_editado']['objects']) == 3
+        assert second_response.data['resumen']['counts_by_label'] == {
+            'membrana': 1,
+            'nucleo': 1,
+            'micronucleo': 1,
+        }
+
+    def test_patch_valid_draft_recalculates_summary_and_ignores_client_summary(self):
+        revision = self._create_draft()
+        edited = deepcopy(revision.resultado_editado)
+        edited['objects'].append(self._manual_object())
+
+        response = self.client.patch(
+            self._revision_url(revision.id_revision_segmentacion),
+            {
+                'resultado_editado': edited,
+                'resumen': {
+                    'counts_by_label': {'membrana': 999},
+                    'total_objects': 999,
+                },
+            },
+            format='json',
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['resumen'] == {
+            'counts_by_label': {
+                'membrana': 1,
+                'nucleo': 1,
+                'micronucleo': 1,
+            },
+            'total_objects': 3,
+        }
+
+    def test_valid_manual_and_automatic_provenance_are_accepted(self):
+        revision = self._create_draft()
+        edited = deepcopy(revision.resultado_editado)
+        edited['objects'].append(self._manual_object())
+
+        response = self._patch_snapshot(revision, edited)
+
+        assert response.status_code == status.HTTP_200_OK
+
+    def test_patch_rejects_invalid_label(self):
+        revision = self._create_draft()
+        edited = deepcopy(revision.resultado_editado)
+        edited['objects'][0]['label'] = 'plaqueta'
+
+        response = self._patch_snapshot(revision, edited)
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_patch_rejects_duplicate_ids(self):
+        revision = self._create_draft()
+        edited = deepcopy(revision.resultado_editado)
+        edited['objects'][1]['id'] = edited['objects'][0]['id']
+
+        response = self._patch_snapshot(revision, edited)
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_patch_rejects_polygon_with_less_than_three_points(self):
+        revision = self._create_draft()
+        edited = deepcopy(revision.resultado_editado)
+        edited['objects'][0]['geometry']['points'] = [[0, 0], [1, 1]]
+
+        response = self._patch_snapshot(revision, edited)
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_patch_rejects_non_numeric_point(self):
+        revision = self._create_draft()
+        edited = deepcopy(revision.resultado_editado)
+        edited['objects'][0]['geometry']['points'][0] = ['x', 0]
+
+        response = self._patch_snapshot(revision, edited)
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_patch_rejects_nan_and_infinity(self):
+        revision = self._create_draft()
+
+        for invalid_value in [float('nan'), float('inf')]:
+            edited = deepcopy(revision.resultado_editado)
+            edited['objects'][0]['geometry']['points'][0] = [invalid_value, 0]
+
+            response = self.client.generic(
+                'PATCH',
+                self._revision_url(revision.id_revision_segmentacion),
+                data=json.dumps({'resultado_editado': edited}, allow_nan=True),
+                content_type='application/json',
+            )
+
+            assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_patch_rejects_invalid_geometry(self):
+        revision = self._create_draft()
+        edited = deepcopy(revision.resultado_editado)
+        edited['objects'][0]['geometry']['type'] = 'box'
+
+        response = self._patch_snapshot(revision, edited)
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_patch_rejects_manual_object_with_base_object_id(self):
+        revision = self._create_draft()
+        edited = deepcopy(revision.resultado_editado)
+        manual_object = self._manual_object()
+        manual_object['provenance']['base_object_id'] = 1
+        edited['objects'].append(manual_object)
+
+        response = self._patch_snapshot(revision, edited)
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_patch_rejects_automatic_object_without_base_object_id(self):
+        revision = self._create_draft()
+        edited = deepcopy(revision.resultado_editado)
+        edited['objects'][0]['provenance']['base_object_id'] = None
+
+        response = self._patch_snapshot(revision, edited)
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_validated_revision_is_immutable(self):
+        revision = self._create_draft()
+        validate_response = self.client.post(
+            self._validar_url(revision.id_revision_segmentacion)
+        )
+        assert validate_response.status_code == status.HTTP_200_OK
+
+        edited = deepcopy(revision.resultado_editado)
+        edited['objects'].append(self._manual_object())
+        patch_response = self._patch_snapshot(revision, edited)
+
+        assert patch_response.status_code == status.HTTP_409_CONFLICT
+
+    def test_validating_validated_revision_again_returns_conflict(self):
+        revision = self._create_draft()
+        first = self.client.post(self._validar_url(revision.id_revision_segmentacion))
+        second = self.client.post(self._validar_url(revision.id_revision_segmentacion))
+
+        assert first.status_code == status.HTTP_200_OK
+        assert second.status_code == status.HTTP_409_CONFLICT
+
+    def test_patch_cannot_change_state_or_revision_metadata(self):
+        revision = self._create_draft()
+
+        response = self.client.patch(
+            self._revision_url(revision.id_revision_segmentacion),
+            {
+                'estado': RevisionSegmentacion.ESTADO_VALIDADA,
+                'numero_revision': 99,
+                'validado_en': '2026-01-01T00:00:00Z',
+            },
+            format='json',
+        )
+
+        revision.refresh_from_db()
+        assert response.status_code == status.HTTP_200_OK
+        assert revision.estado == RevisionSegmentacion.ESTADO_BORRADOR
+        assert revision.numero_revision == 1
+        assert revision.validado_en is None
+
+    def test_resultado_not_found_returns_404(self):
+        response = self.client.post(self._resultado_revisiones_url(999999))
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_revision_not_found_returns_404(self):
+        response = self.client.get(self._revision_url(999999))
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_list_revisions_ordered(self):
+        revision_one = self._create_draft()
+        self.client.post(self._validar_url(revision_one.id_revision_segmentacion))
+        self.client.post(self._resultado_revisiones_url())
+
+        response = self.client.get(self._resultado_revisiones_url())
+
+        assert response.status_code == status.HTTP_200_OK
+        assert [item['numero_revision'] for item in response.data] == [1, 2]
+
+    def test_get_revision_detail(self):
+        revision = self._create_draft()
+
+        response = self.client.get(self._revision_url(revision.id_revision_segmentacion))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['id_revision_segmentacion'] == revision.id_revision_segmentacion
+
+    def test_validation_endpoint_recalculates_summary(self):
+        revision = self._create_draft()
+        edited = deepcopy(revision.resultado_editado)
+        edited['objects'].append(self._manual_object())
+        self._patch_snapshot(revision, edited)
+
+        response = self.client.post(self._validar_url(revision.id_revision_segmentacion))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['estado'] == RevisionSegmentacion.ESTADO_VALIDADA
+        assert response.data['validado_en'] is not None
+        assert response.data['resumen']['total_objects'] == 3
+
+    def test_patch_invalid_snapshot_does_not_change_original_resultado(self):
+        original_raw = deepcopy(self.resultado.respuesta_json)
+        original_normalized = deepcopy(self.resultado.resultado_normalizado)
+        revision = self._create_draft()
+        edited = deepcopy(revision.resultado_editado)
+        edited['objects'][0]['label'] = 'invalido'
+
+        self._patch_snapshot(revision, edited)
+        self.resultado.refresh_from_db()
+
+        assert self.resultado.respuesta_json == original_raw
+        assert self.resultado.resultado_normalizado == original_normalized
+
+    def test_creates_draft_from_normalized_version_1_0(self):
+        resultado = self._create_resultado(normalized=self._normalized(version='1.0'))
+
+        response = self.client.post(
+            self._resultado_revisiones_url(resultado.id_resultado_segmentacion)
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.data['resultado_editado']['version'] == '1.0'
+        assert response.data['resumen']['total_objects'] == 2
+
+    def test_creates_draft_from_normalized_version_1_1(self):
+        resultado = self._create_resultado(normalized=self._normalized(version='1.1'))
+
+        response = self.client.post(
+            self._resultado_revisiones_url(resultado.id_resultado_segmentacion)
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.data['resultado_editado']['version'] == '1.0'
+        assert response.data['resumen']['total_objects'] == 2

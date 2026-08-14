@@ -1,0 +1,195 @@
+import copy
+import math
+
+from rest_framework import serializers
+
+
+ALLOWED_REVISION_LABELS = ('membrana', 'nucleo', 'micronucleo')
+REVISION_SNAPSHOT_VERSION = '1.0'
+
+
+def build_revision_snapshot_from_normalized(resultado_segmentacion):
+    normalized = resultado_segmentacion.resultado_normalizado
+    if not isinstance(normalized, dict):
+        raise serializers.ValidationError(
+            'El resultado normalizado debe ser un objeto JSON'
+        )
+
+    raw_objects = normalized.get('objects')
+    if raw_objects is None:
+        raw_objects = []
+    if not isinstance(raw_objects, list):
+        raise serializers.ValidationError(
+            'resultado_normalizado.objects debe ser una lista'
+        )
+
+    snapshot = {
+        'version': REVISION_SNAPSHOT_VERSION,
+        'base_result_id': resultado_segmentacion.id_resultado_segmentacion,
+        'objects': [
+            _build_automatic_revision_object(raw_object)
+            for raw_object in raw_objects
+        ],
+    }
+    validate_revision_snapshot(snapshot)
+    return snapshot
+
+
+def clone_revision_snapshot(revision):
+    snapshot = copy.deepcopy(revision.resultado_editado)
+    validate_revision_snapshot(snapshot)
+    return snapshot
+
+
+def validate_revision_snapshot(snapshot):
+    if not isinstance(snapshot, dict):
+        raise serializers.ValidationError(
+            'resultado_editado debe ser un objeto JSON'
+        )
+
+    objects = snapshot.get('objects')
+    if not isinstance(objects, list):
+        raise serializers.ValidationError(
+            'resultado_editado.objects debe ser una lista'
+        )
+
+    seen_ids = set()
+    for index, revision_object in enumerate(objects):
+        _validate_revision_object(revision_object, index, seen_ids)
+
+    return True
+
+
+def calculate_revision_summary(snapshot):
+    validate_revision_snapshot(snapshot)
+
+    counts_by_label = {
+        label: 0
+        for label in ALLOWED_REVISION_LABELS
+    }
+
+    for revision_object in snapshot['objects']:
+        counts_by_label[revision_object['label']] += 1
+
+    return {
+        'counts_by_label': counts_by_label,
+        'total_objects': len(snapshot['objects']),
+    }
+
+
+def _build_automatic_revision_object(raw_object):
+    if not isinstance(raw_object, dict):
+        raise serializers.ValidationError(
+            'Los objetos normalizados deben ser objetos JSON'
+        )
+
+    return {
+        'id': raw_object.get('id'),
+        'label': raw_object.get('label'),
+        'geometry': copy.deepcopy(raw_object.get('geometry')),
+        'provenance': {
+            'origin': 'automatic',
+            'base_object_id': raw_object.get('id'),
+        },
+    }
+
+
+def _validate_revision_object(revision_object, index, seen_ids):
+    if not isinstance(revision_object, dict):
+        raise serializers.ValidationError(
+            f'objects[{index}] debe ser un objeto JSON'
+        )
+
+    object_id = revision_object.get('id')
+    if not _is_positive_int(object_id):
+        raise serializers.ValidationError(
+            f'objects[{index}].id debe ser un entero positivo'
+        )
+    if object_id in seen_ids:
+        raise serializers.ValidationError(
+            f'objects[{index}].id esta duplicado'
+        )
+    seen_ids.add(object_id)
+
+    label = revision_object.get('label')
+    if label not in ALLOWED_REVISION_LABELS:
+        raise serializers.ValidationError(
+            f'objects[{index}].label no es valido'
+        )
+
+    _validate_geometry(revision_object.get('geometry'), index)
+    _validate_provenance(revision_object.get('provenance'), index)
+
+
+def _validate_geometry(geometry, object_index):
+    if not isinstance(geometry, dict):
+        raise serializers.ValidationError(
+            f'objects[{object_index}].geometry debe ser un objeto JSON'
+        )
+
+    if geometry.get('type') != 'polygon':
+        raise serializers.ValidationError(
+            f'objects[{object_index}].geometry.type debe ser polygon'
+        )
+
+    points = geometry.get('points')
+    if not isinstance(points, list):
+        raise serializers.ValidationError(
+            f'objects[{object_index}].geometry.points debe ser una lista'
+        )
+
+    if len(points) < 3:
+        raise serializers.ValidationError(
+            f'objects[{object_index}].geometry.points debe tener al menos 3 puntos'
+        )
+
+    for point_index, point in enumerate(points):
+        if not isinstance(point, list) or len(point) != 2:
+            raise serializers.ValidationError(
+                f'objects[{object_index}].geometry.points[{point_index}] debe tener dos coordenadas'
+            )
+
+        if not all(_is_finite_number(coordinate) for coordinate in point):
+            raise serializers.ValidationError(
+                f'objects[{object_index}].geometry.points[{point_index}] debe contener numeros finitos'
+            )
+
+
+def _validate_provenance(provenance, object_index):
+    if not isinstance(provenance, dict):
+        raise serializers.ValidationError(
+            f'objects[{object_index}].provenance debe ser un objeto JSON'
+        )
+
+    origin = provenance.get('origin')
+    base_object_id = provenance.get('base_object_id')
+
+    if origin == 'automatic':
+        if not _is_positive_int(base_object_id):
+            raise serializers.ValidationError(
+                f'objects[{object_index}].provenance.base_object_id debe ser entero positivo para objetos automaticos'
+            )
+        return
+
+    if origin == 'manual':
+        if base_object_id is not None:
+            raise serializers.ValidationError(
+                f'objects[{object_index}].provenance.base_object_id debe ser null para objetos manuales'
+            )
+        return
+
+    raise serializers.ValidationError(
+        f'objects[{object_index}].provenance.origin no es valido'
+    )
+
+
+def _is_positive_int(value):
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def _is_finite_number(value):
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+    )

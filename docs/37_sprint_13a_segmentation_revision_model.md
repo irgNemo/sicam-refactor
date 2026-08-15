@@ -197,6 +197,47 @@ Para objetos manuales:
 
 Las mascaras eliminadas no se guardan como delta; se infieren comparando el `resultado_normalizado` original contra el snapshot completo de la revision.
 
+## Compatibilidad con resultados normalizados legacy
+
+Algunos `ResultadoSegmentacion.resultado_normalizado` historicos fueron creados con contrato `version = "1.0"`. En esos resultados, varios objetos automaticos podian compartir el mismo `objects[].id`, especialmente nucleos y micronucleos derivados del identificador raw `255`.
+
+`RevisionSegmentacion` requiere IDs unicos dentro de `resultado_editado.objects`, por lo que el primer `BORRADOR` ya no copia ciegamente el ID automatico como identidad editorial.
+
+La conversion `ResultadoSegmentacion -> RevisionSegmentacion` separa:
+
+- `resultado_editado.objects[].id`: identidad editorial unica dentro del snapshot editable.
+- `resultado_editado.objects[].provenance.base_object_id`: ID original que tenia el objeto en el resultado automatico.
+
+Estrategia determinista:
+
+- Si el ID automatico es entero positivo y no se ha usado todavia en el snapshot, se conserva como ID editorial.
+- Si el ID automatico esta duplicado o no puede usarse como identidad editorial, se asigna el siguiente entero positivo disponible.
+- La asignacion respeta el orden original de `resultado_normalizado.objects`.
+- Los IDs originales validos que aparecen mas adelante se reservan para evitar colisiones futuras.
+
+Ejemplo legacy:
+
+```text
+Resultado normalizado:
+1, 255, 255, 255
+
+Revision editable:
+1, 255, 2, 3
+
+provenance.base_object_id:
+1, 255, 255, 255
+```
+
+Para resultados modernos `version = "1.1"` con IDs ya unicos, los IDs editoriales se preservan sin renumeracion.
+
+No se modifica:
+
+- `ResultadoSegmentacion.respuesta_json`
+- `ResultadoSegmentacion.resultado_normalizado`
+- registros historicos existentes
+
+No se agrego `base_object_index` porque el contrato actual puede distinguir los objetos dentro de la revision mediante el ID editorial unico, y `base_object_id` conserva la trazabilidad hacia el automatico original. En historicos legacy puede haber varios objetos con el mismo `base_object_id`, lo cual refleja fielmente el origen del dato.
+
 ## Validacion estructural
 
 Antes de persistir `resultado_editado`, Django valida:

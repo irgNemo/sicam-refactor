@@ -1104,6 +1104,40 @@ class RevisionSegmentacionTests(APITestCase):
             },
         }
 
+    def _polygon(self, offset):
+        return {
+            'type': 'polygon',
+            'points': [
+                [offset, offset],
+                [offset + 10, offset],
+                [offset + 10, offset + 10],
+            ],
+        }
+
+    def _normalized_object(self, object_id, label, offset):
+        return {
+            'id': object_id,
+            'label': label,
+            'geometry': self._polygon(offset),
+        }
+
+    def _normalized_with_objects(self, objects, version='1.0'):
+        counts_by_label = {}
+        for item in objects:
+            counts_by_label[item['label']] = (
+                counts_by_label.get(item['label'], 0) + 1
+            )
+
+        return {
+            'version': version,
+            'sample_type': 'SALIVA',
+            'objects': objects,
+            'summary': {
+                'total_objects': len(objects),
+                'counts_by_label': counts_by_label,
+            },
+        }
+
     def _create_resultado(self, normalized=None):
         return ResultadoSegmentacion.objects.create(
             muestra=self.muestra,
@@ -1197,6 +1231,173 @@ class RevisionSegmentacionTests(APITestCase):
             },
             'total_objects': 2,
         }
+
+    def test_first_draft_accepts_legacy_duplicate_object_ids(self):
+        normalized = self._normalized_with_objects([
+            self._normalized_object(1, 'membrana', 0),
+            self._normalized_object(255, 'nucleo', 20),
+            self._normalized_object(255, 'nucleo', 40),
+            self._normalized_object(255, 'micronucleo', 60),
+        ], version='1.0')
+        resultado = self._create_resultado(normalized=normalized)
+        original_raw = deepcopy(resultado.respuesta_json)
+        original_normalized = deepcopy(resultado.resultado_normalizado)
+
+        response = self.client.post(
+            self._resultado_revisiones_url(resultado.id_resultado_segmentacion)
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        objects = response.data['resultado_editado']['objects']
+        revision_ids = [item['id'] for item in objects]
+
+        assert len(objects) == 4
+        assert len(set(revision_ids)) == 4
+        assert [item['label'] for item in objects] == [
+            'membrana',
+            'nucleo',
+            'nucleo',
+            'micronucleo',
+        ]
+        assert [item['geometry'] for item in objects] == [
+            item['geometry']
+            for item in normalized['objects']
+        ]
+        assert [item['provenance']['origin'] for item in objects] == [
+            'automatic',
+            'automatic',
+            'automatic',
+            'automatic',
+        ]
+        assert [item['provenance']['base_object_id'] for item in objects] == [
+            1,
+            255,
+            255,
+            255,
+        ]
+        assert response.data['resumen'] == {
+            'counts_by_label': {
+                'membrana': 1,
+                'nucleo': 2,
+                'micronucleo': 1,
+            },
+            'total_objects': 4,
+        }
+
+        resultado.refresh_from_db()
+        assert resultado.respuesta_json == original_raw
+        assert resultado.resultado_normalizado == original_normalized
+
+    def test_first_draft_preserves_unique_legacy_object_ids(self):
+        normalized = self._normalized_with_objects([
+            self._normalized_object(1, 'membrana', 0),
+            self._normalized_object(2, 'nucleo', 20),
+            self._normalized_object(3, 'micronucleo', 40),
+        ], version='1.0')
+        resultado = self._create_resultado(normalized=normalized)
+
+        response = self.client.post(
+            self._resultado_revisiones_url(resultado.id_resultado_segmentacion)
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert [
+            item['id']
+            for item in response.data['resultado_editado']['objects']
+        ] == [1, 2, 3]
+        assert [
+            item['provenance']['base_object_id']
+            for item in response.data['resultado_editado']['objects']
+        ] == [1, 2, 3]
+
+    def test_first_draft_preserves_unique_version_1_1_object_ids(self):
+        normalized = self._normalized_with_objects([
+            self._normalized_object(1, 'membrana', 0),
+            self._normalized_object(2, 'nucleo', 20),
+            self._normalized_object(3, 'micronucleo', 40),
+        ], version='1.1')
+        resultado = self._create_resultado(normalized=normalized)
+
+        response = self.client.post(
+            self._resultado_revisiones_url(resultado.id_resultado_segmentacion)
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert [
+            item['id']
+            for item in response.data['resultado_editado']['objects']
+        ] == [1, 2, 3]
+        assert [
+            item['provenance']['base_object_id']
+            for item in response.data['resultado_editado']['objects']
+        ] == [1, 2, 3]
+
+    def test_duplicate_ids_are_reassigned_without_future_collisions(self):
+        normalized = self._normalized_with_objects([
+            self._normalized_object(1, 'membrana', 0),
+            self._normalized_object(2, 'nucleo', 20),
+            self._normalized_object(5, 'nucleo', 40),
+            self._normalized_object(5, 'micronucleo', 60),
+            self._normalized_object(6, 'membrana', 80),
+        ], version='1.0')
+        resultado = self._create_resultado(normalized=normalized)
+
+        response = self.client.post(
+            self._resultado_revisiones_url(resultado.id_resultado_segmentacion)
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert [
+            item['id']
+            for item in response.data['resultado_editado']['objects']
+        ] == [1, 2, 5, 3, 6]
+        assert [
+            item['provenance']['base_object_id']
+            for item in response.data['resultado_editado']['objects']
+        ] == [1, 2, 5, 5, 6]
+        assert response.data['resumen'] == {
+            'counts_by_label': {
+                'membrana': 2,
+                'nucleo': 2,
+                'micronucleo': 1,
+            },
+            'total_objects': 5,
+        }
+
+    def test_next_draft_from_validated_revision_keeps_editorial_ids(self):
+        normalized = self._normalized_with_objects([
+            self._normalized_object(1, 'membrana', 0),
+            self._normalized_object(255, 'nucleo', 20),
+            self._normalized_object(255, 'micronucleo', 40),
+        ], version='1.0')
+        resultado = self._create_resultado(normalized=normalized)
+
+        first_response = self.client.post(
+            self._resultado_revisiones_url(resultado.id_resultado_segmentacion)
+        )
+        first_revision_id = first_response.data['id_revision_segmentacion']
+        first_ids = [
+            item['id']
+            for item in first_response.data['resultado_editado']['objects']
+        ]
+
+        validate_response = self.client.post(self._validar_url(first_revision_id))
+        assert validate_response.status_code == status.HTTP_200_OK
+
+        second_response = self.client.post(
+            self._resultado_revisiones_url(resultado.id_resultado_segmentacion)
+        )
+
+        assert second_response.status_code == status.HTTP_201_CREATED
+        assert second_response.data['numero_revision'] == 2
+        assert [
+            item['id']
+            for item in second_response.data['resultado_editado']['objects']
+        ] == first_ids
+        assert [
+            item['provenance']['base_object_id']
+            for item in second_response.data['resultado_editado']['objects']
+        ] == [1, 255, 255]
 
     def test_create_draft_twice_returns_same_active_draft(self):
         first = self.client.post(self._resultado_revisiones_url())

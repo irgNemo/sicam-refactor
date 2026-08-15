@@ -41,7 +41,7 @@ En Sprint 13B la UI usa `getOrCreateSegmentationDraft(resultadoId)` para solicit
 - `revisionError`: error al entrar en modo editor.
 - `selectedObjectKey`: clave local defensiva para seleccionar objetos aunque `object.id` no sea unico.
 - `isSpacePressed`: permite pan temporal en modo editor.
-- `suppressNextOverlayClick`: evita seleccionar una mascara cuando el gesto fue pan con `Space`.
+- `editorTool`: herramienta activa del editor, `SELECT` o `PAN`.
 
 ## Resultado activo
 
@@ -123,6 +123,8 @@ El editor es compatible con:
 
 La visibilidad por etiqueta sigue dependiendo de `label`, no de `object.id`.
 
+Tras el hotfix de compatibilidad legacy de Sprint 13A, los resultados normalizados historicos `version 1.0` con IDs duplicados pueden abrir un `BORRADOR` sin re-segmentar. El backend asigna IDs editoriales unicos en `resultado_editado.objects[].id` y conserva el ID automatico original en `provenance.base_object_id`.
+
 ## Validacion ejecutada
 
 ### Build frontend
@@ -163,6 +165,134 @@ Notas:
 13. Confirmar que en modo editor no se hace pan accidental al seleccionar.
 14. Mantener `Space` y arrastrar para confirmar pan temporal.
 15. Cambiar de muestra y confirmar que vuelve a `Navegar` y limpia seleccion/revision activa.
+
+## Hotfix - seleccion SVG, pan temporal y solapamiento
+
+Despues de la validacion manual de Sprint 13B se corrigieron tres defectos de interaccion:
+
+1. Una mascara seleccionada no podia deseleccionarse con un segundo click.
+2. En modo `EDIT`, `Space + drag` podia no iniciar pan cuando el gesto empezaba sobre un poligono SVG.
+3. El poligono seleccionado se renderizaba arriba como el mismo elemento interactivo, por lo que el highlight podia bloquear la seleccion inmediata de estructuras interiores o anidadas.
+
+### Causas raiz
+
+- La seleccion asignaba siempre `selectedObjectKey = selectionKey`; no existia toggle.
+- El pan temporal dependia de que el `pointerdown` burbujeara desde el SVG/poligono hasta el wrapper.
+- `overlayPolygons()` reordenaba el poligono seleccionado para dibujarlo encima, y ese mismo poligono seguia capturando eventos.
+- No habia una separacion explicita entre click y drag.
+
+### Cambios aplicados
+
+- Se mantuvo una identidad defensiva unica con `overlayObjectKey(object, index)`.
+- La misma identidad se usa para `:key`, seleccion, comparacion de seleccionado, highlight y panel `Objeto seleccionado`.
+- La seleccion ahora es tipo toggle:
+  - click A selecciona A.
+  - click A otra vez limpia seleccion.
+  - click B cambia seleccion a B.
+- El SVG se separo en dos capas:
+  - `segmentation-polygons`: poligonos interactivos en orden estable.
+  - `selection-highlight`: highlight visual del seleccionado con `pointer-events="none"`.
+- El highlight ya no bloquea clicks hacia estructuras interiores.
+- `pointerdown` del wrapper se escucha en fase capture para dar prioridad a navegacion temporal con `Space`.
+- El pan usa `setPointerCapture()` y libera captura al terminar.
+- Se agrego umbral de drag de `5px`.
+- Si el movimiento supera el umbral, no se genera seleccion accidental por el click posterior.
+- `Space` en modo `EDIT` activa navegacion temporal y no selecciona poligonos.
+- `keyup` y `window.blur` limpian `isSpacePressed` y finalizan pan activo.
+
+### Limitacion residual
+
+Si dos poligonos interactivos reales se solapan de forma exacta, el SVG seguira seleccionando el elemento que reciba el hit-test del navegador. Este hotfix evita que el highlight sea la causa del bloqueo, pero no implementa todavia un selector avanzado de objetos apilados.
+
+### Checklist manual del hotfix
+
+1. Click A: A queda seleccionada.
+2. Click A de nuevo: ninguna mascara queda seleccionada.
+3. Click A y luego click B: solo B queda seleccionada.
+4. Seleccionar Membrana exterior y luego Nucleo interior: Nucleo se selecciona inmediatamente.
+5. Zoom 2x, `EDIT`, `Space + drag` desde espacio vacio: imagen y SVG se desplazan juntos.
+6. Zoom 2x, `EDIT`, `Space + drag` desde una mascara: pan funciona y no cambia seleccion.
+7. Soltar mouse y Space: cursor vuelve al estado normal y el siguiente click selecciona.
+8. `Space + drag` sobre un poligono: no selecciona como efecto colateral.
+9. Zoom 2x sin Space: click sobre poligono selecciona correctamente.
+10. Rotar 90, 180 y 270: seleccion sigue operando sobre el SVG.
+11. Ocultar la capa del objeto seleccionado: seleccion y highlight se limpian.
+12. Cambiar de muestra durante `EDIT`: vuelve a `NAVIGATE`, limpia seleccion y termina pan.
+13. Historico `version 1.0` con IDs duplicados: dos objetos con mismo `id` pueden seleccionarse individualmente por la key defensiva.
+
+## Hotfix - pan definitivo en EDIT
+
+La validacion manual posterior confirmo que la seleccion, el toggle, las estructuras anidadas y el highlight funcionaban, pero `Space + drag` seguia sin desplazar la imagen en modo `EDIT`.
+
+### Causa exacta
+
+El visor tenia reglas separadas para cursor, inicio de pan, eventos SVG y seleccion:
+
+- El cursor podia indicar pan temporal por `isSpacePressed`.
+- Los poligonos seguian siendo interactivos en modo `EDIT`.
+- No habia una fuente unica para decidir si el visor estaba realmente en modo pan.
+- El pan en `EDIT` dependia de la ruta de eventos desde SVG/poligonos hacia el wrapper.
+
+Por eso la UI podia mostrar `Pan temporal` sin garantizar que el visor completo estuviera en la misma modalidad de eventos.
+
+### Fuente unica de pan
+
+Se agrego `effectivePanMode`, que es `true` cuando:
+
+- `viewerMode === "NAVIGATE"`.
+- `viewerMode === "EDIT" && editorTool === "PAN"`.
+- `viewerMode === "EDIT" && isSpacePressed`.
+
+Esta misma condicion gobierna:
+
+- inicio del pan;
+- cursor;
+- prioridad de interaccion;
+- `pointer-events` de la capa SVG interactiva.
+
+### Herramientas de editor
+
+En modo `EDIT` se agregaron dos herramientas minimas:
+
+- `SELECT`: permite seleccionar/deseleccionar mascaras.
+- `PAN`: convierte todo el visor en superficie de movimiento.
+
+Al entrar en `EDIT`, al salir de `EDIT` o al cambiar de muestra, `editorTool` vuelve a `SELECT`.
+
+### Space como atajo temporal
+
+En `EDIT + SELECT`, mantener `Space` activa temporalmente `effectivePanMode`.
+
+Soltar `Space` vuelve a `SELECT` sin cambiar la herramienta activa.
+
+Si `editorTool === "PAN"`, `Space` no es necesario para mover el visor.
+
+### Pointer events y pointer capture
+
+Cuando `effectivePanMode === true`, la capa `segmentation-polygons` usa `pointer-events: none`, por lo que el `pointerdown` llega al wrapper del visor aunque empiece encima de una mascara.
+
+El wrapper estable `image-transform-layer` concentra:
+
+- `pointerdown.capture`;
+- `pointermove`;
+- `pointerup`;
+- `pointercancel`;
+- `lostpointercapture`;
+- `setPointerCapture()`;
+- `releasePointerCapture()`.
+
+El algoritmo de pan no se duplico: `EDIT` reutiliza el mismo calculo de delta, clamp y `panX`/`panY` que `NAVIGATE`.
+
+### Checklist manual del pan definitivo
+
+1. `EDIT`, Zoom 2x, `SELECT`, mantener `Space`, drag desde fondo: pan.
+2. `EDIT`, Zoom 2x, `SELECT`, mantener `Space`, drag desde mascara: pan sin seleccion accidental.
+3. `EDIT`, Zoom 2x, activar `Mover`, drag desde fondo: pan.
+4. `Mover`, drag desde mascara: pan sin seleccion accidental.
+5. `Mover -> Seleccionar`, click mascara: seleccion inmediata.
+6. `SELECT`, `Space + pan`, soltar `Space`, click mascara: seleccion inmediata.
+7. Zoom + Rotar + Mover: imagen y SVG permanecen alineados.
+8. `NAVIGATE`: pan sigue funcionando como antes.
 
 ## Limitaciones
 

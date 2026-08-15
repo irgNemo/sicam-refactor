@@ -129,6 +129,29 @@
                 >
                   Revisión #{{ activeRevision.numero_revision }} · {{ activeRevision.estado }}
                 </span>
+                <div
+                  v-if="isEditMode"
+                  class="editor-tool-buttons"
+                >
+                  <button
+                    class="mode-btn editor-tool-btn"
+                    :class="{ active: editorTool === 'SELECT' }"
+                    title="Seleccionar máscaras"
+                    :aria-pressed="editorTool === 'SELECT'"
+                    @click="setEditorTool('SELECT')"
+                  >
+                    Seleccionar
+                  </button>
+                  <button
+                    class="mode-btn editor-tool-btn"
+                    :class="{ active: editorTool === 'PAN' }"
+                    title="Mover visor"
+                    :aria-pressed="editorTool === 'PAN'"
+                    @click="setEditorTool('PAN')"
+                  >
+                    Mover
+                  </button>
+                </div>
               </div>
 
               <div
@@ -144,7 +167,7 @@
                   class="image-transform-layer"
                   :class="imagePanClass"
                   :style="imageTransformStyle"
-                  @pointerdown="startImagePan"
+                  @pointerdown.capture="startImagePan"
                   @pointermove="moveImagePan"
                   @pointerup="endImagePan"
                   @pointercancel="endImagePan"
@@ -162,24 +185,39 @@
                   <svg
                     v-if="shouldShowSegmentationOverlay"
                     class="segmentation-svg-overlay"
-                    :class="{ 'is-editable': isEditMode }"
+                    :class="{
+                      'is-editable': isEditMode,
+                      'is-pan-mode': effectivePanMode
+                    }"
                     :width="imageRenderedSize.width"
                     :height="imageRenderedSize.height"
                     :viewBox="`0 0 ${imageRenderedSize.width} ${imageRenderedSize.height}`"
                   >
-                    <polygon
-                      v-for="polygon in overlayPolygons"
-                      :key="polygon.key"
-                      :points="polygon.points"
-                      class="segmentation-polygon"
-                      :class="{
-                        selected: polygon.selected,
-                        manual: polygon.origin === 'manual'
-                      }"
-                      :style="{ fill: polygon.fill, stroke: polygon.stroke }"
-                      @pointerdown="handleOverlayPolygonPointerDown"
-                      @click="handleOverlayPolygonClick(polygon.selectionKey, $event)"
-                    />
+                    <g class="segmentation-polygons">
+                      <polygon
+                        v-for="polygon in overlayPolygons"
+                        :key="polygon.key"
+                        :points="polygon.points"
+                        class="segmentation-polygon"
+                        :class="{ manual: polygon.origin === 'manual' }"
+                        :style="{ fill: polygon.fill, stroke: polygon.stroke }"
+                        @pointerdown="handleOverlayPolygonPointerDown"
+                        @click="handleOverlayPolygonClick(polygon.selectionKey, $event)"
+                      />
+                    </g>
+                    <g
+                      class="selection-highlight"
+                      pointer-events="none"
+                    >
+                      <polygon
+                        v-for="polygon in selectionHighlightPolygons"
+                        :key="`highlight-${polygon.key}`"
+                        :points="polygon.points"
+                        class="segmentation-selection-highlight"
+                        :class="{ manual: polygon.origin === 'manual' }"
+                        :style="{ stroke: polygon.stroke }"
+                      />
+                    </g>
                   </svg>
                 </div>
                 <div
@@ -297,8 +335,11 @@
               >
                 <div class="selected-object-header">
                   <h4>Objeto seleccionado</h4>
-                  <span v-if="isSpacePressed" class="editor-hint">
+                  <span v-if="isSpacePressed && editorTool === 'SELECT'" class="editor-hint">
                     Pan temporal
+                  </span>
+                  <span v-else-if="editorTool === 'PAN'" class="editor-hint">
+                    Mover visor
                   </span>
                 </div>
 
@@ -497,13 +538,19 @@ export default {
       historialLoading: false,
       historialError: "",
       viewerMode: "NAVIGATE",
+      editorTool: "SELECT",
       activeRevision: null,
       activeRevisionId: null,
       revisionLoading: false,
       revisionError: "",
       selectedObjectKey: null,
       isSpacePressed: false,
-      suppressNextOverlayClick: false,
+      activePanPointerId: null,
+      panCaptureTarget: null,
+      didPointerDrag: false,
+      dragThreshold: 5,
+      lastPointerDragAt: 0,
+      lastSpacePointerAt: 0,
       imageNaturalSize: { width: 0, height: 0 },
       imageRenderedSize: { width: 0, height: 0 },
       imageZoom: 1,
@@ -594,6 +641,14 @@ export default {
       return this.viewerMode === "EDIT";
     },
 
+    effectivePanMode() {
+      return (
+        this.viewerMode === "NAVIGATE" ||
+        (this.viewerMode === "EDIT" && this.editorTool === "PAN") ||
+        (this.viewerMode === "EDIT" && this.isSpacePressed)
+      );
+    },
+
     activeRevisionSummary() {
       return this.isEditMode ? this.activeRevision?.resumen || null : null;
     },
@@ -661,9 +716,10 @@ export default {
 
     imagePanClass() {
       return {
-        "is-pannable": this.imageZoom > 1 && (!this.isEditMode || this.isSpacePressed),
+        "is-pannable": this.imageZoom > 1 && this.effectivePanMode,
         "is-panning": this.isPanning,
         "is-edit-mode": this.isEditMode,
+        "is-effective-pan-mode": this.effectivePanMode,
       };
     },
 
@@ -745,7 +801,7 @@ export default {
         return [];
       }
 
-      const polygons = this.overlayVisibleDrawableObjects
+      return this.overlayVisibleDrawableObjects
         .map((item, index) => {
           const color = this.overlayColorForLabel(item.label);
           return {
@@ -765,11 +821,10 @@ export default {
             .map(point => point.join(","))
             .join(" "),
         }));
+    },
 
-      return [
-        ...polygons.filter(polygon => !polygon.selected),
-        ...polygons.filter(polygon => polygon.selected),
-      ];
+    selectionHighlightPolygons() {
+      return this.overlayPolygons.filter(polygon => polygon.selected);
     },
 
     shouldShowSegmentationOverlay() {
@@ -910,10 +965,13 @@ export default {
     setViewerMode(mode) {
       if (mode === "NAVIGATE") {
         this.viewerMode = "NAVIGATE";
+        this.editorTool = "SELECT";
         this.selectedObjectKey = null;
         this.isSpacePressed = false;
-        this.suppressNextOverlayClick = false;
         this.endImagePan();
+        this.didPointerDrag = false;
+        this.activePanPointerId = null;
+        this.panCaptureTarget = null;
         return;
       }
 
@@ -942,6 +1000,7 @@ export default {
         this.activeRevision.resultado_segmentacion === resultadoId
       ) {
         this.viewerMode = "EDIT";
+        this.editorTool = "SELECT";
         this.syncOverlayLabelVisibility();
         return;
       }
@@ -959,6 +1018,7 @@ export default {
         this.activeRevision = response.data;
         this.activeRevisionId = response.data.id_revision_segmentacion;
         this.viewerMode = "EDIT";
+        this.editorTool = "SELECT";
         this.syncOverlayLabelVisibility();
       } catch (error) {
         console.error("Error al cargar borrador de revision:", error);
@@ -980,12 +1040,15 @@ export default {
 
     resetEditorState({ clearRevision } = { clearRevision: true }) {
       this.viewerMode = "NAVIGATE";
+      this.editorTool = "SELECT";
       this.selectedObjectKey = null;
       this.revisionError = "";
       this.revisionLoading = false;
       this.isSpacePressed = false;
-      this.suppressNextOverlayClick = false;
       this.endImagePan();
+      this.didPointerDrag = false;
+      this.activePanPointerId = null;
+      this.panCaptureTarget = null;
 
       if (clearRevision) {
         this.activeRevision = null;
@@ -1002,11 +1065,19 @@ export default {
       }
     },
 
+    setEditorTool(tool) {
+      if (!["SELECT", "PAN"].includes(tool)) return;
+
+      this.editorTool = tool;
+      this.isSpacePressed = false;
+      this.endImagePan();
+    },
+
     handleOverlayPolygonPointerDown(event) {
       if (!this.isEditMode) return;
 
-      if (this.isSpacePressed) {
-        this.suppressNextOverlayClick = true;
+      if (this.effectivePanMode) {
+        this.lastSpacePointerAt = Date.now();
         return;
       }
 
@@ -1014,13 +1085,21 @@ export default {
     },
 
     handleOverlayPolygonClick(selectionKey, event) {
-      if (!this.isEditMode || this.isSpacePressed || this.suppressNextOverlayClick) {
-        this.suppressNextOverlayClick = false;
+      const justDragged = Date.now() - this.lastPointerDragAt < 200;
+      const spaceInteraction = Date.now() - this.lastSpacePointerAt < 200;
+
+      if (
+        !this.isEditMode ||
+        this.effectivePanMode ||
+        justDragged ||
+        spaceInteraction
+      ) {
         return;
       }
 
       event.stopPropagation();
-      this.selectedObjectKey = selectionKey;
+      this.selectedObjectKey =
+        this.selectedObjectKey === selectionKey ? null : selectionKey;
     },
 
     provenanceDisplayName(origin) {
@@ -1037,13 +1116,25 @@ export default {
         return;
       }
 
-      this.isSpacePressed = true;
+      if (event.repeat) {
+        event.preventDefault();
+        return;
+      }
+
+      if (this.editorTool === "SELECT") {
+        this.isSpacePressed = true;
+      }
       event.preventDefault();
     },
 
     handleEditorKeyUp(event) {
       if (event.code !== "Space") return;
 
+      this.isSpacePressed = false;
+      this.endImagePan();
+    },
+
+    handleWindowBlur() {
       this.isSpacePressed = false;
       this.endImagePan();
     },
@@ -1149,6 +1240,9 @@ export default {
       this.panX = 0;
       this.panY = 0;
       this.isPanning = false;
+      this.activePanPointerId = null;
+      this.panCaptureTarget = null;
+      this.didPointerDrag = false;
     },
 
     clampImagePan() {
@@ -1165,11 +1259,14 @@ export default {
     },
 
     startImagePan(event) {
-      if (this.isEditMode && !this.isSpacePressed) return;
+      if (!this.effectivePanMode) return;
       if (this.imageZoom <= 1 || event.button !== 0) return;
 
       event.preventDefault();
       this.isPanning = true;
+      this.activePanPointerId = event.pointerId;
+      this.panCaptureTarget = event.currentTarget;
+      this.didPointerDrag = false;
       this.panStartPointerX = event.clientX;
       this.panStartPointerY = event.clientY;
       this.panStartX = this.panX;
@@ -1179,11 +1276,26 @@ export default {
 
     moveImagePan(event) {
       if (!this.isPanning) return;
+      if (
+        this.activePanPointerId !== null &&
+        event.pointerId !== this.activePanPointerId
+      ) {
+        return;
+      }
 
       event.preventDefault();
-      const nextPanX = this.panStartX + event.clientX - this.panStartPointerX;
-      const nextPanY = this.panStartY + event.clientY - this.panStartPointerY;
+      const deltaX = event.clientX - this.panStartPointerX;
+      const deltaY = event.clientY - this.panStartPointerY;
+      const nextPanX = this.panStartX + deltaX;
+      const nextPanY = this.panStartY + deltaY;
       const { maxX, maxY } = this.imagePanLimits;
+
+      if (
+        Math.abs(deltaX) > this.dragThreshold ||
+        Math.abs(deltaY) > this.dragThreshold
+      ) {
+        this.didPointerDrag = true;
+      }
 
       this.panX = Math.min(Math.max(nextPanX, -maxX), maxX);
       this.panY = Math.min(Math.max(nextPanY, -maxY), maxY);
@@ -1191,13 +1303,30 @@ export default {
 
     endImagePan(event) {
       if (!this.isPanning) return;
+      if (
+        event &&
+        this.activePanPointerId !== null &&
+        event.pointerId !== this.activePanPointerId
+      ) {
+        return;
+      }
 
       try {
-        event?.currentTarget?.releasePointerCapture?.(event.pointerId);
+        const pointerId = event?.pointerId ?? this.activePanPointerId;
+        const captureTarget = event?.currentTarget || this.panCaptureTarget;
+        if (pointerId !== null && pointerId !== undefined) {
+          captureTarget?.releasePointerCapture?.(pointerId);
+        }
       } catch {
         // Pointer capture may already be released after pointercancel/lostpointercapture.
       }
+      if (this.didPointerDrag) {
+        this.lastPointerDragAt = Date.now();
+      }
       this.isPanning = false;
+      this.activePanPointerId = null;
+      this.panCaptureTarget = null;
+      this.didPointerDrag = false;
     },
 
     overlayColorForLabel(label) {
@@ -1245,6 +1374,7 @@ export default {
     window.addEventListener("resize", this.updateImageMeasurements);
     window.addEventListener("keydown", this.handleEditorKeyDown);
     window.addEventListener("keyup", this.handleEditorKeyUp);
+    window.addEventListener("blur", this.handleWindowBlur);
 
     apiClient
       .get("/api/analisis/")
@@ -1263,6 +1393,7 @@ export default {
     window.removeEventListener("resize", this.updateImageMeasurements);
     window.removeEventListener("keydown", this.handleEditorKeyDown);
     window.removeEventListener("keyup", this.handleEditorKeyUp);
+    window.removeEventListener("blur", this.handleWindowBlur);
   },
 };
 </script>
@@ -1712,6 +1843,18 @@ export default {
   cursor: grab;
 }
 
+.image-transform-layer.is-edit-mode.is-panning {
+  cursor: grabbing;
+}
+
+.image-transform-layer.is-edit-mode.is-effective-pan-mode {
+  cursor: grab;
+}
+
+.image-transform-layer.is-edit-mode.is-effective-pan-mode.is-panning {
+  cursor: grabbing;
+}
+
 .segmentation-svg-overlay {
   display: block;
   height: 100%;
@@ -1724,6 +1867,10 @@ export default {
 
 .segmentation-svg-overlay.is-editable {
   pointer-events: auto;
+}
+
+.segmentation-svg-overlay.is-pan-mode .segmentation-polygons {
+  pointer-events: none;
 }
 
 .segmentation-polygon {
@@ -1742,9 +1889,20 @@ export default {
   stroke-dasharray: 7 4;
 }
 
-.segmentation-polygon.selected {
+.selection-highlight {
+  pointer-events: none;
+}
+
+.segmentation-selection-highlight {
+  fill: transparent;
   filter: drop-shadow(0 0 5px rgba(0, 0, 0, 0.55));
+  pointer-events: none;
+  stroke-linejoin: round;
   stroke-width: 5;
+}
+
+.segmentation-selection-highlight.manual {
+  stroke-dasharray: 7 4;
 }
 
 .empty-image-state {

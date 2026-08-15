@@ -23,16 +23,54 @@ def build_revision_snapshot_from_normalized(resultado_segmentacion):
             'resultado_normalizado.objects debe ser una lista'
         )
 
+    revision_object_ids = assign_revision_object_ids(raw_objects)
     snapshot = {
         'version': REVISION_SNAPSHOT_VERSION,
         'base_result_id': resultado_segmentacion.id_resultado_segmentacion,
         'objects': [
-            _build_automatic_revision_object(raw_object)
-            for raw_object in raw_objects
+            _build_automatic_revision_object(raw_object, revision_object_id)
+            for raw_object, revision_object_id
+            in zip(raw_objects, revision_object_ids)
         ],
     }
     validate_revision_snapshot(snapshot)
     return snapshot
+
+
+def assign_revision_object_ids(raw_objects):
+    reserved_original_ids = {
+        raw_object.get('id')
+        for raw_object in raw_objects
+        if (
+            isinstance(raw_object, dict)
+            and _is_positive_int(raw_object.get('id'))
+        )
+    }
+    used_ids = set()
+    next_candidate = 1
+    revision_ids = []
+
+    for raw_object in raw_objects:
+        original_id = (
+            raw_object.get('id')
+            if isinstance(raw_object, dict)
+            else None
+        )
+
+        if _is_positive_int(original_id) and original_id not in used_ids:
+            revision_id = original_id
+        else:
+            while (
+                next_candidate in used_ids
+                or next_candidate in reserved_original_ids
+            ):
+                next_candidate += 1
+            revision_id = next_candidate
+
+        revision_ids.append(revision_id)
+        used_ids.add(revision_id)
+
+    return revision_ids
 
 
 def clone_revision_snapshot(revision):
@@ -77,14 +115,14 @@ def calculate_revision_summary(snapshot):
     }
 
 
-def _build_automatic_revision_object(raw_object):
+def _build_automatic_revision_object(raw_object, revision_object_id):
     if not isinstance(raw_object, dict):
         raise serializers.ValidationError(
             'Los objetos normalizados deben ser objetos JSON'
         )
 
     return {
-        'id': raw_object.get('id'),
+        'id': revision_object_id,
         'label': raw_object.get('label'),
         'geometry': copy.deepcopy(raw_object.get('geometry')),
         'provenance': {

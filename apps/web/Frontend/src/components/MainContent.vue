@@ -151,7 +151,22 @@
                   >
                     Mover
                   </button>
+                  <button
+                    class="mode-btn editor-tool-btn"
+                    :class="{ active: editorTool === 'DRAW' }"
+                    title="Dibujar máscara"
+                    :aria-pressed="editorTool === 'DRAW'"
+                    @click="setEditorTool('DRAW')"
+                  >
+                    Dibujar
+                  </button>
                 </div>
+                <span
+                  v-if="isDraftDirty"
+                  class="revision-badge dirty"
+                >
+                  Cambios sin guardar
+                </span>
               </div>
 
               <div
@@ -187,11 +202,14 @@
                     class="segmentation-svg-overlay"
                     :class="{
                       'is-editable': isEditMode,
-                      'is-pan-mode': effectivePanMode
+                      'is-pan-mode': effectivePanMode,
+                      'is-draw-mode': isDrawMode
                     }"
+                    ref="segmentationSvg"
                     :width="imageRenderedSize.width"
                     :height="imageRenderedSize.height"
                     :viewBox="`0 0 ${imageRenderedSize.width} ${imageRenderedSize.height}`"
+                    @click="handleOverlaySvgClick"
                   >
                     <g class="segmentation-polygons">
                       <polygon
@@ -216,6 +234,35 @@
                         class="segmentation-selection-highlight"
                         :class="{ manual: polygon.origin === 'manual' }"
                         :style="{ stroke: polygon.stroke }"
+                      />
+                    </g>
+                    <g
+                      v-if="draftPolygonSvgPoints.length"
+                      class="draft-polygon-layer"
+                      pointer-events="none"
+                    >
+                      <polyline
+                        :points="draftPolygonSvgPointsString"
+                        class="draft-polygon-line"
+                        :style="{ stroke: drawingColor.stroke }"
+                      />
+                      <polygon
+                        v-if="draftPolygonSvgPoints.length >= 3"
+                        :points="draftPolygonSvgPointsString"
+                        class="draft-polygon-fill"
+                        :style="{
+                          fill: drawingColor.fill,
+                          stroke: drawingColor.stroke
+                        }"
+                      />
+                      <circle
+                        v-for="(point, index) in draftPolygonSvgPoints"
+                        :key="`draft-point-${index}`"
+                        :cx="point[0]"
+                        :cy="point[1]"
+                        r="4"
+                        class="draft-polygon-point"
+                        :style="{ fill: drawingColor.stroke }"
                       />
                     </g>
                   </svg>
@@ -335,7 +382,7 @@
               >
                 <div class="selected-object-header">
                   <h4>Objeto seleccionado</h4>
-                  <span v-if="isSpacePressed && editorTool === 'SELECT'" class="editor-hint">
+                  <span v-if="isSpacePressed && editorTool !== 'PAN'" class="editor-hint">
                     Pan temporal
                   </span>
                   <span v-else-if="editorTool === 'PAN'" class="editor-hint">
@@ -361,6 +408,105 @@
                 <div v-else class="selected-object-empty">
                   Seleccione una máscara sobre la imagen.
                 </div>
+
+                <div class="editor-actions">
+                  <button
+                    class="control-btn danger"
+                    :disabled="!selectedObject || editorTool !== 'SELECT'"
+                    @click="deleteSelectedObject"
+                  >
+                    Eliminar máscara
+                  </button>
+                  <button
+                    class="control-btn"
+                    :disabled="!canUndo"
+                    @click="undoRevisionEdit"
+                  >
+                    Deshacer
+                  </button>
+                  <button
+                    class="control-btn"
+                    :disabled="!canRedo"
+                    @click="redoRevisionEdit"
+                  >
+                    Rehacer
+                  </button>
+                </div>
+
+                <div class="drawing-panel">
+                  <div class="drawing-label-row">
+                    <span>Tipo a dibujar</span>
+                    <select
+                      v-model="drawingLabel"
+                      class="drawing-label-select"
+                      :disabled="!isEditMode"
+                    >
+                      <option value="membrana">Membranas</option>
+                      <option value="nucleo">Núcleos</option>
+                      <option value="micronucleo">Micronúcleos</option>
+                    </select>
+                  </div>
+                  <div
+                    v-if="draftPolygonPoints.length"
+                    class="draft-status"
+                  >
+                    Máscara en construcción: {{ draftPolygonPoints.length }} puntos
+                  </div>
+                  <div
+                    v-else-if="isDrawMode"
+                    class="draft-status"
+                  >
+                    Click sobre la imagen para agregar vértices.
+                  </div>
+                  <div
+                    v-if="invalidDrawMessage"
+                    class="draft-status warning"
+                  >
+                    {{ invalidDrawMessage }}
+                  </div>
+                  <div class="editor-actions">
+                    <button
+                      class="control-btn success"
+                      :disabled="draftPolygonPoints.length < 3"
+                      @click="finishDraftPolygon"
+                    >
+                      Finalizar máscara
+                    </button>
+                    <button
+                      class="control-btn"
+                      :disabled="!draftPolygonPoints.length"
+                      @click="cancelDraftPolygon"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+
+                <div
+                  v-if="saveDraftError"
+                  class="segmentation-status error"
+                >
+                  {{ saveDraftError }}
+                </div>
+                <div
+                  v-if="saveDraftMessage"
+                  class="segmentation-status success"
+                >
+                  {{ saveDraftMessage }}
+                </div>
+                <div
+                  v-if="draftPolygonPoints.length"
+                  class="segmentation-status warning"
+                >
+                  Finalice o cancele la máscara en construcción.
+                </div>
+                <button
+                  class="btn-segment full-width"
+                  :disabled="!canSaveDraft"
+                  @click="saveDraft"
+                >
+                  {{ isSavingDraft ? 'Guardando...' : 'Guardar borrador' }}
+                </button>
               </div>
 
               <div v-if="imagenSeleccionada" class="segmentation-panel">
@@ -388,6 +534,32 @@
                     <span>Objetos</span>
                     <strong>{{ segmentacionObjetosCount }}</strong>
                   </div>
+                </div>
+
+                <div
+                  v-if="showPendingDraftNotice"
+                  class="pending-draft-card"
+                >
+                  <div class="pending-draft-copy">
+                    <strong>Revisión pendiente</strong>
+                    <span>
+                      Revisión #{{ pendingDraftRevision.numero_revision }} ·
+                      Cambios guardados, aún no validados.
+                    </span>
+                  </div>
+                  <button
+                    class="control-btn"
+                    @click="setViewerMode('EDIT')"
+                  >
+                    Continuar edición
+                  </button>
+                </div>
+
+                <div
+                  v-else-if="pendingDraftError && !isEditMode"
+                  class="segmentation-status neutral"
+                >
+                  No fue posible consultar revisiones pendientes.
                 </div>
 
                 <div class="segmentation-history">
@@ -508,7 +680,9 @@ import {
   segmentarMuestra,
 } from "../services/segmentationService";
 import {
+  getSegmentationRevisions,
   getOrCreateSegmentationDraft,
+  updateSegmentationDraft,
 } from "../services/segmentationRevisionService";
 
 export default {
@@ -541,6 +715,21 @@ export default {
       editorTool: "SELECT",
       activeRevision: null,
       activeRevisionId: null,
+      pendingDraftRevision: null,
+      pendingDraftLoading: false,
+      pendingDraftError: "",
+      workingObjects: [],
+      isDraftDirty: false,
+      isSavingDraft: false,
+      saveDraftError: "",
+      saveDraftMessage: "",
+      draftBaselineSignature: "",
+      undoStack: [],
+      redoStack: [],
+      manualObjectIdCursor: 0,
+      drawingLabel: "membrana",
+      draftPolygonPoints: [],
+      invalidDrawMessage: "",
       revisionLoading: false,
       revisionError: "",
       selectedObjectKey: null,
@@ -649,8 +838,12 @@ export default {
       );
     },
 
+    isDrawMode() {
+      return this.isEditMode && this.editorTool === "DRAW" && !this.effectivePanMode;
+    },
+
     activeRevisionSummary() {
-      return this.isEditMode ? this.activeRevision?.resumen || null : null;
+      return this.isEditMode ? this.workingSummary : null;
     },
 
     activeOverlaySummary() {
@@ -658,16 +851,32 @@ export default {
     },
 
     activeOverlayObjects() {
-      if (
-        this.isEditMode &&
-        Array.isArray(this.activeRevision?.resultado_editado?.objects)
-      ) {
-        return this.activeRevision.resultado_editado.objects;
+      if (this.isEditMode) {
+        return this.workingObjects;
       }
 
       return Array.isArray(this.resultadoNormalizadoActivo?.objects)
         ? this.resultadoNormalizadoActivo.objects
         : [];
+    },
+
+    workingSummary() {
+      const counts = {
+        membrana: 0,
+        nucleo: 0,
+        micronucleo: 0,
+      };
+
+      this.workingObjects.forEach(object => {
+        if (Object.prototype.hasOwnProperty.call(counts, object.label)) {
+          counts[object.label] += 1;
+        }
+      });
+
+      return {
+        counts_by_label: counts,
+        total_objects: this.workingObjects.length,
+      };
     },
 
     selectedObject() {
@@ -721,6 +930,50 @@ export default {
         "is-edit-mode": this.isEditMode,
         "is-effective-pan-mode": this.effectivePanMode,
       };
+    },
+
+    drawingColor() {
+      return this.overlayColorForLabel(this.drawingLabel);
+    },
+
+    draftPolygonSvgPoints() {
+      return this.draftPolygonPoints
+        .map(point => this.scalePoint(point))
+        .filter(Boolean);
+    },
+
+    draftPolygonSvgPointsString() {
+      return this.draftPolygonSvgPoints
+        .map(point => point.join(","))
+        .join(" ");
+    },
+
+    hasPendingDraftWork() {
+      return this.isDraftDirty || this.draftPolygonPoints.length > 0;
+    },
+
+    canUndo() {
+      return this.isEditMode && this.undoStack.length > 0;
+    },
+
+    canRedo() {
+      return this.isEditMode && this.redoStack.length > 0;
+    },
+
+    canSaveDraft() {
+      return (
+        this.isEditMode &&
+        this.isDraftDirty &&
+        !this.isSavingDraft &&
+        this.draftPolygonPoints.length === 0
+      );
+    },
+
+    showPendingDraftNotice() {
+      return (
+        this.viewerMode === "NAVIGATE" &&
+        this.pendingDraftRevision?.estado === "BORRADOR"
+      );
     },
 
     imagePanLimits() {
@@ -831,7 +1084,7 @@ export default {
       return Boolean(
         this.imagenSeleccionada &&
         this.overlayContainment.canProject &&
-        this.overlayPolygons.length
+        (this.overlayPolygons.length || this.isEditMode)
       );
     },
 
@@ -883,13 +1136,32 @@ export default {
 
     activeResultadoSegmentacionId(newId, oldId) {
       if (newId !== oldId) {
+        if (this.hasPendingDraftWork && !this.confirmDiscardDraftChanges()) {
+          return;
+        }
         this.resetEditorState({ clearRevision: true });
+        this.loadPendingDraftRevision(newId);
+      }
+    },
+
+    drawingLabel(label) {
+      if (this.isEditMode && this.editorTool === "DRAW") {
+        this.showOverlayLabel(label);
       }
     },
   },
 
   methods: {
     selectImagen(muestra) {
+      if (
+        this.imagenSeleccionada &&
+        muestra?.id_muestra !== this.imagenSeleccionada.id_muestra &&
+        this.hasPendingDraftWork &&
+        !this.confirmDiscardDraftChanges()
+      ) {
+        return;
+      }
+
       this.imagenSeleccionada = muestra;
       this.segmentacionResultado = null;
       this.segmentacionError = "";
@@ -964,6 +1236,9 @@ export default {
 
     setViewerMode(mode) {
       if (mode === "NAVIGATE") {
+        if (this.hasPendingDraftWork && !this.confirmDiscardDraftChanges()) {
+          return;
+        }
         this.viewerMode = "NAVIGATE";
         this.editorTool = "SELECT";
         this.selectedObjectKey = null;
@@ -1001,6 +1276,10 @@ export default {
       ) {
         this.viewerMode = "EDIT";
         this.editorTool = "SELECT";
+        this.pendingDraftRevision = this.activeRevision;
+        if (!this.workingObjects.length) {
+          this.loadWorkingRevision(this.activeRevision);
+        }
         this.syncOverlayLabelVisibility();
         return;
       }
@@ -1017,6 +1296,8 @@ export default {
 
         this.activeRevision = response.data;
         this.activeRevisionId = response.data.id_revision_segmentacion;
+        this.pendingDraftRevision = response.data;
+        this.loadWorkingRevision(response.data);
         this.viewerMode = "EDIT";
         this.editorTool = "SELECT";
         this.syncOverlayLabelVisibility();
@@ -1049,10 +1330,24 @@ export default {
       this.didPointerDrag = false;
       this.activePanPointerId = null;
       this.panCaptureTarget = null;
+      this.draftPolygonPoints = [];
+      this.invalidDrawMessage = "";
+      this.isDraftDirty = false;
+      this.isSavingDraft = false;
+      this.saveDraftError = "";
+      this.saveDraftMessage = "";
+      this.draftBaselineSignature = "";
+      this.undoStack = [];
+      this.redoStack = [];
+      this.workingObjects = [];
+      this.manualObjectIdCursor = 0;
 
       if (clearRevision) {
         this.activeRevision = null;
         this.activeRevisionId = null;
+        this.pendingDraftRevision = null;
+        this.pendingDraftLoading = false;
+        this.pendingDraftError = "";
       }
     },
 
@@ -1065,12 +1360,366 @@ export default {
       }
     },
 
+    async loadPendingDraftRevision(resultadoId = this.activeResultadoSegmentacionId) {
+      this.pendingDraftRevision = null;
+      this.pendingDraftError = "";
+
+      if (!resultadoId) return;
+
+      if (
+        this.activeRevision?.resultado_segmentacion === resultadoId &&
+        this.activeRevision?.estado === "BORRADOR"
+      ) {
+        this.pendingDraftRevision = this.activeRevision;
+        return;
+      }
+
+      this.pendingDraftLoading = true;
+
+      try {
+        const response = await getSegmentationRevisions(resultadoId);
+
+        if (this.activeResultadoSegmentacionId !== resultadoId) return;
+
+        const revisions = Array.isArray(response.data) ? response.data : [];
+        this.pendingDraftRevision =
+          revisions.find(revision => revision.estado === "BORRADOR") || null;
+      } catch (error) {
+        if (this.activeResultadoSegmentacionId === resultadoId) {
+          this.pendingDraftError =
+            error.response?.data?.error ||
+            "No fue posible consultar revisiones pendientes.";
+        }
+      } finally {
+        if (this.activeResultadoSegmentacionId === resultadoId) {
+          this.pendingDraftLoading = false;
+        }
+      }
+    },
+
+    cloneJson(value) {
+      return value == null ? value : JSON.parse(JSON.stringify(value));
+    },
+
+    serializeObjects(objects) {
+      return JSON.stringify(objects || []);
+    },
+
+    loadWorkingRevision(revision) {
+      const objects = Array.isArray(revision?.resultado_editado?.objects)
+        ? revision.resultado_editado.objects
+        : [];
+
+      this.workingObjects = this.cloneJson(objects);
+      this.draftBaselineSignature = this.serializeObjects(this.workingObjects);
+      this.isDraftDirty = false;
+      this.isSavingDraft = false;
+      this.saveDraftError = "";
+      this.saveDraftMessage = "";
+      this.draftPolygonPoints = [];
+      this.invalidDrawMessage = "";
+      this.undoStack = [];
+      this.redoStack = [];
+      this.selectedObjectKey = null;
+      this.manualObjectIdCursor = this.maxRevisionObjectId(this.workingObjects);
+    },
+
+    updateDraftDirtyState() {
+      this.isDraftDirty =
+        this.serializeObjects(this.workingObjects) !== this.draftBaselineSignature;
+    },
+
+    maxRevisionObjectId(objects) {
+      return objects.reduce((maxId, object) => {
+        const objectId = Number(object?.id);
+        return Number.isInteger(objectId) && objectId > maxId ? objectId : maxId;
+      }, 0);
+    },
+
+    nextRevisionObjectId() {
+      const usedIds = new Set(
+        this.workingObjects
+          .map(object => Number(object?.id))
+          .filter(objectId => Number.isInteger(objectId) && objectId > 0)
+      );
+      let candidate = Math.max(
+        this.manualObjectIdCursor,
+        this.maxRevisionObjectId(this.workingObjects)
+      ) + 1;
+
+      while (usedIds.has(candidate)) {
+        candidate += 1;
+      }
+
+      this.manualObjectIdCursor = candidate;
+      return candidate;
+    },
+
+    revisionObjectSelectionKey(object) {
+      return `revision-${object.id}`;
+    },
+
+    findWorkingObjectIndexByKey(selectionKey) {
+      return this.workingObjects.findIndex(
+        object => this.revisionObjectSelectionKey(object) === selectionKey
+      );
+    },
+
+    applyRevisionOperation(operation) {
+      const object = this.cloneJson(operation.object);
+
+      if (operation.type === "CREATE_OBJECT") {
+        const index = Math.min(
+          Math.max(operation.index, 0),
+          this.workingObjects.length
+        );
+        this.workingObjects.splice(index, 0, object);
+        this.selectedObjectKey = this.revisionObjectSelectionKey(object);
+      }
+
+      if (operation.type === "DELETE_OBJECT") {
+        this.workingObjects = this.workingObjects.filter(
+          item => item.id !== object.id
+        );
+        if (this.selectedObjectKey === this.revisionObjectSelectionKey(object)) {
+          this.selectedObjectKey = null;
+        }
+      }
+
+      this.updateDraftDirtyState();
+    },
+
+    revertRevisionOperation(operation) {
+      const object = this.cloneJson(operation.object);
+
+      if (operation.type === "CREATE_OBJECT") {
+        this.workingObjects = this.workingObjects.filter(
+          item => item.id !== object.id
+        );
+        if (this.selectedObjectKey === this.revisionObjectSelectionKey(object)) {
+          this.selectedObjectKey = null;
+        }
+      }
+
+      if (operation.type === "DELETE_OBJECT") {
+        const index = Math.min(
+          Math.max(operation.index, 0),
+          this.workingObjects.length
+        );
+        this.workingObjects.splice(index, 0, object);
+      }
+
+      this.updateDraftDirtyState();
+    },
+
+    pushUndoOperation(operation) {
+      this.undoStack.push(this.cloneJson(operation));
+      this.redoStack = [];
+      this.updateDraftDirtyState();
+    },
+
     setEditorTool(tool) {
-      if (!["SELECT", "PAN"].includes(tool)) return;
+      if (!["SELECT", "PAN", "DRAW"].includes(tool)) return;
 
       this.editorTool = tool;
       this.isSpacePressed = false;
       this.endImagePan();
+
+      if (tool === "DRAW") {
+        this.showOverlayLabel(this.drawingLabel);
+      }
+    },
+
+    showOverlayLabel(label) {
+      this.overlayLabelVisibility = {
+        ...this.overlayLabelVisibility,
+        [label]: true,
+      };
+    },
+
+    handleOverlaySvgClick(event) {
+      if (!this.isDrawMode) return;
+
+      const justDragged = Date.now() - this.lastPointerDragAt < 200;
+      const spaceInteraction = Date.now() - this.lastSpacePointerAt < 200;
+      if (justDragged || spaceInteraction) return;
+
+      const point = this.screenPointToNaturalImagePoint(event);
+      if (!point) return;
+
+      event.stopPropagation();
+      this.invalidDrawMessage = "";
+      this.draftPolygonPoints = [
+        ...this.draftPolygonPoints,
+        point,
+      ];
+    },
+
+    screenPointToSvgPoint(event) {
+      const svg = this.$refs.segmentationSvg;
+      if (!svg) return null;
+
+      const ctm = svg.getScreenCTM?.();
+      if (!ctm) return null;
+
+      const point = new DOMPoint(event.clientX, event.clientY);
+      const svgPoint = point.matrixTransform(ctm.inverse());
+      return {
+        x: svgPoint.x,
+        y: svgPoint.y,
+      };
+    },
+
+    svgPointToNaturalImagePoint(point) {
+      const containment = this.overlayContainment;
+      if (!containment.canProject) return null;
+
+      const { offsetX, offsetY, scaleX, scaleY, displayedSize } = containment;
+      const maxX = offsetX + displayedSize.width;
+      const maxY = offsetY + displayedSize.height;
+
+      if (
+        point.x < offsetX ||
+        point.y < offsetY ||
+        point.x > maxX ||
+        point.y > maxY
+      ) {
+        this.invalidDrawMessage = "El punto esta fuera del area real de imagen.";
+        return null;
+      }
+
+      return [
+        Number(((point.x - offsetX) / scaleX).toFixed(2)),
+        Number(((point.y - offsetY) / scaleY).toFixed(2)),
+      ];
+    },
+
+    screenPointToNaturalImagePoint(event) {
+      const svgPoint = this.screenPointToSvgPoint(event);
+      if (!svgPoint) return null;
+      return this.svgPointToNaturalImagePoint(svgPoint);
+    },
+
+    finishDraftPolygon() {
+      if (this.draftPolygonPoints.length < 3) return;
+
+      const newObject = {
+        id: this.nextRevisionObjectId(),
+        label: this.drawingLabel,
+        geometry: {
+          type: "polygon",
+          points: this.cloneJson(this.draftPolygonPoints),
+        },
+        provenance: {
+          origin: "manual",
+          base_object_id: null,
+        },
+      };
+      const index = this.workingObjects.length;
+
+      this.workingObjects = [
+        ...this.workingObjects,
+        newObject,
+      ];
+      this.draftPolygonPoints = [];
+      this.invalidDrawMessage = "";
+      this.selectedObjectKey = this.revisionObjectSelectionKey(newObject);
+      this.pushUndoOperation({
+        type: "CREATE_OBJECT",
+        object: newObject,
+        index,
+      });
+      this.showOverlayLabel(newObject.label);
+    },
+
+    cancelDraftPolygon() {
+      this.draftPolygonPoints = [];
+      this.invalidDrawMessage = "";
+    },
+
+    deleteSelectedObject() {
+      if (!this.selectedObjectKey) return;
+
+      const index = this.findWorkingObjectIndexByKey(this.selectedObjectKey);
+      if (index < 0) return;
+
+      const object = this.cloneJson(this.workingObjects[index]);
+      this.workingObjects.splice(index, 1);
+      this.selectedObjectKey = null;
+      this.pushUndoOperation({
+        type: "DELETE_OBJECT",
+        object,
+        index,
+      });
+    },
+
+    undoRevisionEdit() {
+      const operation = this.undoStack.pop();
+      if (!operation) return;
+
+      this.revertRevisionOperation(operation);
+      this.redoStack.push(this.cloneJson(operation));
+    },
+
+    redoRevisionEdit() {
+      const operation = this.redoStack.pop();
+      if (!operation) return;
+
+      this.applyRevisionOperation(operation);
+      this.undoStack.push(this.cloneJson(operation));
+    },
+
+    buildEditableSnapshot() {
+      return {
+        ...this.cloneJson(this.activeRevision?.resultado_editado || {}),
+        objects: this.cloneJson(this.workingObjects),
+      };
+    },
+
+    async saveDraft() {
+      if (!this.canSaveDraft || !this.activeRevisionId) return;
+
+      this.isSavingDraft = true;
+      this.saveDraftError = "";
+      this.saveDraftMessage = "";
+
+      try {
+        const response = await updateSegmentationDraft(
+          this.activeRevisionId,
+          this.buildEditableSnapshot()
+        );
+        const selectedKey = this.selectedObjectKey;
+
+        this.activeRevision = response.data;
+        this.activeRevisionId = response.data.id_revision_segmentacion;
+        this.pendingDraftRevision = response.data;
+        this.loadWorkingRevision(response.data);
+
+        if (
+          selectedKey &&
+          this.workingObjects.some(
+            object => this.revisionObjectSelectionKey(object) === selectedKey
+          )
+        ) {
+          this.selectedObjectKey = selectedKey;
+        }
+
+        this.viewerMode = "EDIT";
+        this.saveDraftMessage = "Borrador guardado.";
+      } catch (error) {
+        this.saveDraftError =
+          error.response?.data?.resultado_editado?.[0] ||
+          error.response?.data?.detail ||
+          "No fue posible guardar el borrador.";
+      } finally {
+        this.isSavingDraft = false;
+      }
+    },
+
+    confirmDiscardDraftChanges() {
+      return window.confirm(
+        "Hay cambios locales sin guardar. Desea descartarlos?"
+      );
     },
 
     handleOverlayPolygonPointerDown(event) {
@@ -1121,7 +1770,7 @@ export default {
         return;
       }
 
-      if (this.editorTool === "SELECT") {
+      if (this.editorTool !== "PAN") {
         this.isSpacePressed = true;
       }
       event.preventDefault();
@@ -1137,6 +1786,13 @@ export default {
     handleWindowBlur() {
       this.isSpacePressed = false;
       this.endImagePan();
+    },
+
+    handleBeforeUnload(event) {
+      if (!this.hasPendingDraftWork) return;
+
+      event.preventDefault();
+      event.returnValue = "";
     },
 
     isTypingTarget(target) {
@@ -1209,6 +1865,10 @@ export default {
     },
 
     overlayObjectKey(object, index) {
+      if (this.isEditMode && Number.isInteger(Number(object?.id))) {
+        return this.revisionObjectSelectionKey(object);
+      }
+
       const normalizedId = object?.id ?? "sin-id";
       const label = object?.label || "desconocido";
       return `${index}-${normalizedId}-${label}`;
@@ -1375,6 +2035,7 @@ export default {
     window.addEventListener("keydown", this.handleEditorKeyDown);
     window.addEventListener("keyup", this.handleEditorKeyUp);
     window.addEventListener("blur", this.handleWindowBlur);
+    window.addEventListener("beforeunload", this.handleBeforeUnload);
 
     apiClient
       .get("/api/analisis/")
@@ -1394,6 +2055,7 @@ export default {
     window.removeEventListener("keydown", this.handleEditorKeyDown);
     window.removeEventListener("keyup", this.handleEditorKeyUp);
     window.removeEventListener("blur", this.handleWindowBlur);
+    window.removeEventListener("beforeunload", this.handleBeforeUnload);
   },
 };
 </script>
@@ -1795,6 +2457,20 @@ export default {
   white-space: nowrap;
 }
 
+.revision-badge.dirty {
+  background: #fff8e1;
+  color: #8a6d1d;
+}
+
+.editor-tool-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.editor-tool-btn {
+  padding-inline: 10px;
+}
+
 .img-placeholder {
   position: relative;
   flex: 0 0 auto;
@@ -1873,6 +2549,10 @@ export default {
   pointer-events: none;
 }
 
+.segmentation-svg-overlay.is-draw-mode .segmentation-polygons {
+  pointer-events: none;
+}
+
 .segmentation-polygon {
   fill: rgba(30, 136, 229, 0.16);
   stroke: rgba(30, 136, 229, 0.92);
@@ -1903,6 +2583,30 @@ export default {
 
 .segmentation-selection-highlight.manual {
   stroke-dasharray: 7 4;
+}
+
+.draft-polygon-layer {
+  pointer-events: none;
+}
+
+.draft-polygon-line,
+.draft-polygon-fill {
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.draft-polygon-line {
+  fill: none;
+  stroke-dasharray: 6 4;
+}
+
+.draft-polygon-fill {
+  opacity: 0.85;
+}
+
+.draft-polygon-point {
+  stroke: white;
+  stroke-width: 2;
 }
 
 .empty-image-state {
@@ -1947,6 +2651,31 @@ export default {
 .control-btn:hover {
   border-color: #1e88e5;
   background: #e3f2fd;
+}
+
+.control-btn.danger {
+  border-color: #ffcdd2;
+  color: #c62828;
+}
+
+.control-btn.danger:hover:not(:disabled) {
+  background: #ffebee;
+  border-color: #ef5350;
+}
+
+.control-btn.success {
+  border-color: #c8e6c9;
+  color: #2e7d32;
+}
+
+.control-btn.success:hover:not(:disabled) {
+  background: #e8f5e9;
+  border-color: #43a047;
+}
+
+.control-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 /* DATOS */
@@ -2098,6 +2827,59 @@ export default {
   line-height: 1.4;
 }
 
+.editor-actions {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 10px;
+}
+
+.drawing-panel {
+  border-top: 1px solid #d9e2ec;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+}
+
+.drawing-label-row {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.drawing-label-row span {
+  color: #667;
+  font-size: 12px;
+}
+
+.drawing-label-select {
+  border: 1px solid #d9e2ec;
+  border-radius: 8px;
+  color: #2c3e50;
+  font-size: 12px;
+  min-width: 130px;
+  padding: 6px 8px;
+}
+
+.draft-status {
+  background: #f0f4f8;
+  border: 1px solid #d9e2ec;
+  border-radius: 8px;
+  color: #52606d;
+  font-size: 12px;
+  padding: 8px 10px;
+}
+
+.draft-status.warning,
+.segmentation-status.warning {
+  background: #fff8e1;
+  border-color: #ffe082;
+  color: #8a6d1d;
+}
+
 .segmentation-panel {
   display: flex;
   flex-direction: column;
@@ -2151,6 +2933,36 @@ export default {
   border: 1px solid #d9e2ec;
   background: #f8f9fa;
   color: #2c3e50;
+}
+
+.pending-draft-card {
+  align-items: center;
+  background: #fff8e1;
+  border: 1px solid #ffe082;
+  border-radius: 10px;
+  color: #5f4b12;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 10px 12px;
+}
+
+.pending-draft-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.pending-draft-copy strong {
+  color: #5f4b12;
+  font-size: 13px;
+}
+
+.pending-draft-copy span {
+  color: #7a651a;
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .segmentation-history {

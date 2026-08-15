@@ -11,3 +11,9 @@ export function getOrCreateSegmentationDraft(resultadoId) {
 export function getSegmentationRevision(revisionId) {
   return apiClient.get(`/api/revisiones-segmentacion/${revisionId}/`);
 }
+
+export function updateSegmentationDraft(revisionId, resultadoEditado) {
+  return apiClient.patch(`/api/revisiones-segmentacion/${revisionId}/`, {
+    resultado_editado: resultadoEditado,
+  });
+}

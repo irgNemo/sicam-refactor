@@ -31,6 +31,11 @@ from .services.segmentation.exceptions import (
     SegmentationTimeoutError,
 )
 from .services.segmentation.normalizers import normalize_segmentation_result
+from .services.segmentation.effective import (
+    FUENTE_AUTOMATICO,
+    FUENTE_VALIDADA,
+    resolve_effective_segmentation,
+)
 from .management.commands.seed_demo_data import (
     DEMO_IDENTIFICACION,
     DEMO_IMAGE_NAME,
@@ -756,6 +761,52 @@ class CasoSegmentationSummaryTests(APITestCase):
             resultado_normalizado=normalized,
         )
 
+    def _revision_snapshot(self, resultado, counts):
+        objects = []
+        object_id = 1
+        for label, count in counts.items():
+            for _ in range(count):
+                objects.append({
+                    'id': object_id,
+                    'label': label,
+                    'geometry': {
+                        'type': 'polygon',
+                        'points': [
+                            [object_id, object_id],
+                            [object_id + 1, object_id],
+                            [object_id + 1, object_id + 1],
+                        ],
+                    },
+                    'provenance': {
+                        'origin': 'manual',
+                        'base_object_id': None,
+                    },
+                })
+                object_id += 1
+
+        return {
+            'version': '1.0',
+            'base_result_id': resultado.id_resultado_segmentacion,
+            'objects': objects,
+        }
+
+    def _create_revision(self, resultado, numero_revision, estado, counts):
+        normalized_counts = {
+            'membrana': counts.get('membrana', 0),
+            'nucleo': counts.get('nucleo', 0),
+            'micronucleo': counts.get('micronucleo', 0),
+        }
+        return RevisionSegmentacion.objects.create(
+            resultado_segmentacion=resultado,
+            numero_revision=numero_revision,
+            estado=estado,
+            resultado_editado=self._revision_snapshot(resultado, counts),
+            resumen={
+                'counts_by_label': normalized_counts,
+                'total_objects': sum(normalized_counts.values()),
+            },
+        )
+
     def _assert_invariant(self, data):
         assert (
             data['muestras_segmentadas']
@@ -1009,6 +1060,50 @@ class CasoSegmentationSummaryTests(APITestCase):
         assert response.data['total_objects'] == 0
         self._assert_invariant(response.data)
 
+    def test_resumen_segmentacion_uses_effective_validated_revision(self):
+        muestra = self._create_muestra()
+        resultado = self._create_result(muestra, counts={'membrana': 1})
+        self._create_revision(
+            resultado,
+            1,
+            RevisionSegmentacion.ESTADO_VALIDADA,
+            {'membrana': 2},
+        )
+
+        response = self.client.get(self._url())
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['counts_by_label'] == {
+            'membrana': 2,
+            'nucleo': 0,
+            'micronucleo': 0,
+        }
+        assert response.data['total_objects'] == 2
+
+        self._create_revision(
+            resultado,
+            2,
+            RevisionSegmentacion.ESTADO_BORRADOR,
+            {'membrana': 3},
+        )
+
+        draft_response = self.client.get(self._url())
+
+        assert draft_response.status_code == status.HTTP_200_OK
+        assert draft_response.data['counts_by_label']['membrana'] == 2
+        assert draft_response.data['total_objects'] == 2
+
+        RevisionSegmentacion.objects.filter(
+            resultado_segmentacion=resultado,
+            numero_revision=2,
+        ).update(estado=RevisionSegmentacion.ESTADO_VALIDADA)
+
+        validated_response = self.client.get(self._url())
+
+        assert validated_response.status_code == status.HTTP_200_OK
+        assert validated_response.data['counts_by_label']['membrana'] == 3
+        assert validated_response.data['total_objects'] == 3
+
 
 
 class RevisionSegmentacionTests(APITestCase):
@@ -1063,6 +1158,14 @@ class RevisionSegmentacionTests(APITestCase):
         return reverse(
             'revision-segmentacion-validar',
             kwargs={'pk': revision_id}
+        )
+
+    def _efectivo_url(self, resultado_id=None):
+        return reverse(
+            'resultado-segmentacion-efectivo',
+            kwargs={
+                'pk': resultado_id or self.resultado.id_resultado_segmentacion
+            }
         )
 
     def _normalized(self, version='1.1'):
@@ -1167,6 +1270,47 @@ class RevisionSegmentacionTests(APITestCase):
                 'base_object_id': None,
             },
         }
+
+    def _snapshot(self, resultado=None, objects=None):
+        resultado = resultado or self.resultado
+        return {
+            'version': '1.0',
+            'base_result_id': resultado.id_resultado_segmentacion,
+            'objects': objects if objects is not None else [
+                self._manual_object(1, 'membrana'),
+            ],
+        }
+
+    def _summary(self, counts):
+        normalized_counts = {
+            'membrana': counts.get('membrana', 0),
+            'nucleo': counts.get('nucleo', 0),
+            'micronucleo': counts.get('micronucleo', 0),
+        }
+        return {
+            'counts_by_label': normalized_counts,
+            'total_objects': sum(normalized_counts.values()),
+        }
+
+    def _create_revision(
+        self,
+        *,
+        numero_revision,
+        estado,
+        resultado=None,
+        snapshot=None,
+        summary=None
+    ):
+        resultado = resultado or self.resultado
+        snapshot = snapshot or self._snapshot(resultado=resultado)
+        summary = summary or self._summary({'membrana': 1})
+        return RevisionSegmentacion.objects.create(
+            resultado_segmentacion=resultado,
+            numero_revision=numero_revision,
+            estado=estado,
+            resultado_editado=snapshot,
+            resumen=summary,
+        )
 
     def _patch_snapshot(self, revision, snapshot):
         return self.client.patch(
@@ -1676,3 +1820,160 @@ class RevisionSegmentacionTests(APITestCase):
         assert response.status_code == status.HTTP_201_CREATED
         assert response.data['resultado_editado']['version'] == '1.0'
         assert response.data['resumen']['total_objects'] == 2
+
+    def test_effective_without_revisions_uses_automatic_result(self):
+        effective = resolve_effective_segmentation(self.resultado)
+
+        assert effective['fuente'] == FUENTE_AUTOMATICO
+        assert effective['revision'] is None
+        assert effective['resultado'] == self.resultado.resultado_normalizado
+        assert effective['resumen'] == self.resultado.resultado_normalizado['summary']
+
+    def test_effective_ignores_draft_without_validated_revision(self):
+        self._create_revision(
+            numero_revision=1,
+            estado=RevisionSegmentacion.ESTADO_BORRADOR,
+            summary=self._summary({'membrana': 99}),
+        )
+
+        effective = resolve_effective_segmentation(self.resultado)
+
+        assert effective['fuente'] == FUENTE_AUTOMATICO
+        assert effective['revision'] is None
+        assert effective['resumen'] == self.resultado.resultado_normalizado['summary']
+
+    def test_effective_uses_validated_revision_snapshot_and_summary(self):
+        snapshot = self._snapshot(objects=[
+            self._manual_object(10, 'membrana'),
+            self._manual_object(11, 'nucleo'),
+        ])
+        summary = self._summary({'membrana': 1, 'nucleo': 1})
+        revision = self._create_revision(
+            numero_revision=1,
+            estado=RevisionSegmentacion.ESTADO_VALIDADA,
+            snapshot=snapshot,
+            summary=summary,
+        )
+
+        effective = resolve_effective_segmentation(self.resultado)
+
+        assert effective['fuente'] == FUENTE_VALIDADA
+        assert effective['revision']['id_revision_segmentacion'] == (
+            revision.id_revision_segmentacion
+        )
+        assert effective['revision']['numero_revision'] == 1
+        assert effective['resultado'] == snapshot
+        assert effective['resumen'] == summary
+
+    def test_effective_uses_validated_revision_before_later_draft(self):
+        validated = self._create_revision(
+            numero_revision=1,
+            estado=RevisionSegmentacion.ESTADO_VALIDADA,
+            summary=self._summary({'membrana': 2}),
+        )
+        self._create_revision(
+            numero_revision=2,
+            estado=RevisionSegmentacion.ESTADO_BORRADOR,
+            summary=self._summary({'membrana': 3}),
+        )
+
+        effective = resolve_effective_segmentation(self.resultado)
+
+        assert effective['fuente'] == FUENTE_VALIDADA
+        assert effective['revision']['id_revision_segmentacion'] == (
+            validated.id_revision_segmentacion
+        )
+        assert effective['revision']['numero_revision'] == 1
+        assert effective['resumen']['counts_by_label']['membrana'] == 2
+
+    def test_effective_uses_highest_validated_revision_number(self):
+        self._create_revision(
+            numero_revision=1,
+            estado=RevisionSegmentacion.ESTADO_VALIDADA,
+            summary=self._summary({'membrana': 1}),
+        )
+        revision_two = self._create_revision(
+            numero_revision=2,
+            estado=RevisionSegmentacion.ESTADO_VALIDADA,
+            summary=self._summary({'membrana': 2}),
+        )
+
+        effective = resolve_effective_segmentation(self.resultado)
+
+        assert effective['fuente'] == FUENTE_VALIDADA
+        assert effective['revision']['id_revision_segmentacion'] == (
+            revision_two.id_revision_segmentacion
+        )
+        assert effective['revision']['numero_revision'] == 2
+        assert effective['resumen']['counts_by_label']['membrana'] == 2
+
+    def test_effective_endpoint_without_validated_revision_returns_automatic(self):
+        response = self.client.get(self._efectivo_url())
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['resultado_segmentacion_id'] == (
+            self.resultado.id_resultado_segmentacion
+        )
+        assert response.data['fuente'] == FUENTE_AUTOMATICO
+        assert response.data['revision'] is None
+        assert response.data['resultado'] == self.resultado.resultado_normalizado
+        assert response.data['resumen'] == self.resultado.resultado_normalizado['summary']
+
+    def test_effective_endpoint_with_validated_revision_returns_validated(self):
+        snapshot = self._snapshot(objects=[
+            self._manual_object(10, 'membrana'),
+            self._manual_object(11, 'nucleo'),
+        ])
+        summary = self._summary({'membrana': 1, 'nucleo': 1})
+        revision = self._create_revision(
+            numero_revision=1,
+            estado=RevisionSegmentacion.ESTADO_VALIDADA,
+            snapshot=snapshot,
+            summary=summary,
+        )
+
+        response = self.client.get(self._efectivo_url())
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['fuente'] == FUENTE_VALIDADA
+        assert response.data['revision']['id_revision_segmentacion'] == (
+            revision.id_revision_segmentacion
+        )
+        assert response.data['revision']['numero_revision'] == 1
+        assert response.data['revision']['estado'] == RevisionSegmentacion.ESTADO_VALIDADA
+        assert response.data['resultado'] == snapshot
+        assert response.data['resumen'] == summary
+
+    def test_effective_endpoint_ignores_draft_after_validated_revision(self):
+        self._create_revision(
+            numero_revision=1,
+            estado=RevisionSegmentacion.ESTADO_VALIDADA,
+            summary=self._summary({'membrana': 2}),
+        )
+        self._create_revision(
+            numero_revision=2,
+            estado=RevisionSegmentacion.ESTADO_BORRADOR,
+            summary=self._summary({'membrana': 3}),
+        )
+
+        response = self.client.get(self._efectivo_url())
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['fuente'] == FUENTE_VALIDADA
+        assert response.data['revision']['numero_revision'] == 1
+        assert response.data['resumen']['counts_by_label']['membrana'] == 2
+
+    def test_effective_resolution_does_not_mutate_automatic_result(self):
+        original_raw = deepcopy(self.resultado.respuesta_json)
+        original_normalized = deepcopy(self.resultado.resultado_normalizado)
+        self._create_revision(
+            numero_revision=1,
+            estado=RevisionSegmentacion.ESTADO_VALIDADA,
+            summary=self._summary({'membrana': 2}),
+        )
+
+        self.client.get(self._efectivo_url())
+        self.resultado.refresh_from_db()
+
+        assert self.resultado.respuesta_json == original_raw
+        assert self.resultado.resultado_normalizado == original_normalized

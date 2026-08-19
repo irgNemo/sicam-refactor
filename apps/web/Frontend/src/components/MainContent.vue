@@ -739,6 +739,28 @@
                 </div>
 
                 <div
+                  v-if="effectiveSegmentationLoading"
+                  class="segmentation-status neutral"
+                >
+                  Cargando resultado mostrado...
+                </div>
+
+                <div
+                  v-else-if="effectiveSegmentationError"
+                  class="segmentation-status error"
+                >
+                  {{ effectiveSegmentationError }}
+                </div>
+
+                <div
+                  v-else-if="effectiveSegmentation"
+                  class="effective-result-card"
+                >
+                  <strong>Resultado mostrado</strong>
+                  <span>{{ effectiveSegmentationDisplay }}</span>
+                </div>
+
+                <div
                   v-if="showPendingDraftNotice"
                   class="pending-draft-card"
                 >
@@ -876,6 +898,7 @@ import {
   segmentarMuestra,
 } from "../services/segmentationService";
 import {
+  getEffectiveSegmentation,
   getSegmentationRevisions,
   getOrCreateSegmentationDraft,
   updateSegmentationDraft,
@@ -937,6 +960,10 @@ export default {
       activeRevisionId: null,
       pendingDraftRevision: null,
       latestValidatedRevision: null,
+      effectiveSegmentation: null,
+      effectiveSegmentationLoading: false,
+      effectiveSegmentationError: "",
+      effectiveSegmentationRequestToken: 0,
       pendingDraftLoading: false,
       pendingDraftError: "",
       workingObjects: [],
@@ -1102,7 +1129,11 @@ export default {
     },
 
     activeOverlaySummary() {
-      return this.activeRevisionSummary || this.resultadoNormalizadoActivo?.summary || null;
+      if (this.isEditMode) {
+        return this.activeRevisionSummary;
+      }
+
+      return this.effectiveSegmentation?.resumen || null;
     },
 
     activeOverlayObjects() {
@@ -1110,9 +1141,24 @@ export default {
         return this.workingObjects;
       }
 
-      return Array.isArray(this.resultadoNormalizadoActivo?.objects)
-        ? this.resultadoNormalizadoActivo.objects
+      const objects = this.effectiveSegmentation?.resultado?.objects;
+      return Array.isArray(objects)
+        ? objects
         : [];
+    },
+
+    effectiveSegmentationDisplay() {
+      if (!this.effectiveSegmentation) return "";
+
+      if (this.effectiveSegmentation.fuente === "VALIDADA") {
+        const revisionNumber =
+          this.effectiveSegmentation.revision?.numero_revision;
+        return revisionNumber
+          ? `Revisión #${revisionNumber} validada`
+          : "Revisión validada";
+      }
+
+      return "Automático";
     },
 
     workingSummary() {
@@ -1627,6 +1673,7 @@ export default {
           return;
         }
         this.resetEditorState({ clearRevision: true });
+        this.loadEffectiveSegmentation(newId);
         this.loadPendingDraftRevision(newId);
       }
     },
@@ -1656,6 +1703,7 @@ export default {
       this.historialSegmentacion = [];
       this.historialError = "";
       this.historialLoading = false;
+      this.clearEffectiveSegmentation();
       this.resetImageMeasurements();
       this.resetImageView();
       this.resetEditorState({ clearRevision: true });
@@ -1708,6 +1756,7 @@ export default {
         this.segmentacionResultado = response.data;
         this.syncOverlayLabelVisibility();
         await this.cargarHistorialSegmentacion(this.imagenSeleccionada.id_muestra);
+        await this.loadEffectiveSegmentation(this.activeResultadoSegmentacionId);
         this.$emit("segmentation-completed", {
           caseId: this.caseId,
           muestraId: this.imagenSeleccionada.id_muestra,
@@ -1848,6 +1897,13 @@ export default {
       }
     },
 
+    clearEffectiveSegmentation() {
+      this.effectiveSegmentation = null;
+      this.effectiveSegmentationError = "";
+      this.effectiveSegmentationLoading = false;
+      this.effectiveSegmentationRequestToken += 1;
+    },
+
     ensureRevisionBelongsToActiveResult() {
       if (
         this.activeRevision &&
@@ -1869,7 +1925,6 @@ export default {
         this.activeRevision?.estado === "BORRADOR"
       ) {
         this.pendingDraftRevision = this.activeRevision;
-        return;
       }
 
       this.pendingDraftLoading = true;
@@ -1902,6 +1957,51 @@ export default {
       return revisions
         .filter(revision => revision.estado === "VALIDADA")
         .sort((a, b) => Number(b.numero_revision) - Number(a.numero_revision))[0] || null;
+    },
+
+    async loadEffectiveSegmentation(resultadoId = this.activeResultadoSegmentacionId) {
+      const requestToken = this.effectiveSegmentationRequestToken + 1;
+      this.effectiveSegmentationRequestToken = requestToken;
+      this.effectiveSegmentation = null;
+      this.effectiveSegmentationError = "";
+
+      if (!resultadoId) {
+        this.effectiveSegmentationLoading = false;
+        return;
+      }
+
+      this.effectiveSegmentationLoading = true;
+
+      try {
+        const response = await getEffectiveSegmentation(resultadoId);
+
+        if (
+          this.activeResultadoSegmentacionId !== resultadoId ||
+          this.effectiveSegmentationRequestToken !== requestToken
+        ) {
+          return;
+        }
+
+        this.effectiveSegmentation = response.data || null;
+        this.syncOverlayLabelVisibility();
+      } catch (error) {
+        if (
+          this.activeResultadoSegmentacionId === resultadoId &&
+          this.effectiveSegmentationRequestToken === requestToken
+        ) {
+          this.effectiveSegmentation = null;
+          this.effectiveSegmentationError =
+            error.response?.data?.error ||
+            "No fue posible cargar el resultado mostrado.";
+        }
+      } finally {
+        if (
+          this.activeResultadoSegmentacionId === resultadoId &&
+          this.effectiveSegmentationRequestToken === requestToken
+        ) {
+          this.effectiveSegmentationLoading = false;
+        }
+      }
     },
 
     cloneJson(value) {
@@ -2787,6 +2887,7 @@ export default {
       this.validateRevisionMessage = "";
 
       try {
+        const resultadoId = this.activeResultadoSegmentacionId;
         const response = await validateRevision(this.activeRevisionId);
 
         this.cancelVertexDrag();
@@ -2813,7 +2914,12 @@ export default {
         this.vertexEditMode = "MOVE";
         this.isSpacePressed = false;
         this.endImagePan();
-        this.loadPendingDraftRevision(this.activeResultadoSegmentacionId);
+        await this.loadEffectiveSegmentation(resultadoId);
+        await this.loadPendingDraftRevision(resultadoId);
+        this.$emit("segmentation-completed", {
+          caseId: this.caseId,
+          resultadoId,
+        });
       } catch (error) {
         const status = error.response?.status;
         this.validateRevisionError =
@@ -3291,7 +3397,10 @@ export default {
       const nextVisibility = {};
 
       this.overlayLabelNames.forEach(label => {
-        nextVisibility[label] = true;
+        nextVisibility[label] =
+          this.overlayLabelVisibility[label] !== undefined
+            ? this.overlayLabelVisibility[label]
+            : true;
       });
 
       this.overlayLabelVisibility = nextVisibility;
@@ -4349,11 +4458,27 @@ export default {
   padding: 10px 12px;
 }
 
+.effective-result-card {
+  background: #eef5ff;
+  border: 1px solid #c8dcf5;
+  border-radius: 10px;
+  color: #1f4f82;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+}
+
 .validated-revision-card strong {
   font-size: 12px;
 }
 
-.validated-revision-card span {
+.effective-result-card strong {
+  font-size: 12px;
+}
+
+.validated-revision-card span,
+.effective-result-card span {
   font-size: 11px;
   line-height: 1.4;
 }

@@ -1,5 +1,5 @@
 from django.db import transaction
-from django.db.models import OuterRef, Subquery
+from django.db.models import OuterRef, Prefetch, Subquery
 from django.shortcuts import render
 from django.utils import timezone
 
@@ -41,6 +41,7 @@ from .services.segmentation.exceptions import (
     SegmentationTimeoutError,
 )
 from .services.segmentation.factory import segment_image
+from .services.segmentation.effective import resolve_effective_segmentation
 from .services.segmentation.normalizers import normalize_segmentation_result
 from .services.segmentation.revisions import (
     build_revision_snapshot_from_normalized,
@@ -62,6 +63,10 @@ def _extract_valid_segmentation_summary(resultado_normalizado):
         return None
 
     summary = resultado_normalizado.get('summary')
+    return _extract_valid_summary(summary)
+
+
+def _extract_valid_summary(summary):
     if not isinstance(summary, dict):
         return None
 
@@ -186,6 +191,14 @@ class CasoViewSet(viewsets.ModelViewSet):
             resultado.id_resultado_segmentacion: resultado
             for resultado in ResultadoSegmentacion.objects.filter(
                 id_resultado_segmentacion__in=result_ids
+            ).prefetch_related(
+                Prefetch(
+                    'revisiones',
+                    queryset=RevisionSegmentacion.objects.filter(
+                        estado=RevisionSegmentacion.ESTADO_VALIDADA
+                    ).order_by('-numero_revision'),
+                    to_attr='validated_revisions_for_effective',
+                )
             )
         }
 
@@ -210,8 +223,13 @@ class CasoViewSet(viewsets.ModelViewSet):
                 continue
 
             resultado = resultados.get(latest_result_id)
-            normalized_summary = _extract_valid_segmentation_summary(
-                resultado.resultado_normalizado if resultado else None
+            effective = (
+                resolve_effective_segmentation(resultado)
+                if resultado
+                else None
+            )
+            normalized_summary = _extract_valid_summary(
+                effective['resumen'] if effective else None
             )
 
             if normalized_summary is None:
@@ -378,6 +396,11 @@ class MuestraSalivaViewSet(viewsets.ModelViewSet):
 class ResultadoSegmentacionViewSet(viewsets.GenericViewSet):
     queryset = ResultadoSegmentacion.objects.all()
     serializer_class = ResultadoSegmentacionSerializer
+
+    @action(detail=True, methods=['get'], url_path='efectivo')
+    def efectivo(self, request, pk=None):
+        resultado = self.get_object()
+        return Response(resolve_effective_segmentation(resultado))
 
     @action(detail=True, methods=['get', 'post'], url_path='revisiones')
     def revisiones(self, request, pk=None):

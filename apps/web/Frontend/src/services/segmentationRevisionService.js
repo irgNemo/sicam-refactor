@@ -4,6 +4,10 @@ export function getSegmentationRevisions(resultadoId) {
   return apiClient.get(`/api/resultados-segmentacion/${resultadoId}/revisiones/`);
 }
 
+export function getEffectiveSegmentation(resultadoId) {
+  return apiClient.get(`/api/resultados-segmentacion/${resultadoId}/efectivo/`);
+}
+
 export function getOrCreateSegmentationDraft(resultadoId) {
   return apiClient.post(`/api/resultados-segmentacion/${resultadoId}/revisiones/`);
 }

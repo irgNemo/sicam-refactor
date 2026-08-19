@@ -81,92 +81,93 @@
                 Análisis microscópico
               </span>
             </div>
-            <div class="card-tools">
-              <button class="tool-btn" title="Editar">
-                <span>✏️</span>
-              </button>
-              <button class="tool-btn" title="Limpiar">
-                <span>🧹</span>
-              </button>
-              <button class="tool-btn danger" title="Eliminar">
-                <span>🗑️</span>
-              </button>
-              <button class="tool-btn success" title="Aprobar">
-                <span>✔️</span>
-              </button>
-            </div>
           </div>
 
           <div class="card-body split-view">
 
             <!-- IMAGEN -->
             <div class="image-container">
-              <div v-if="imagenSeleccionada" class="viewer-mode-bar">
-                <div class="viewer-mode-buttons">
-                  <button
-                    class="mode-btn"
-                    :class="{ active: viewerMode === 'NAVIGATE' }"
-                    title="Navegar por la imagen"
-                    :aria-pressed="viewerMode === 'NAVIGATE'"
-                    @click="setViewerMode('NAVIGATE')"
-                  >
-                    Navegar
-                  </button>
-                  <button
-                    class="mode-btn"
-                    :class="{ active: viewerMode === 'EDIT' }"
-                    :disabled="revisionLoading"
-                    title="Editar revision experta"
-                    :aria-pressed="viewerMode === 'EDIT'"
-                    @click="setViewerMode('EDIT')"
-                  >
-                    {{ revisionLoading ? 'Cargando...' : 'Editar' }}
-                  </button>
+              <div v-if="imagenSeleccionada" class="viewer-editor-toolbar">
+                <div class="editor-mode-row">
+                  <div class="viewer-mode-buttons">
+                    <button
+                      class="mode-btn"
+                      :class="{ active: viewerMode === 'NAVIGATE' }"
+                      title="Navegar por la imagen"
+                      :aria-pressed="viewerMode === 'NAVIGATE'"
+                      @click="setViewerMode('NAVIGATE')"
+                    >
+                      Navegar
+                    </button>
+                    <button
+                      class="mode-btn"
+                      :class="{ active: viewerMode === 'EDIT' }"
+                      :disabled="revisionLoading"
+                      title="Editar revision experta"
+                      :aria-pressed="viewerMode === 'EDIT'"
+                      @click="setViewerMode('EDIT')"
+                    >
+                      {{ revisionLoading ? 'Cargando...' : 'Editar' }}
+                    </button>
+                  </div>
+                  <div class="editor-revision-status">
+                    <span
+                      v-if="isEditMode && activeRevision"
+                      class="revision-badge"
+                    >
+                      Revisión #{{ activeRevision.numero_revision }} · {{ activeRevision.estado }}
+                    </span>
+                    <span
+                      v-if="isDraftDirty"
+                      class="revision-badge dirty"
+                    >
+                      Cambios sin guardar
+                    </span>
+                  </div>
                 </div>
-                <span
-                  v-if="isEditMode && activeRevision"
-                  class="revision-badge"
-                >
-                  Revisión #{{ activeRevision.numero_revision }} · {{ activeRevision.estado }}
-                </span>
                 <div
                   v-if="isEditMode"
-                  class="editor-tool-buttons"
+                  class="editor-tools-row"
                 >
-                  <button
-                    class="mode-btn editor-tool-btn"
-                    :class="{ active: editorTool === 'SELECT' }"
-                    title="Seleccionar máscaras"
-                    :aria-pressed="editorTool === 'SELECT'"
-                    @click="setEditorTool('SELECT')"
-                  >
-                    Seleccionar
-                  </button>
-                  <button
-                    class="mode-btn editor-tool-btn"
-                    :class="{ active: editorTool === 'PAN' }"
-                    title="Mover visor"
-                    :aria-pressed="editorTool === 'PAN'"
-                    @click="setEditorTool('PAN')"
-                  >
-                    Mover
-                  </button>
-                  <button
-                    class="mode-btn editor-tool-btn"
-                    :class="{ active: editorTool === 'DRAW' }"
-                    title="Dibujar máscara"
-                    :aria-pressed="editorTool === 'DRAW'"
-                    @click="setEditorTool('DRAW')"
-                  >
-                    Dibujar
-                  </button>
+                  <div class="editor-tool-buttons">
+                    <button
+                      class="mode-btn editor-tool-btn"
+                      :class="{ active: editorTool === 'SELECT' }"
+                      title="Seleccionar máscaras"
+                      :aria-pressed="editorTool === 'SELECT'"
+                      @click="setEditorTool('SELECT')"
+                    >
+                      Seleccionar
+                    </button>
+                    <button
+                      class="mode-btn editor-tool-btn"
+                      :class="{ active: editorTool === 'PAN' }"
+                      title="Mover visor"
+                      :aria-pressed="editorTool === 'PAN'"
+                      @click="setEditorTool('PAN')"
+                    >
+                      Mover
+                    </button>
+                    <button
+                      class="mode-btn editor-tool-btn"
+                      :class="{ active: editorTool === 'DRAW' }"
+                      title="Dibujar máscara"
+                      :aria-pressed="editorTool === 'DRAW'"
+                      @click="setEditorTool('DRAW')"
+                    >
+                      Dibujar
+                    </button>
+                    <button
+                      class="mode-btn editor-tool-btn"
+                      :class="{ active: editorTool === 'VERTEX' }"
+                      title="Editar contorno"
+                      :aria-pressed="editorTool === 'VERTEX'"
+                      @click="setEditorTool('VERTEX')"
+                    >
+                      Editar contorno
+                    </button>
+                  </div>
                 </div>
-                <span
-                  v-if="isDraftDirty"
-                  class="revision-badge dirty"
-                >
-                  Cambios sin guardar
-                </span>
               </div>
 
               <div
@@ -203,7 +204,9 @@
                     :class="{
                       'is-editable': isEditMode,
                       'is-pan-mode': effectivePanMode,
-                      'is-draw-mode': isDrawMode
+                      'is-draw-mode': isDrawMode,
+                      'is-vertex-mode': isVertexMode,
+                      'is-vertex-insert-mode': isVertexMode && vertexEditMode === 'INSERT'
                     }"
                     ref="segmentationSvg"
                     :width="imageRenderedSize.width"
@@ -217,8 +220,15 @@
                         :key="polygon.key"
                         :points="polygon.points"
                         class="segmentation-polygon"
-                        :class="{ manual: polygon.origin === 'manual' }"
-                        :style="{ fill: polygon.fill, stroke: polygon.stroke }"
+                        :class="{
+                          manual: polygon.origin === 'manual',
+                          selected: polygon.selected
+                        }"
+                        :style="{
+                          fill: polygon.fill,
+                          stroke: polygon.stroke,
+                          strokeWidth: overlayStrokeWidth
+                        }"
                         @pointerdown="handleOverlayPolygonPointerDown"
                         @click="handleOverlayPolygonClick(polygon.selectionKey, $event)"
                       />
@@ -233,37 +243,109 @@
                         :points="polygon.points"
                         class="segmentation-selection-highlight"
                         :class="{ manual: polygon.origin === 'manual' }"
-                        :style="{ stroke: polygon.stroke }"
+                        :style="{
+                          stroke: polygon.stroke,
+                          strokeWidth: selectedOverlayStrokeWidth
+                        }"
                       />
                     </g>
                     <g
                       v-if="draftPolygonSvgPoints.length"
                       class="draft-polygon-layer"
-                      pointer-events="none"
                     >
                       <polyline
                         :points="draftPolygonSvgPointsString"
                         class="draft-polygon-line"
-                        :style="{ stroke: drawingColor.stroke }"
+                        :style="{
+                          stroke: drawingColor.stroke,
+                          strokeWidth: draftStrokeWidth
+                        }"
                       />
                       <polygon
                         v-if="draftPolygonSvgPoints.length >= 3"
                         :points="draftPolygonSvgPointsString"
                         class="draft-polygon-fill"
                         :style="{
-                          fill: drawingColor.fill,
-                          stroke: drawingColor.stroke
+                          fill: overlayFillForLabel(drawingLabel, 'draft'),
+                          stroke: drawingColor.stroke,
+                          strokeWidth: draftStrokeWidth
                         }"
+                      />
+                      <line
+                        v-for="segment in draftPolygonSegments"
+                        :key="segment.key"
+                        class="draft-segment-hit"
+                        :x1="segment.start[0]"
+                        :y1="segment.start[1]"
+                        :x2="segment.end[0]"
+                        :y2="segment.end[1]"
+                        :stroke-width="draftSegmentHitStrokeWidth"
+                        @pointerdown="handleDraftSegmentPointerDown(segment, $event)"
+                        @click.stop.prevent
+                      />
+                      <circle
+                        v-for="(point, index) in draftPolygonSvgPoints"
+                        :key="`draft-point-hit-${index}`"
+                        :cx="point[0]"
+                        :cy="point[1]"
+                        class="draft-polygon-point-hit"
+                        :r="draftPointHitRadius"
+                        @pointerdown="startDraftPointDrag(index, $event)"
+                        @pointermove="moveDraftPointDrag"
+                        @pointerup="endDraftPointDrag"
+                        @pointercancel="cancelDraftPointDrag"
+                        @lostpointercapture="cancelDraftPointDrag"
+                        @click.stop.prevent
                       />
                       <circle
                         v-for="(point, index) in draftPolygonSvgPoints"
                         :key="`draft-point-${index}`"
                         :cx="point[0]"
                         :cy="point[1]"
-                        r="4"
                         class="draft-polygon-point"
-                        :style="{ fill: drawingColor.stroke }"
+                        :class="{ selected: selectedDraftPointIndex === index }"
+                        :r="selectedDraftPointIndex === index ? draftSelectedPointRadius : draftPointRadius"
+                        :style="{
+                          fill: drawingColor.stroke,
+                          strokeWidth: selectedDraftPointIndex === index
+                            ? draftSelectedPointStrokeWidth
+                            : draftPointStrokeWidth
+                        }"
                       />
+                    </g>
+                    <g
+                      v-if="selectedVertexHandles.length"
+                      class="vertex-handle-layer"
+                    >
+                      <g
+                        v-for="handle in selectedVertexHandles"
+                        :key="handle.key"
+                      >
+                        <circle
+                          class="vertex-handle-hit"
+                          :class="handle.role"
+                          :cx="handle.x"
+                          :cy="handle.y"
+                          :r="vertexHandleHitRadius"
+                          @pointerdown="startVertexDrag(handle, $event)"
+                          @pointermove="moveVertexDrag"
+                          @pointerup="endVertexDrag"
+                          @pointercancel="cancelVertexDrag"
+                          @lostpointercapture="cancelVertexDrag"
+                        />
+                        <circle
+                          class="vertex-handle"
+                          :class="handle.role"
+                          :cx="handle.x"
+                          :cy="handle.y"
+                          :r="handle.selected ? vertexSelectedHandleRadius : vertexHandleRadius"
+                          :style="{
+                            strokeWidth: handle.selected
+                              ? vertexSelectedHandleStrokeWidth
+                              : vertexHandleStrokeWidth
+                          }"
+                        />
+                      </g>
                     </g>
                   </svg>
                 </div>
@@ -381,7 +463,7 @@
                 class="selected-object-panel"
               >
                 <div class="selected-object-header">
-                  <h4>Objeto seleccionado</h4>
+                  <h4>{{ contextualPanelTitle }}</h4>
                   <span v-if="isSpacePressed && editorTool !== 'PAN'" class="editor-hint">
                     Pan temporal
                   </span>
@@ -390,50 +472,115 @@
                   </span>
                 </div>
 
-                <div v-if="selectedObject" class="selected-object-grid">
-                  <span>Tipo</span>
-                  <strong>{{ overlayLabelDisplayName(selectedObject.label) }}</strong>
-                  <span>ID</span>
-                  <strong>#{{ selectedObject.id }}</strong>
-                  <span>Origen</span>
-                  <strong>{{ provenanceDisplayName(selectedObject.provenance?.origin) }}</strong>
-                  <span v-if="selectedObject.provenance?.base_object_id">
-                    ID base
-                  </span>
-                  <strong v-if="selectedObject.provenance?.base_object_id">
-                    #{{ selectedObject.provenance.base_object_id }}
-                  </strong>
-                </div>
+                <template v-if="showObjectContext">
+                  <div v-if="selectedObject" class="selected-object-grid">
+                    <span>Tipo</span>
+                    <strong>{{ overlayLabelDisplayName(selectedObject.label) }}</strong>
+                    <span>ID</span>
+                    <strong>#{{ selectedObject.id }}</strong>
+                    <span>Origen</span>
+                    <strong>{{ provenanceDisplayName(selectedObject.provenance?.origin) }}</strong>
+                    <span v-if="selectedObject.provenance?.base_object_id">
+                      ID base
+                    </span>
+                    <strong v-if="selectedObject.provenance?.base_object_id">
+                      #{{ selectedObject.provenance.base_object_id }}
+                    </strong>
+                    <span v-if="selectedObject.provenance?.modified">
+                      Modificado
+                    </span>
+                    <strong v-if="selectedObject.provenance?.modified">
+                      Sí
+                    </strong>
+                    <span v-if="editorTool === 'VERTEX' && selectedVertexIndex !== null">
+                      Vértice
+                    </span>
+                    <strong v-if="editorTool === 'VERTEX' && selectedVertexIndex !== null">
+                      #{{ selectedVertexIndex + 1 }}
+                    </strong>
+                  </div>
 
-                <div v-else class="selected-object-empty">
-                  Seleccione una máscara sobre la imagen.
-                </div>
+                  <div v-else class="selected-object-empty">
+                    Seleccione una máscara sobre la imagen.
+                  </div>
+                  <div
+                    v-if="editorTool === 'VERTEX' && !selectedObject"
+                    class="draft-status"
+                  >
+                    Seleccione una máscara para editar su contorno.
+                  </div>
+                  <div
+                    v-else-if="editorTool === 'VERTEX' && selectedObject"
+                    class="draft-status"
+                  >
+                    {{ selectedVertexHandles.length }} handles visibles de
+                    {{ selectedObject.geometry?.points?.length || 0 }} vértices.
+                  </div>
 
-                <div class="editor-actions">
+                  <div
+                    v-if="editorTool === 'VERTEX'"
+                    class="vertex-mode-panel"
+                  >
+                    <div class="vertex-mode-buttons">
+                      <button
+                        class="mode-btn editor-tool-btn"
+                        :class="{ active: vertexEditMode === 'MOVE' }"
+                        :aria-pressed="vertexEditMode === 'MOVE'"
+                        @click="setVertexEditMode('MOVE')"
+                      >
+                        Mover puntos
+                      </button>
+                      <button
+                        class="mode-btn editor-tool-btn"
+                        :class="{ active: vertexEditMode === 'INSERT' }"
+                        :aria-pressed="vertexEditMode === 'INSERT'"
+                        @click="setVertexEditMode('INSERT')"
+                      >
+                        Agregar punto
+                      </button>
+                    </div>
+                    <div
+                      v-if="selectedVertexIndex !== null"
+                      class="draft-status"
+                    >
+                      Vértice seleccionado: #{{ selectedVertexIndex + 1 }}
+                    </div>
+                    <div
+                      v-if="selectedObject && selectedVertexIndex !== null && !canDeleteSelectedVertex"
+                      class="draft-status warning"
+                    >
+                      El contorno debe conservar al menos 3 puntos.
+                    </div>
+                    <button
+                      v-if="selectedObject && selectedVertexIndex !== null"
+                      class="control-btn danger full-width"
+                      :disabled="!canDeleteSelectedVertex"
+                      @click="deleteSelectedVertex"
+                    >
+                      Eliminar punto
+                    </button>
+                  </div>
+
                   <button
-                    class="control-btn danger"
-                    :disabled="!selectedObject || editorTool !== 'SELECT'"
+                    v-if="selectedObject"
+                    class="control-btn danger full-width"
                     @click="deleteSelectedObject"
                   >
                     Eliminar máscara
                   </button>
-                  <button
-                    class="control-btn"
-                    :disabled="!canUndo"
-                    @click="undoRevisionEdit"
-                  >
-                    Deshacer
-                  </button>
-                  <button
-                    class="control-btn"
-                    :disabled="!canRedo"
-                    @click="redoRevisionEdit"
-                  >
-                    Rehacer
-                  </button>
+                </template>
+
+                <div
+                  v-else-if="editorTool === 'PAN'"
+                  class="draft-status"
+                >
+                  Mueva la imagen ampliada. Use Seleccionar o Editar contorno para acciones de edición.
                 </div>
 
-                <div class="drawing-panel">
+                <div
+                  v-if="isDrawTool"
+                  class="drawing-panel"
+                >
                   <div class="drawing-label-row">
                     <span>Tipo a dibujar</span>
                     <select
@@ -451,6 +598,9 @@
                     class="draft-status"
                   >
                     Máscara en construcción: {{ draftPolygonPoints.length }} puntos
+                    <span v-if="selectedDraftPointIndex !== null">
+                      · Punto #{{ selectedDraftPointIndex + 1 }} seleccionado
+                    </span>
                   </div>
                   <div
                     v-else-if="isDrawMode"
@@ -479,34 +629,60 @@
                     >
                       Cancelar
                     </button>
+                    <button
+                      class="control-btn danger"
+                      :disabled="selectedDraftPointIndex === null"
+                      @click="deleteSelectedDraftPoint"
+                    >
+                      Eliminar punto
+                    </button>
                   </div>
                 </div>
 
                 <div
-                  v-if="saveDraftError"
+                  v-if="showRevisionActions && saveDraftError"
                   class="segmentation-status error"
                 >
                   {{ saveDraftError }}
                 </div>
                 <div
-                  v-if="saveDraftMessage"
+                  v-if="showRevisionActions && saveDraftMessage"
                   class="segmentation-status success"
                 >
                   {{ saveDraftMessage }}
                 </div>
                 <div
-                  v-if="draftPolygonPoints.length"
+                  v-if="isDrawTool && draftPolygonPoints.length"
                   class="segmentation-status warning"
                 >
                   Finalice o cancele la máscara en construcción.
                 </div>
-                <button
-                  class="btn-segment full-width"
-                  :disabled="!canSaveDraft"
-                  @click="saveDraft"
+                <div
+                  v-if="showRevisionActions"
+                  class="editor-actions"
                 >
-                  {{ isSavingDraft ? 'Guardando...' : 'Guardar borrador' }}
-                </button>
+                  <button
+                    class="control-btn"
+                    :disabled="!canUndo"
+                    @click="undoRevisionEdit"
+                  >
+                    Deshacer
+                  </button>
+                  <button
+                    class="control-btn"
+                    :disabled="!canRedo"
+                    @click="redoRevisionEdit"
+                  >
+                    Rehacer
+                  </button>
+                  <button
+                    class="btn-segment"
+                    :disabled="!canSaveDraft"
+                    @click="saveDraft"
+                  >
+                    {{ isSavingDraft ? 'Guardando...' : 'Guardar borrador' }}
+                  </button>
+                </div>
               </div>
 
               <div v-if="imagenSeleccionada" class="segmentation-panel">
@@ -591,10 +767,6 @@
                 </div>
               </div>
 
-              <button class="btn-review full-width">
-                <span class="btn-icon">⚠️</span>
-                Marcar para revisión manual
-              </button>
             </div>
 
           </div>
@@ -650,21 +822,6 @@
               </table>
             </div>
 
-            <div class="objects-tools-panel">
-              <div class="info-box">
-                <div class="info-icon">💡</div>
-                <p>Active u oculte capas sin modificar los conteos del resultado</p>
-              </div>
-              <button class="btn-tool-large review">
-                <span>✏️</span>
-                Marcar revisión
-              </button>
-              <button class="btn-tool-large export">
-                <span>⬆</span>
-                Exportar Datos
-              </button>
-            </div>
-
           </div>
         </div>
 
@@ -684,6 +841,28 @@ import {
   getOrCreateSegmentationDraft,
   updateSegmentationDraft,
 } from "../services/segmentationRevisionService";
+
+const ZOOM_MIN = 1;
+const ZOOM_MAX = 8;
+const ZOOM_STEP = 0.25;
+const SEGMENT_HIT_TOLERANCE_PX = 8;
+const VERTEX_SEGMENT_HIT_TOLERANCE_PX = 8;
+const DRAW_HANDLE_VISIBLE_RADIUS_PX = 2;
+const DRAW_HANDLE_SELECTED_RADIUS_PX = 3;
+const DRAW_HANDLE_HIT_RADIUS_PX = 8;
+const VERTEX_HANDLE_VISIBLE_RADIUS_PX = 2.25;
+const VERTEX_HANDLE_SELECTED_RADIUS_PX = 3.25;
+const VERTEX_HANDLE_HIT_RADIUS_PX = 8;
+const OVERLAY_STROKE_PX = 1.5;
+const SELECTED_OVERLAY_STROKE_PX = 2;
+const DRAFT_STROKE_PX = 1.25;
+const DRAW_HANDLE_STROKE_PX = 1;
+const DRAW_SELECTED_HANDLE_STROKE_PX = 1.25;
+const VERTEX_HANDLE_STROKE_PX = 1.1;
+const VERTEX_SELECTED_HANDLE_STROKE_PX = 1.25;
+const MIN_VERTEX_HANDLE_SPACING_PX = 12;
+const NEAREST_VERTEX_HIT_PX = 12;
+const VERTEX_NEIGHBOR_RADIUS = 3;
 
 export default {
   name: "MainContent",
@@ -713,6 +892,7 @@ export default {
       historialError: "",
       viewerMode: "NAVIGATE",
       editorTool: "SELECT",
+      vertexEditMode: "MOVE",
       activeRevision: null,
       activeRevisionId: null,
       pendingDraftRevision: null,
@@ -729,7 +909,11 @@ export default {
       manualObjectIdCursor: 0,
       drawingLabel: "membrana",
       draftPolygonPoints: [],
+      selectedDraftPointIndex: null,
+      draftPointDrag: null,
+      selectedVertexIndex: null,
       invalidDrawMessage: "",
+      vertexDrag: null,
       revisionLoading: false,
       revisionError: "",
       selectedObjectKey: null,
@@ -842,6 +1026,33 @@ export default {
       return this.isEditMode && this.editorTool === "DRAW" && !this.effectivePanMode;
     },
 
+    isVertexMode() {
+      return this.isEditMode && this.editorTool === "VERTEX" && !this.effectivePanMode;
+    },
+
+    isDrawTool() {
+      return this.isEditMode && this.editorTool === "DRAW";
+    },
+
+    showObjectContext() {
+      return this.isEditMode && ["SELECT", "VERTEX"].includes(this.editorTool);
+    },
+
+    showRevisionActions() {
+      return this.isEditMode && ["SELECT", "VERTEX"].includes(this.editorTool);
+    },
+
+    contextualPanelTitle() {
+      const titles = {
+        SELECT: "Objeto seleccionado",
+        PAN: "Navegación",
+        DRAW: "Máscara en construcción",
+        VERTEX: "Editar contorno",
+      };
+
+      return titles[this.editorTool] || "Edición";
+    },
+
     activeRevisionSummary() {
       return this.isEditMode ? this.workingSummary : null;
     },
@@ -936,6 +1147,22 @@ export default {
       return this.overlayColorForLabel(this.drawingLabel);
     },
 
+    overlayStrokeWidth() {
+      return Number((OVERLAY_STROKE_PX / Math.max(this.imageZoom, 1)).toFixed(3));
+    },
+
+    selectedOverlayStrokeWidth() {
+      return Number((SELECTED_OVERLAY_STROKE_PX / Math.max(this.imageZoom, 1)).toFixed(3));
+    },
+
+    draftStrokeWidth() {
+      return Number((DRAFT_STROKE_PX / Math.max(this.imageZoom, 1)).toFixed(3));
+    },
+
+    draftSegmentHitStrokeWidth() {
+      return Number(((SEGMENT_HIT_TOLERANCE_PX * 2) / Math.max(this.imageZoom, 1)).toFixed(3));
+    },
+
     draftPolygonSvgPoints() {
       return this.draftPolygonPoints
         .map(point => this.scalePoint(point))
@@ -946,6 +1173,165 @@ export default {
       return this.draftPolygonSvgPoints
         .map(point => point.join(","))
         .join(" ");
+    },
+
+    draftPolygonSegments() {
+      const points = this.draftPolygonSvgPoints;
+      if (points.length < 2) return [];
+
+      const segments = points.slice(0, -1).map((point, index) => ({
+        key: `draft-segment-${index}-${index + 1}`,
+        startIndex: index,
+        endIndex: index + 1,
+        start: point,
+        end: points[index + 1],
+      }));
+
+      if (points.length >= 3) {
+        segments.push({
+          key: `draft-segment-${points.length - 1}-0`,
+          startIndex: points.length - 1,
+          endIndex: 0,
+          start: points[points.length - 1],
+          end: points[0],
+        });
+      }
+
+      return segments;
+    },
+
+    draftPointRadius() {
+      return Number((DRAW_HANDLE_VISIBLE_RADIUS_PX / Math.max(this.imageZoom, 1)).toFixed(3));
+    },
+
+    draftSelectedPointRadius() {
+      return Number((DRAW_HANDLE_SELECTED_RADIUS_PX / Math.max(this.imageZoom, 1)).toFixed(3));
+    },
+
+    draftPointHitRadius() {
+      return Number((DRAW_HANDLE_HIT_RADIUS_PX / Math.max(this.imageZoom, 1)).toFixed(3));
+    },
+
+    draftPointStrokeWidth() {
+      return Number((DRAW_HANDLE_STROKE_PX / Math.max(this.imageZoom, 1)).toFixed(3));
+    },
+
+    draftSelectedPointStrokeWidth() {
+      return Number((DRAW_SELECTED_HANDLE_STROKE_PX / Math.max(this.imageZoom, 1)).toFixed(3));
+    },
+
+    vertexHandleRadius() {
+      return Number((VERTEX_HANDLE_VISIBLE_RADIUS_PX / Math.max(this.imageZoom, 1)).toFixed(3));
+    },
+
+    vertexSelectedHandleRadius() {
+      return Number((VERTEX_HANDLE_SELECTED_RADIUS_PX / Math.max(this.imageZoom, 1)).toFixed(3));
+    },
+
+    vertexHandleHitRadius() {
+      return Number((VERTEX_HANDLE_HIT_RADIUS_PX / Math.max(this.imageZoom, 1)).toFixed(3));
+    },
+
+    vertexHandleStrokeWidth() {
+      return Number((VERTEX_HANDLE_STROKE_PX / Math.max(this.imageZoom, 1)).toFixed(3));
+    },
+
+    vertexSelectedHandleStrokeWidth() {
+      return Number((VERTEX_SELECTED_HANDLE_STROKE_PX / Math.max(this.imageZoom, 1)).toFixed(3));
+    },
+
+    selectedVertexHandles() {
+      if (!this.isVertexMode || !this.selectedObject) return [];
+
+      const points = this.selectedObject.geometry?.points;
+      if (!Array.isArray(points)) return [];
+
+      const neighborIndices = new Set(this.selectedVertexNeighborIndices);
+
+      return this.visibleVertexIndices
+        .map(vertexIndex => {
+          const svgPoint = this.scalePoint(points[vertexIndex]);
+          if (!svgPoint) return null;
+          const selected = vertexIndex === this.selectedVertexIndex;
+          const neighbor = neighborIndices.has(vertexIndex) && !selected;
+
+          return {
+            key: `${this.selectedObject.id}-${vertexIndex}`,
+            objectId: this.selectedObject.id,
+            vertexIndex,
+            x: svgPoint[0],
+            y: svgPoint[1],
+            selected,
+            role: selected ? "selected" : neighbor ? "neighbor" : "general",
+          };
+        })
+        .filter(Boolean);
+    },
+
+    visibleVertexIndices() {
+      if (!this.isVertexMode || !this.selectedObject) return [];
+
+      const points = this.selectedObject.geometry?.points;
+      if (!Array.isArray(points) || !points.length) return [];
+
+      const visible = new Set(this.computeLodVertexIndices(points));
+      this.selectedVertexNeighborIndices.forEach(index => visible.add(index));
+
+      return [...visible].sort((a, b) => a - b);
+    },
+
+    selectedVertexNeighborIndices() {
+      const points = this.selectedObject?.geometry?.points;
+      if (
+        !Array.isArray(points) ||
+        !points.length ||
+        this.selectedVertexIndex === null ||
+        this.selectedVertexIndex < 0 ||
+        this.selectedVertexIndex >= points.length
+      ) {
+        return [];
+      }
+
+      const indices = new Set();
+      const count = points.length;
+
+      for (let offset = -VERTEX_NEIGHBOR_RADIUS; offset <= VERTEX_NEIGHBOR_RADIUS; offset += 1) {
+        indices.add((this.selectedVertexIndex + offset + count) % count);
+      }
+
+      return [...indices];
+    },
+
+    selectedObjectVertexSegments() {
+      const points = this.selectedObject?.geometry?.points;
+      if (!Array.isArray(points) || points.length < 3) return [];
+
+      return points
+        .map((point, index) => {
+          const nextIndex = (index + 1) % points.length;
+          const start = this.scalePoint(point);
+          const end = this.scalePoint(points[nextIndex]);
+          if (!start || !end) return null;
+
+          return {
+            key: `object-segment-${index}-${nextIndex}`,
+            startIndex: index,
+            endIndex: nextIndex,
+            start,
+            end,
+          };
+        })
+        .filter(Boolean);
+    },
+
+    canDeleteSelectedVertex() {
+      const points = this.selectedObject?.geometry?.points;
+      return (
+        this.isVertexMode &&
+        this.selectedVertexIndex !== null &&
+        Array.isArray(points) &&
+        points.length > 3
+      );
     },
 
     hasPendingDraftWork() {
@@ -965,7 +1351,9 @@ export default {
         this.isEditMode &&
         this.isDraftDirty &&
         !this.isSavingDraft &&
-        this.draftPolygonPoints.length === 0
+        this.draftPolygonPoints.length === 0 &&
+        !this.draftPointDrag &&
+        !this.vertexDrag
       );
     },
 
@@ -1054,7 +1442,7 @@ export default {
         return [];
       }
 
-      return this.overlayVisibleDrawableObjects
+      return this.overlayVisibleDrawableObjectsForRender
         .map((item, index) => {
           const color = this.overlayColorForLabel(item.label);
           return {
@@ -1064,7 +1452,7 @@ export default {
             origin: item.object.provenance?.origin,
             selected: this.isEditMode && item.selectionKey === this.selectedObjectKey,
             points: item.points,
-            fill: color.fill,
+            fill: this.overlayFillForLabel(item.label),
             stroke: color.stroke,
           };
         })
@@ -1105,6 +1493,17 @@ export default {
       return this.overlayDrawableObjects.filter(
         item => this.overlayLabelVisibility[item.label] !== false
       );
+    },
+
+    overlayVisibleDrawableObjectsForRender() {
+      return [...this.overlayVisibleDrawableObjects].sort((a, b) => {
+        const labelDiff =
+          this.overlayLabelRenderOrder(a.label) -
+          this.overlayLabelRenderOrder(b.label);
+
+        if (labelDiff !== 0) return labelDiff;
+        return a.objectIndex - b.objectIndex;
+      });
     },
 
     overlayLabelNames() {
@@ -1242,6 +1641,7 @@ export default {
         this.viewerMode = "NAVIGATE";
         this.editorTool = "SELECT";
         this.selectedObjectKey = null;
+        this.selectedVertexIndex = null;
         this.isSpacePressed = false;
         this.endImagePan();
         this.didPointerDrag = false;
@@ -1266,6 +1666,7 @@ export default {
         this.activeRevision = null;
         this.activeRevisionId = null;
         this.selectedObjectKey = null;
+        this.selectedVertexIndex = null;
         this.revisionError = "No hay resultado de segmentacion para editar.";
         return;
       }
@@ -1288,6 +1689,7 @@ export default {
       this.activeRevision = null;
       this.activeRevisionId = null;
       this.selectedObjectKey = null;
+      this.selectedVertexIndex = null;
 
       try {
         const response = await getOrCreateSegmentationDraft(resultadoId);
@@ -1309,6 +1711,7 @@ export default {
           this.activeRevision = null;
           this.activeRevisionId = null;
           this.selectedObjectKey = null;
+          this.selectedVertexIndex = null;
           this.revisionError =
             error.response?.data?.error || "No fue posible cargar el borrador experto.";
         }
@@ -1323,6 +1726,7 @@ export default {
       this.viewerMode = "NAVIGATE";
       this.editorTool = "SELECT";
       this.selectedObjectKey = null;
+      this.selectedVertexIndex = null;
       this.revisionError = "";
       this.revisionLoading = false;
       this.isSpacePressed = false;
@@ -1330,8 +1734,11 @@ export default {
       this.didPointerDrag = false;
       this.activePanPointerId = null;
       this.panCaptureTarget = null;
+      this.cancelDraftPointDrag();
       this.draftPolygonPoints = [];
+      this.selectedDraftPointIndex = null;
       this.invalidDrawMessage = "";
+      this.cancelVertexDrag();
       this.isDraftDirty = false;
       this.isSavingDraft = false;
       this.saveDraftError = "";
@@ -1416,11 +1823,14 @@ export default {
       this.isSavingDraft = false;
       this.saveDraftError = "";
       this.saveDraftMessage = "";
+      this.cancelDraftPointDrag();
       this.draftPolygonPoints = [];
+      this.selectedDraftPointIndex = null;
       this.invalidDrawMessage = "";
       this.undoStack = [];
       this.redoStack = [];
       this.selectedObjectKey = null;
+      this.selectedVertexIndex = null;
       this.manualObjectIdCursor = this.maxRevisionObjectId(this.workingObjects);
     },
 
@@ -1465,6 +1875,18 @@ export default {
       );
     },
 
+    findWorkingObjectIndexById(objectId) {
+      return this.workingObjects.findIndex(object => object.id === objectId);
+    },
+
+    updateWorkingObjectAt(index, updater) {
+      if (index < 0) return;
+
+      const nextObjects = this.cloneJson(this.workingObjects);
+      nextObjects[index] = updater(nextObjects[index]);
+      this.workingObjects = nextObjects;
+    },
+
     applyRevisionOperation(operation) {
       const object = this.cloneJson(operation.object);
 
@@ -1483,7 +1905,26 @@ export default {
         );
         if (this.selectedObjectKey === this.revisionObjectSelectionKey(object)) {
           this.selectedObjectKey = null;
+          this.selectedVertexIndex = null;
         }
+      }
+
+      if (operation.type === "MOVE_VERTEX") {
+        this.applyVertexMove(
+          operation.objectId,
+          operation.vertexIndex,
+          operation.after,
+          operation.provenanceAfter
+        );
+      }
+
+      if (["INSERT_VERTEX", "DELETE_VERTEX"].includes(operation.type)) {
+        this.applyVertexPointsSnapshot(
+          operation.objectId,
+          operation.afterPoints,
+          operation.provenanceAfter
+        );
+        this.selectedVertexIndex = operation.selectedVertexIndexAfter ?? null;
       }
 
       this.updateDraftDirtyState();
@@ -1498,6 +1939,7 @@ export default {
         );
         if (this.selectedObjectKey === this.revisionObjectSelectionKey(object)) {
           this.selectedObjectKey = null;
+          this.selectedVertexIndex = null;
         }
       }
 
@@ -1507,6 +1949,24 @@ export default {
           this.workingObjects.length
         );
         this.workingObjects.splice(index, 0, object);
+      }
+
+      if (operation.type === "MOVE_VERTEX") {
+        this.applyVertexMove(
+          operation.objectId,
+          operation.vertexIndex,
+          operation.before,
+          operation.provenanceBefore
+        );
+      }
+
+      if (["INSERT_VERTEX", "DELETE_VERTEX"].includes(operation.type)) {
+        this.applyVertexPointsSnapshot(
+          operation.objectId,
+          operation.beforePoints,
+          operation.provenanceBefore
+        );
+        this.selectedVertexIndex = operation.selectedVertexIndexBefore ?? null;
       }
 
       this.updateDraftDirtyState();
@@ -1519,9 +1979,17 @@ export default {
     },
 
     setEditorTool(tool) {
-      if (!["SELECT", "PAN", "DRAW"].includes(tool)) return;
+      if (!["SELECT", "PAN", "DRAW", "VERTEX"].includes(tool)) return;
 
+      this.cancelVertexDrag();
+      this.cancelDraftPointDrag();
       this.editorTool = tool;
+      if (tool !== "VERTEX") {
+        this.selectedVertexIndex = null;
+        this.vertexEditMode = "MOVE";
+      } else if (!["MOVE", "INSERT"].includes(this.vertexEditMode)) {
+        this.vertexEditMode = "MOVE";
+      }
       this.isSpacePressed = false;
       this.endImagePan();
 
@@ -1537,12 +2005,489 @@ export default {
       };
     },
 
+    buildModifiedProvenance(provenance) {
+      return {
+        ...(this.cloneJson(provenance) || {}),
+        modified: true,
+      };
+    },
+
+    setVertexEditMode(mode) {
+      if (!["MOVE", "INSERT"].includes(mode)) return;
+
+      this.cancelVertexDrag();
+      this.vertexEditMode = mode;
+    },
+
+    applyVertexMove(objectId, vertexIndex, point, provenance) {
+      const objectIndex = this.findWorkingObjectIndexById(objectId);
+      if (objectIndex < 0) return;
+
+      this.updateWorkingObjectAt(objectIndex, object => {
+        const points = Array.isArray(object.geometry?.points)
+          ? this.cloneJson(object.geometry.points)
+          : [];
+        if (!points[vertexIndex]) return object;
+
+        points[vertexIndex] = this.cloneJson(point);
+
+        return {
+          ...object,
+          geometry: {
+            ...object.geometry,
+            points,
+          },
+          provenance: this.cloneJson(provenance || object.provenance),
+        };
+      });
+    },
+
+    applyVertexPointsSnapshot(objectId, points, provenance) {
+      const objectIndex = this.findWorkingObjectIndexById(objectId);
+      if (objectIndex < 0 || !Array.isArray(points)) return;
+
+      this.updateWorkingObjectAt(objectIndex, object => ({
+        ...object,
+        geometry: {
+          ...object.geometry,
+          points: this.cloneJson(points),
+        },
+        provenance: this.cloneJson(provenance || object.provenance),
+      }));
+    },
+
+    startVertexDrag(handle, event) {
+      if (!this.isVertexMode || this.effectivePanMode || this.vertexEditMode !== "MOVE") return;
+
+      const objectIndex = this.findWorkingObjectIndexById(handle.objectId);
+      const object = this.workingObjects[objectIndex];
+      const beforePoint = object?.geometry?.points?.[handle.vertexIndex];
+      if (!beforePoint) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      event.currentTarget?.setPointerCapture?.(event.pointerId);
+
+      this.selectedVertexIndex = handle.vertexIndex;
+      this.vertexDrag = {
+        objectId: handle.objectId,
+        vertexIndex: handle.vertexIndex,
+        pointerId: event.pointerId,
+        captureTarget: event.currentTarget,
+        before: this.cloneJson(beforePoint),
+        after: this.cloneJson(beforePoint),
+        provenanceBefore: this.cloneJson(object.provenance),
+        provenanceAfter: this.buildModifiedProvenance(object.provenance),
+      };
+    },
+
+    moveVertexDrag(event) {
+      if (!this.vertexDrag || event.pointerId !== this.vertexDrag.pointerId) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      const point = this.screenPointToNaturalImagePoint(event);
+      if (!point) return;
+
+      this.vertexDrag.after = this.cloneJson(point);
+      this.applyVertexMove(
+        this.vertexDrag.objectId,
+        this.vertexDrag.vertexIndex,
+        point,
+        this.vertexDrag.provenanceAfter
+      );
+      this.updateDraftDirtyState();
+    },
+
+    endVertexDrag(event) {
+      if (!this.vertexDrag) return;
+      if (event && event.pointerId !== this.vertexDrag.pointerId) return;
+
+      event?.preventDefault?.();
+      event?.stopPropagation?.();
+
+      const operation = {
+        type: "MOVE_VERTEX",
+        objectId: this.vertexDrag.objectId,
+        vertexIndex: this.vertexDrag.vertexIndex,
+        before: this.cloneJson(this.vertexDrag.before),
+        after: this.cloneJson(this.vertexDrag.after),
+        provenanceBefore: this.cloneJson(this.vertexDrag.provenanceBefore),
+        provenanceAfter: this.cloneJson(this.vertexDrag.provenanceAfter),
+      };
+      const changed =
+        this.serializeObjects([operation.before]) !==
+        this.serializeObjects([operation.after]);
+
+      this.releaseVertexPointerCapture(event);
+      this.vertexDrag = null;
+
+      if (changed) {
+        this.pushUndoOperation(operation);
+      } else {
+        this.updateDraftDirtyState();
+      }
+    },
+
+    cancelVertexDrag(event) {
+      if (!this.vertexDrag) return;
+      if (event && event.pointerId !== this.vertexDrag.pointerId) return;
+
+      this.applyVertexMove(
+        this.vertexDrag.objectId,
+        this.vertexDrag.vertexIndex,
+        this.vertexDrag.before,
+        this.vertexDrag.provenanceBefore
+      );
+      this.releaseVertexPointerCapture(event);
+      this.vertexDrag = null;
+      this.updateDraftDirtyState();
+    },
+
+    releaseVertexPointerCapture(event) {
+      try {
+        const pointerId = event?.pointerId ?? this.vertexDrag?.pointerId;
+        const captureTarget = event?.currentTarget || this.vertexDrag?.captureTarget;
+        if (pointerId !== null && pointerId !== undefined) {
+          captureTarget?.releasePointerCapture?.(pointerId);
+        }
+      } catch {
+        // Pointer capture may already be released after pointercancel/lostpointercapture.
+      }
+    },
+
+    insertVertexOnSelectedObject(event) {
+      if (!this.isVertexMode || this.vertexEditMode !== "INSERT" || !this.selectedObject) {
+        return false;
+      }
+
+      const segmentHit = this.findSelectedObjectSegmentNearScreenPoint(event);
+      if (!segmentHit) return false;
+
+      const point = this.svgPointToNaturalImagePoint(segmentHit.hit.projectedSvgPoint);
+      if (!point) return false;
+
+      const object = this.selectedObject;
+      const beforePoints = Array.isArray(object.geometry?.points)
+        ? this.cloneJson(object.geometry.points)
+        : [];
+      if (beforePoints.length < 3) return false;
+
+      const insertIndex = segmentHit.segment.endIndex === 0
+        ? beforePoints.length
+        : segmentHit.segment.startIndex + 1;
+      const afterPoints = [
+        ...beforePoints.slice(0, insertIndex),
+        point,
+        ...beforePoints.slice(insertIndex),
+      ];
+      const provenanceBefore = this.cloneJson(object.provenance);
+      const provenanceAfter = this.buildModifiedProvenance(object.provenance);
+      const selectedVertexIndexBefore = this.selectedVertexIndex;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      this.applyVertexPointsSnapshot(object.id, afterPoints, provenanceAfter);
+      this.selectedObjectKey = this.revisionObjectSelectionKey(object);
+      this.selectedVertexIndex = insertIndex;
+      this.pushUndoOperation({
+        type: "INSERT_VERTEX",
+        objectId: object.id,
+        vertexIndex: insertIndex,
+        point: this.cloneJson(point),
+        beforePoints,
+        afterPoints,
+        provenanceBefore,
+        provenanceAfter,
+        selectedVertexIndexBefore,
+        selectedVertexIndexAfter: insertIndex,
+      });
+      return true;
+    },
+
+    deleteSelectedVertex() {
+      if (!this.canDeleteSelectedVertex || !this.selectedObject) return;
+
+      const object = this.selectedObject;
+      const beforePoints = this.cloneJson(object.geometry.points);
+      const point = this.cloneJson(beforePoints[this.selectedVertexIndex]);
+      const afterPoints = beforePoints.filter(
+        (_item, index) => index !== this.selectedVertexIndex
+      );
+      const selectedVertexIndexBefore = this.selectedVertexIndex;
+      const selectedVertexIndexAfter = Math.min(
+        selectedVertexIndexBefore,
+        afterPoints.length - 1
+      );
+      const provenanceBefore = this.cloneJson(object.provenance);
+      const provenanceAfter = this.buildModifiedProvenance(object.provenance);
+
+      this.cancelVertexDrag();
+      this.applyVertexPointsSnapshot(object.id, afterPoints, provenanceAfter);
+      this.selectedVertexIndex = selectedVertexIndexAfter;
+      this.pushUndoOperation({
+        type: "DELETE_VERTEX",
+        objectId: object.id,
+        vertexIndex: selectedVertexIndexBefore,
+        point,
+        beforePoints,
+        afterPoints,
+        provenanceBefore,
+        provenanceAfter,
+        selectedVertexIndexBefore,
+        selectedVertexIndexAfter,
+      });
+    },
+
+    findSelectedObjectSegmentNearScreenPoint(event) {
+      return this.selectedObjectVertexSegments
+        .map(segment => ({
+          segment,
+          hit: this.projectEventToDraftSegment(event, segment),
+        }))
+        .filter(
+          item =>
+            item.hit &&
+            item.hit.distance <= VERTEX_SEGMENT_HIT_TOLERANCE_PX
+        )
+        .sort((a, b) => a.hit.distance - b.hit.distance)[0] || null;
+    },
+
+    startDraftPointDrag(index, event) {
+      if (!this.isDrawMode || this.effectivePanMode) return;
+
+      const beforePoint = this.draftPolygonPoints[index];
+      if (!beforePoint) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      event.currentTarget?.setPointerCapture?.(event.pointerId);
+
+      this.selectedDraftPointIndex = index;
+      this.draftPointDrag = {
+        index,
+        pointerId: event.pointerId,
+        captureTarget: event.currentTarget,
+        before: this.cloneJson(beforePoint),
+        after: this.cloneJson(beforePoint),
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        didDrag: false,
+      };
+    },
+
+    moveDraftPointDrag(event) {
+      if (!this.draftPointDrag || event.pointerId !== this.draftPointDrag.pointerId) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      const point = this.screenPointToNaturalImagePoint(event);
+      if (!point) return;
+
+      const deltaX = event.clientX - this.draftPointDrag.startClientX;
+      const deltaY = event.clientY - this.draftPointDrag.startClientY;
+      if (
+        Math.abs(deltaX) > this.dragThreshold ||
+        Math.abs(deltaY) > this.dragThreshold
+      ) {
+        this.draftPointDrag.didDrag = true;
+      }
+
+      this.draftPointDrag.after = this.cloneJson(point);
+      this.updateDraftPointAt(this.draftPointDrag.index, point);
+    },
+
+    endDraftPointDrag(event) {
+      if (!this.draftPointDrag) return;
+      if (event && event.pointerId !== this.draftPointDrag.pointerId) return;
+
+      event?.preventDefault?.();
+      event?.stopPropagation?.();
+
+      if (this.draftPointDrag.didDrag) {
+        this.lastPointerDragAt = Date.now();
+      }
+
+      this.releaseDraftPointerCapture(event);
+      this.draftPointDrag = null;
+    },
+
+    cancelDraftPointDrag(event) {
+      if (!this.draftPointDrag) return;
+      if (event && event.pointerId !== this.draftPointDrag.pointerId) return;
+
+      this.updateDraftPointAt(this.draftPointDrag.index, this.draftPointDrag.before);
+      this.releaseDraftPointerCapture(event);
+      this.draftPointDrag = null;
+    },
+
+    releaseDraftPointerCapture(event) {
+      try {
+        const pointerId = event?.pointerId ?? this.draftPointDrag?.pointerId;
+        const captureTarget = event?.currentTarget || this.draftPointDrag?.captureTarget;
+        if (pointerId !== null && pointerId !== undefined) {
+          captureTarget?.releasePointerCapture?.(pointerId);
+        }
+      } catch {
+        // Pointer capture may already be released after pointercancel/lostpointercapture.
+      }
+    },
+
+    updateDraftPointAt(index, point) {
+      if (index < 0 || index >= this.draftPolygonPoints.length) return;
+
+      const nextPoints = this.cloneJson(this.draftPolygonPoints);
+      nextPoints[index] = this.cloneJson(point);
+      this.draftPolygonPoints = nextPoints;
+      this.invalidDrawMessage = "";
+    },
+
+    deleteSelectedDraftPoint() {
+      if (this.selectedDraftPointIndex === null) return;
+      if (
+        this.selectedDraftPointIndex < 0 ||
+        this.selectedDraftPointIndex >= this.draftPolygonPoints.length
+      ) {
+        this.selectedDraftPointIndex = null;
+        return;
+      }
+
+      this.cancelDraftPointDrag();
+      this.draftPolygonPoints = this.draftPolygonPoints.filter(
+        (_point, index) => index !== this.selectedDraftPointIndex
+      );
+      this.selectedDraftPointIndex = null;
+      this.invalidDrawMessage = "";
+    },
+
+    handleDraftSegmentPointerDown(segment, event) {
+      if (!this.isDrawMode || this.effectivePanMode) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      this.insertDraftPointOnSegment(segment, event);
+    },
+
+    insertDraftPointOnSegment(segment, event) {
+      const segmentHit = this.projectEventToDraftSegment(event, segment);
+      if (!segmentHit || segmentHit.distance > SEGMENT_HIT_TOLERANCE_PX) return;
+
+      const point = this.svgPointToNaturalImagePoint(segmentHit.projectedSvgPoint);
+      if (!point) return;
+
+      const insertIndex = segment.endIndex === 0
+        ? this.draftPolygonPoints.length
+        : segment.endIndex;
+
+      this.draftPolygonPoints = [
+        ...this.draftPolygonPoints.slice(0, insertIndex),
+        point,
+        ...this.draftPolygonPoints.slice(insertIndex),
+      ];
+      this.selectedDraftPointIndex = insertIndex;
+      this.invalidDrawMessage = "";
+    },
+
+    findDraftSegmentNearScreenPoint(event) {
+      return this.draftPolygonSegments
+        .map(segment => ({
+          segment,
+          hit: this.projectEventToDraftSegment(event, segment),
+        }))
+        .filter(item => item.hit && item.hit.distance <= SEGMENT_HIT_TOLERANCE_PX)
+        .sort((a, b) => a.hit.distance - b.hit.distance)[0] || null;
+    },
+
+    projectEventToDraftSegment(event, segment) {
+      const startScreen = this.svgArrayPointToScreenPoint(segment.start);
+      const endScreen = this.svgArrayPointToScreenPoint(segment.end);
+      if (!startScreen || !endScreen) return null;
+
+      const screenProjection = this.projectPointToSegment(
+        { x: event.clientX, y: event.clientY },
+        startScreen,
+        endScreen
+      );
+      const projectedSvgPoint = this.interpolateSvgSegmentPoint(
+        segment.start,
+        segment.end,
+        screenProjection.t
+      );
+
+      return {
+        distance: screenProjection.distance,
+        projectedSvgPoint,
+      };
+    },
+
+    svgArrayPointToScreenPoint(point) {
+      const svg = this.$refs.segmentationSvg;
+      if (!svg || !Array.isArray(point)) return null;
+
+      const ctm = svg.getScreenCTM?.();
+      if (!ctm) return null;
+
+      const screenPoint = new DOMPoint(point[0], point[1]).matrixTransform(ctm);
+      return {
+        x: screenPoint.x,
+        y: screenPoint.y,
+      };
+    },
+
+    projectPointToSegment(point, start, end) {
+      const deltaX = end.x - start.x;
+      const deltaY = end.y - start.y;
+      const lengthSquared = deltaX * deltaX + deltaY * deltaY;
+
+      if (!lengthSquared) {
+        const distance = Math.hypot(point.x - start.x, point.y - start.y);
+        return { t: 0, distance };
+      }
+
+      const rawT =
+        ((point.x - start.x) * deltaX + (point.y - start.y) * deltaY) /
+        lengthSquared;
+      const t = Math.min(Math.max(rawT, 0), 1);
+      const projected = {
+        x: start.x + t * deltaX,
+        y: start.y + t * deltaY,
+      };
+
+      return {
+        t,
+        distance: Math.hypot(point.x - projected.x, point.y - projected.y),
+      };
+    },
+
+    interpolateSvgSegmentPoint(start, end, t) {
+      return {
+        x: start[0] + (end[0] - start[0]) * t,
+        y: start[1] + (end[1] - start[1]) * t,
+      };
+    },
+
     handleOverlaySvgClick(event) {
       if (!this.isDrawMode) return;
+      if (event.defaultPrevented) return;
 
       const justDragged = Date.now() - this.lastPointerDragAt < 200;
       const spaceInteraction = Date.now() - this.lastSpacePointerAt < 200;
       if (justDragged || spaceInteraction) return;
+
+      const segmentHit = this.findDraftSegmentNearScreenPoint(event);
+      if (segmentHit) {
+        event.stopPropagation();
+        this.insertDraftPointOnSegment(segmentHit.segment, event);
+        return;
+      }
 
       const point = this.screenPointToNaturalImagePoint(event);
       if (!point) return;
@@ -1553,6 +2498,7 @@ export default {
         ...this.draftPolygonPoints,
         point,
       ];
+      this.selectedDraftPointIndex = this.draftPolygonPoints.length - 1;
     },
 
     screenPointToSvgPoint(event) {
@@ -1602,6 +2548,7 @@ export default {
 
     finishDraftPolygon() {
       if (this.draftPolygonPoints.length < 3) return;
+      this.cancelDraftPointDrag();
 
       const newObject = {
         id: this.nextRevisionObjectId(),
@@ -1622,6 +2569,7 @@ export default {
         newObject,
       ];
       this.draftPolygonPoints = [];
+      this.selectedDraftPointIndex = null;
       this.invalidDrawMessage = "";
       this.selectedObjectKey = this.revisionObjectSelectionKey(newObject);
       this.pushUndoOperation({
@@ -1633,7 +2581,9 @@ export default {
     },
 
     cancelDraftPolygon() {
+      this.cancelDraftPointDrag();
       this.draftPolygonPoints = [];
+      this.selectedDraftPointIndex = null;
       this.invalidDrawMessage = "";
     },
 
@@ -1643,9 +2593,11 @@ export default {
       const index = this.findWorkingObjectIndexByKey(this.selectedObjectKey);
       if (index < 0) return;
 
+      this.cancelVertexDrag();
       const object = this.cloneJson(this.workingObjects[index]);
       this.workingObjects.splice(index, 1);
       this.selectedObjectKey = null;
+      this.selectedVertexIndex = null;
       this.pushUndoOperation({
         type: "DELETE_OBJECT",
         object,
@@ -1747,6 +2699,34 @@ export default {
       }
 
       event.stopPropagation();
+
+      if (this.editorTool === "VERTEX") {
+        if (this.vertexEditMode === "INSERT") {
+          this.insertVertexOnSelectedObject(event);
+          return;
+        }
+
+        const objectItem = this.overlayDrawableObjects.find(
+          item => item.selectionKey === selectionKey
+        );
+        const nearestVertexIndex = this.findNearestVertexIndexForEvent(
+          objectItem?.object,
+          event
+        );
+        const changedObject = this.selectedObjectKey !== selectionKey;
+
+        this.selectedObjectKey = selectionKey;
+        if (nearestVertexIndex !== null) {
+          this.selectedVertexIndex = nearestVertexIndex;
+        } else if (changedObject) {
+          this.selectedVertexIndex = null;
+        }
+        return;
+      }
+
+      if (this.editorTool !== "SELECT") return;
+
+      this.selectedVertexIndex = null;
       this.selectedObjectKey =
         this.selectedObjectKey === selectionKey ? null : selectionKey;
     },
@@ -1761,6 +2741,30 @@ export default {
     },
 
     handleEditorKeyDown(event) {
+      if (
+        this.isVertexMode &&
+        this.selectedVertexIndex !== null &&
+        (event.code === "Delete" || event.code === "Backspace") &&
+        !this.isTypingTarget(event.target)
+      ) {
+        if (this.canDeleteSelectedVertex) {
+          event.preventDefault();
+          this.deleteSelectedVertex();
+        }
+        return;
+      }
+
+      if (
+        this.isDrawMode &&
+        this.selectedDraftPointIndex !== null &&
+        (event.code === "Delete" || event.code === "Backspace") &&
+        !this.isTypingTarget(event.target)
+      ) {
+        event.preventDefault();
+        this.deleteSelectedDraftPoint();
+        return;
+      }
+
       if (event.code !== "Space" || !this.isEditMode || this.isTypingTarget(event.target)) {
         return;
       }
@@ -1864,6 +2868,83 @@ export default {
         .filter(Boolean);
     },
 
+    computeLodVertexIndices(points) {
+      const occupiedCells = new Map();
+      const visibleIndices = [];
+
+      points.forEach((point, vertexIndex) => {
+        if (!this.validPolygonPoints([point]).length) return;
+
+        const svgPoint = this.scalePoint(point);
+        const screenPoint = this.svgArrayPointToScreenPoint(svgPoint);
+        if (!screenPoint) return;
+
+        const cellX = Math.floor(screenPoint.x / MIN_VERTEX_HANDLE_SPACING_PX);
+        const cellY = Math.floor(screenPoint.y / MIN_VERTEX_HANDLE_SPACING_PX);
+
+        if (this.hasNearbyOccupiedVertex(occupiedCells, cellX, cellY, screenPoint)) {
+          return;
+        }
+
+        const key = this.vertexLodCellKey(cellX, cellY);
+        const bucket = occupiedCells.get(key) || [];
+        bucket.push(screenPoint);
+        occupiedCells.set(key, bucket);
+        visibleIndices.push(vertexIndex);
+      });
+
+      return visibleIndices;
+    },
+
+    hasNearbyOccupiedVertex(occupiedCells, cellX, cellY, screenPoint) {
+      for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+        for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
+          const key = this.vertexLodCellKey(cellX + offsetX, cellY + offsetY);
+          const bucket = occupiedCells.get(key) || [];
+          const tooClose = bucket.some(existingPoint => (
+            Math.hypot(
+              screenPoint.x - existingPoint.x,
+              screenPoint.y - existingPoint.y
+            ) < MIN_VERTEX_HANDLE_SPACING_PX
+          ));
+
+          if (tooClose) return true;
+        }
+      }
+
+      return false;
+    },
+
+    vertexLodCellKey(cellX, cellY) {
+      return `${cellX}:${cellY}`;
+    },
+
+    findNearestVertexIndexForEvent(object, event) {
+      const points = object?.geometry?.points;
+      if (!Array.isArray(points) || !points.length) return null;
+
+      let nearest = null;
+
+      points.forEach((point, index) => {
+        const svgPoint = this.scalePoint(point);
+        const screenPoint = this.svgArrayPointToScreenPoint(svgPoint);
+        if (!screenPoint) return;
+
+        const distance = Math.hypot(
+          event.clientX - screenPoint.x,
+          event.clientY - screenPoint.y
+        );
+
+        if (!nearest || distance < nearest.distance) {
+          nearest = { index, distance };
+        }
+      });
+
+      return nearest && nearest.distance <= NEAREST_VERTEX_HIT_PX
+        ? nearest.index
+        : null;
+    },
+
     overlayObjectKey(object, index) {
       if (this.isEditMode && Number.isInteger(Number(object?.id))) {
         return this.revisionObjectSelectionKey(object);
@@ -1880,12 +2961,12 @@ export default {
     },
 
     zoomImage() {
-      this.imageZoom = Math.min(Number((this.imageZoom + 0.25).toFixed(2)), 2);
+      this.imageZoom = Math.min(Number((this.imageZoom + ZOOM_STEP).toFixed(2)), ZOOM_MAX);
       this.clampImagePan();
     },
 
     zoomOutImage() {
-      this.imageZoom = Math.max(Number((this.imageZoom - 0.25).toFixed(2)), 1);
+      this.imageZoom = Math.max(Number((this.imageZoom - ZOOM_STEP).toFixed(2)), ZOOM_MIN);
       this.clampImagePan();
     },
 
@@ -1895,7 +2976,7 @@ export default {
     },
 
     resetImageView() {
-      this.imageZoom = 1;
+      this.imageZoom = ZOOM_MIN;
       this.imageRotation = 0;
       this.panX = 0;
       this.panY = 0;
@@ -1998,6 +3079,43 @@ export default {
       return this.overlayFallbackPalette[index % this.overlayFallbackPalette.length];
     },
 
+    overlayFillForLabel(label, context = "overlay") {
+      const color = this.overlayColorForLabel(label);
+      const alpha = context === "draft"
+        ? 0.06
+        : this.overlayFillAlpha();
+
+      return this.withRgbaAlpha(color.fill, alpha);
+    },
+
+    overlayFillAlpha() {
+      if (!this.isEditMode) return 0.16;
+      if (this.editorTool === "DRAW") return 0.06;
+      if (this.editorTool === "VERTEX") return 0.09;
+      if (this.editorTool === "SELECT") return 0.14;
+      return 0.1;
+    },
+
+    withRgbaAlpha(color, alpha) {
+      const rgbaMatch = String(color).match(
+        /rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*[\d.]+)?\s*\)/
+      );
+
+      if (!rgbaMatch) return color;
+
+      return `rgba(${rgbaMatch[1]}, ${rgbaMatch[2]}, ${rgbaMatch[3]}, ${alpha})`;
+    },
+
+    overlayLabelRenderOrder(label) {
+      const order = {
+        membrana: 1,
+        nucleo: 2,
+        micronucleo: 3,
+      };
+
+      return order[label] || 10;
+    },
+
     overlayLabelDisplayName(label) {
       const displayNames = {
         membrana: "Membranas",
@@ -2025,7 +3143,9 @@ export default {
       };
 
       if (!visible && this.selectedObject?.label === label) {
+        this.cancelVertexDrag();
         this.selectedObjectKey = null;
+        this.selectedVertexIndex = null;
       }
     },
   },
@@ -2358,40 +3478,6 @@ export default {
   color: #999;
 }
 
-.card-tools {
-  display: flex;
-  gap: 8px;
-}
-
-.tool-btn {
-  width: 36px;
-  height: 36px;
-  border: 2px solid #e0e0e0;
-  background: white;
-  cursor: pointer;
-  border-radius: 8px;
-  font-size: 16px;
-  transition: all 0.2s ease;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.tool-btn:hover {
-  background: #f0f4f8;
-  transform: translateY(-2px);
-}
-
-.tool-btn.danger:hover {
-  border-color: #ef5350;
-  background: #ffebee;
-}
-
-.tool-btn.success:hover {
-  border-color: #66bb6a;
-  background: #e8f5e9;
-}
-
 /* VISTA DIVIDIDA */
 .split-view {
   display: grid;
@@ -2413,16 +3499,41 @@ export default {
   min-height: 0;
 }
 
-.viewer-mode-bar {
+.viewer-editor-toolbar {
+  background: #f8fafc;
+  border: 1px solid #d9e2ec;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px;
+}
+
+.editor-mode-row,
+.editor-tools-row {
   align-items: center;
   display: flex;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 8px;
   justify-content: space-between;
+  min-width: 0;
 }
 
 .viewer-mode-buttons {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+  min-width: 0;
+}
+
+.editor-revision-status {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+  min-width: 0;
 }
 
 .mode-btn {
@@ -2464,7 +3575,9 @@ export default {
 
 .editor-tool-buttons {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
+  min-width: 0;
 }
 
 .editor-tool-btn {
@@ -2549,19 +3662,48 @@ export default {
   pointer-events: none;
 }
 
+.segmentation-svg-overlay.is-pan-mode .segmentation-polygon {
+  pointer-events: none;
+}
+
 .segmentation-svg-overlay.is-draw-mode .segmentation-polygons {
   pointer-events: none;
+}
+
+.segmentation-svg-overlay.is-draw-mode .segmentation-polygon {
+  pointer-events: none;
+}
+
+.segmentation-svg-overlay.is-vertex-mode .segmentation-polygon {
+  pointer-events: none;
+}
+
+.segmentation-svg-overlay.is-vertex-mode .segmentation-polygon.selected {
+  pointer-events: visiblePainted;
 }
 
 .segmentation-polygon {
   fill: rgba(30, 136, 229, 0.16);
   stroke: rgba(30, 136, 229, 0.92);
   stroke-linejoin: round;
-  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
 }
 
 .segmentation-svg-overlay.is-editable .segmentation-polygon {
   cursor: pointer;
+  pointer-events: visiblePainted;
+}
+
+.segmentation-svg-overlay.is-editable.is-pan-mode .segmentation-polygon,
+.segmentation-svg-overlay.is-editable.is-draw-mode .segmentation-polygon {
+  pointer-events: none;
+}
+
+.segmentation-svg-overlay.is-editable.is-vertex-mode .segmentation-polygon {
+  pointer-events: none;
+}
+
+.segmentation-svg-overlay.is-editable.is-vertex-mode .segmentation-polygon.selected {
   pointer-events: visiblePainted;
 }
 
@@ -2578,7 +3720,7 @@ export default {
   filter: drop-shadow(0 0 5px rgba(0, 0, 0, 0.55));
   pointer-events: none;
   stroke-linejoin: round;
-  stroke-width: 5;
+  vector-effect: non-scaling-stroke;
 }
 
 .segmentation-selection-highlight.manual {
@@ -2586,13 +3728,17 @@ export default {
 }
 
 .draft-polygon-layer {
+  pointer-events: auto;
+}
+
+.segmentation-svg-overlay.is-pan-mode .draft-polygon-layer {
   pointer-events: none;
 }
 
 .draft-polygon-line,
 .draft-polygon-fill {
   stroke-linejoin: round;
-  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
 }
 
 .draft-polygon-line {
@@ -2604,9 +3750,78 @@ export default {
   opacity: 0.85;
 }
 
+.draft-segment-hit {
+  cursor: copy;
+  opacity: 0;
+  pointer-events: stroke;
+  stroke: #000;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.draft-polygon-point-hit {
+  cursor: grab;
+  fill: transparent;
+  pointer-events: all;
+  stroke: transparent;
+}
+
+.draft-polygon-point-hit:active {
+  cursor: grabbing;
+}
+
 .draft-polygon-point {
+  pointer-events: none;
   stroke: white;
-  stroke-width: 2;
+  stroke-width: 1.25;
+  vector-effect: non-scaling-stroke;
+}
+
+.draft-polygon-point.selected {
+  stroke: #263238;
+  stroke-width: 1.5;
+}
+
+.vertex-handle-layer {
+  pointer-events: auto;
+}
+
+.segmentation-svg-overlay.is-pan-mode .vertex-handle-layer {
+  pointer-events: none;
+}
+
+.segmentation-svg-overlay.is-vertex-insert-mode .vertex-handle-layer {
+  pointer-events: none;
+}
+
+.vertex-handle-hit {
+  cursor: grab;
+  fill: transparent;
+  pointer-events: all;
+  stroke: transparent;
+}
+
+.vertex-handle-hit:active {
+  cursor: grabbing;
+}
+
+.vertex-handle {
+  fill: #ffffff;
+  pointer-events: none;
+  stroke: #263238;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.vertex-handle.neighbor {
+  fill: #f8fafc;
+  stroke: #607d8b;
+}
+
+.vertex-handle.selected {
+  fill: #263238;
+  stroke: #ffffff;
+  stroke-width: 1.5;
 }
 
 .empty-image-state {
@@ -2843,6 +4058,21 @@ export default {
   padding-top: 10px;
 }
 
+.vertex-mode-panel {
+  border-top: 1px solid #d9e2ec;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+}
+
+.vertex-mode-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .drawing-label-row {
   align-items: center;
   display: flex;
@@ -3024,29 +4254,6 @@ export default {
   font-size: 11px;
 }
 
-.btn-review {
-  padding: 14px;
-  border: 2px solid #ff9800;
-  background: white;
-  color: #f57c00;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 600;
-  border-radius: 10px;
-  transition: all 0.3s ease;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  margin-top: auto;
-}
-
-.btn-review:hover {
-  background: #fff3e0;
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(255, 152, 0, 0.2);
-}
-
 .full-width {
   width: 100%;
 }
@@ -3097,7 +4304,7 @@ export default {
 }
 
 .objects-layout {
-  display: flex;
+  display: block;
   flex: 1;
   min-height: 0;
   min-width: 0;
@@ -3105,9 +4312,7 @@ export default {
 }
 
 .objects-table-wrapper {
-  flex: 1;
   padding: 16px;
-  border-right: 2px solid #f0f0f0;
   overflow-y: auto;
   min-height: 0;
   min-width: 0;
@@ -3162,93 +4367,6 @@ export default {
 }
 
 .obj-icon {
-  font-size: 16px;
-}
-
-.obj-actions {
-  display: flex;
-  gap: 6px;
-  justify-content: center;
-}
-
-.obj-btn {
-  width: 32px;
-  height: 32px;
-  border: 2px solid #e0e0e0;
-  background: white;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 14px;
-  transition: all 0.2s ease;
-}
-
-.obj-btn:hover {
-  background: #f0f4f8;
-  border-color: #1e88e5;
-  transform: scale(1.1);
-}
-
-.objects-tools-panel {
-  width: 240px;
-  padding: 16px;
-  flex: 0 0 240px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  background: #fafbfc;
-  overflow-y: auto;
-}
-
-.info-box {
-  border: 2px solid #e3f2fd;
-  border-radius: 10px;
-  padding: 12px;
-  font-size: 11px;
-  background: white;
-  color: #666;
-  line-height: 1.5;
-}
-
-.info-icon {
-  font-size: 20px;
-  margin-bottom: 6px;
-}
-
-.info-box p {
-  margin: 0;
-}
-
-.btn-tool-large {
-  padding: 12px;
-  border: 2px solid #e0e0e0;
-  background: white;
-  cursor: pointer;
-  border-radius: 10px;
-  font-size: 13px;
-  font-weight: 600;
-  transition: all 0.3s ease;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
-
-.btn-tool-large:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-}
-
-.btn-tool-large.review:hover {
-  border-color: #ff9800;
-  background: #fff3e0;
-}
-
-.btn-tool-large.export:hover {
-  border-color: #1e88e5;
-  background: #e3f2fd;
-}
-
-.btn-tool-large span {
   font-size: 16px;
 }
 
@@ -3327,14 +4445,8 @@ export default {
     min-height: 150px;
   }
 
-  .objects-table-wrapper,
-  .objects-tools-panel {
+  .objects-table-wrapper {
     padding: 12px;
-  }
-
-  .objects-tools-panel {
-    flex-basis: 200px;
-    width: 200px;
   }
 }
 
@@ -3397,18 +4509,8 @@ export default {
     gap: 12px;
   }
 
-  .objects-layout {
-    flex-direction: column;
-  }
-
   .objects-table-wrapper {
-    border-right: 0;
     padding: 12px;
-  }
-
-  .objects-tools-panel {
-    flex-basis: auto;
-    width: 100%;
   }
 }
 </style>

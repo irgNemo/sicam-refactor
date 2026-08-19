@@ -17,3 +17,7 @@ export function updateSegmentationDraft(revisionId, resultadoEditado) {
     resultado_editado: resultadoEditado,
   });
 }
+
+export function validateRevision(revisionId) {
+  return apiClient.post(`/api/revisiones-segmentacion/${revisionId}/validar/`);
+}

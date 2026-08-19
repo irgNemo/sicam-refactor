@@ -652,6 +652,18 @@
                   {{ saveDraftMessage }}
                 </div>
                 <div
+                  v-if="showRevisionActions && validateRevisionError"
+                  class="segmentation-status error"
+                >
+                  {{ validateRevisionError }}
+                </div>
+                <div
+                  v-if="showRevisionActions && validateRevisionMessage"
+                  class="segmentation-status success"
+                >
+                  {{ validateRevisionMessage }}
+                </div>
+                <div
                   v-if="isDrawTool && draftPolygonPoints.length"
                   class="segmentation-status warning"
                 >
@@ -683,6 +695,20 @@
                     {{ isSavingDraft ? 'Guardando...' : 'Guardar borrador' }}
                   </button>
                 </div>
+                <div
+                  v-if="showRevisionActions && validateRevisionBlockReason"
+                  class="draft-status warning"
+                >
+                  {{ validateRevisionBlockReason }}
+                </div>
+                <button
+                  v-if="showRevisionActions && activeRevision?.estado === 'BORRADOR'"
+                  class="btn-segment success full-width"
+                  :disabled="!canValidateRevision"
+                  @click="confirmAndValidateRevision"
+                >
+                  {{ isValidatingRevision ? 'Validando...' : 'Validar revisión' }}
+                </button>
               </div>
 
               <div v-if="imagenSeleccionada" class="segmentation-panel">
@@ -729,6 +755,19 @@
                   >
                     Continuar edición
                   </button>
+                </div>
+
+                <div
+                  v-else-if="showValidatedRevisionNotice"
+                  class="validated-revision-card"
+                >
+                  <strong>Revisión validada</strong>
+                  <span>
+                    Revisión #{{ latestValidatedRevision.numero_revision }} · VALIDADA
+                    <template v-if="latestValidatedRevision.validado_en">
+                      · {{ formatearFechaResultado(latestValidatedRevision.validado_en) }}
+                    </template>
+                  </span>
                 </div>
 
                 <div
@@ -840,6 +879,7 @@ import {
   getSegmentationRevisions,
   getOrCreateSegmentationDraft,
   updateSegmentationDraft,
+  validateRevision,
 } from "../services/segmentationRevisionService";
 
 const ZOOM_MIN = 1;
@@ -896,13 +936,17 @@ export default {
       activeRevision: null,
       activeRevisionId: null,
       pendingDraftRevision: null,
+      latestValidatedRevision: null,
       pendingDraftLoading: false,
       pendingDraftError: "",
       workingObjects: [],
       isDraftDirty: false,
       isSavingDraft: false,
+      isValidatingRevision: false,
       saveDraftError: "",
       saveDraftMessage: "",
+      validateRevisionError: "",
+      validateRevisionMessage: "",
       draftBaselineSignature: "",
       undoStack: [],
       redoStack: [],
@@ -1357,6 +1401,50 @@ export default {
       );
     },
 
+    noEditorialInteractionInProgress() {
+      return !this.draftPointDrag && !this.vertexDrag && !this.isPanning;
+    },
+
+    validateRevisionBlockReason() {
+      if (!this.activeRevision || this.activeRevision.estado !== "BORRADOR") {
+        return "No hay una revisión BORRADOR activa.";
+      }
+
+      if (this.isDraftDirty) {
+        return "Guarda los cambios antes de validar la revisión.";
+      }
+
+      if (this.draftPolygonPoints.length > 0) {
+        return "Finaliza o cancela la máscara en construcción antes de validar.";
+      }
+
+      if (!this.noEditorialInteractionInProgress) {
+        return "Termina la interacción actual antes de validar.";
+      }
+
+      if (this.isValidatingRevision) {
+        return "Validando revisión...";
+      }
+
+      return "";
+    },
+
+    canValidateRevision() {
+      return (
+        this.isEditMode &&
+        ["SELECT", "VERTEX"].includes(this.editorTool) &&
+        !this.validateRevisionBlockReason
+      );
+    },
+
+    showValidatedRevisionNotice() {
+      return (
+        this.viewerMode === "NAVIGATE" &&
+        !this.pendingDraftRevision &&
+        Boolean(this.latestValidatedRevision)
+      );
+    },
+
     showPendingDraftNotice() {
       return (
         this.viewerMode === "NAVIGATE" &&
@@ -1673,7 +1761,8 @@ export default {
 
       if (
         this.activeRevision &&
-        this.activeRevision.resultado_segmentacion === resultadoId
+        this.activeRevision.resultado_segmentacion === resultadoId &&
+        this.activeRevision.estado === "BORRADOR"
       ) {
         this.viewerMode = "EDIT";
         this.editorTool = "SELECT";
@@ -1753,6 +1842,7 @@ export default {
         this.activeRevision = null;
         this.activeRevisionId = null;
         this.pendingDraftRevision = null;
+        this.latestValidatedRevision = null;
         this.pendingDraftLoading = false;
         this.pendingDraftError = "";
       }
@@ -1769,6 +1859,7 @@ export default {
 
     async loadPendingDraftRevision(resultadoId = this.activeResultadoSegmentacionId) {
       this.pendingDraftRevision = null;
+      this.latestValidatedRevision = null;
       this.pendingDraftError = "";
 
       if (!resultadoId) return;
@@ -1791,6 +1882,7 @@ export default {
         const revisions = Array.isArray(response.data) ? response.data : [];
         this.pendingDraftRevision =
           revisions.find(revision => revision.estado === "BORRADOR") || null;
+        this.latestValidatedRevision = this.findLatestValidatedRevision(revisions);
       } catch (error) {
         if (this.activeResultadoSegmentacionId === resultadoId) {
           this.pendingDraftError =
@@ -1802,6 +1894,14 @@ export default {
           this.pendingDraftLoading = false;
         }
       }
+    },
+
+    findLatestValidatedRevision(revisions) {
+      if (!Array.isArray(revisions)) return null;
+
+      return revisions
+        .filter(revision => revision.estado === "VALIDADA")
+        .sort((a, b) => Number(b.numero_revision) - Number(a.numero_revision))[0] || null;
     },
 
     cloneJson(value) {
@@ -2634,6 +2734,8 @@ export default {
       this.isSavingDraft = true;
       this.saveDraftError = "";
       this.saveDraftMessage = "";
+      this.validateRevisionError = "";
+      this.validateRevisionMessage = "";
 
       try {
         const response = await updateSegmentationDraft(
@@ -2665,6 +2767,65 @@ export default {
           "No fue posible guardar el borrador.";
       } finally {
         this.isSavingDraft = false;
+      }
+    },
+
+    async confirmAndValidateRevision() {
+      if (!this.canValidateRevision || !this.activeRevisionId) return;
+
+      const revisionNumber = this.activeRevision?.numero_revision;
+      const confirmed = window.confirm(
+        `Validar revisión\n\nLa Revisión #${revisionNumber} quedará marcada como VALIDADA y ya no podrá editarse.\n\nEl resultado automático se conservará como referencia histórica.\n\n¿Deseas continuar?`
+      );
+
+      if (!confirmed) return;
+
+      if (!this.canValidateRevision || !this.activeRevisionId) return;
+
+      this.isValidatingRevision = true;
+      this.validateRevisionError = "";
+      this.validateRevisionMessage = "";
+
+      try {
+        const response = await validateRevision(this.activeRevisionId);
+
+        this.cancelVertexDrag();
+        this.cancelDraftPointDrag();
+        this.activeRevision = response.data;
+        this.activeRevisionId = response.data.id_revision_segmentacion;
+        this.pendingDraftRevision = null;
+        this.latestValidatedRevision = response.data;
+        this.workingObjects = this.cloneJson(response.data.resultado_editado?.objects || []);
+        this.draftBaselineSignature = this.serializeObjects(this.workingObjects);
+        this.isDraftDirty = false;
+        this.undoStack = [];
+        this.redoStack = [];
+        this.selectedObjectKey = null;
+        this.selectedVertexIndex = null;
+        this.selectedDraftPointIndex = null;
+        this.draftPolygonPoints = [];
+        this.invalidDrawMessage = "";
+        this.saveDraftError = "";
+        this.saveDraftMessage = "";
+        this.validateRevisionMessage = "Revisión validada.";
+        this.viewerMode = "NAVIGATE";
+        this.editorTool = "SELECT";
+        this.vertexEditMode = "MOVE";
+        this.isSpacePressed = false;
+        this.endImagePan();
+        this.loadPendingDraftRevision(this.activeResultadoSegmentacionId);
+      } catch (error) {
+        const status = error.response?.status;
+        this.validateRevisionError =
+          status === 409
+            ? "La revisión ya no está disponible como BORRADOR."
+            : error.response?.data?.error || "No fue posible validar la revisión.";
+
+        if (status === 409) {
+          this.loadPendingDraftRevision(this.activeResultadoSegmentacionId);
+        }
+      } finally {
+        this.isValidatingRevision = false;
       }
     },
 
@@ -4175,6 +4336,26 @@ export default {
   gap: 10px;
   grid-template-columns: minmax(0, 1fr) auto;
   padding: 10px 12px;
+}
+
+.validated-revision-card {
+  background: #edf7ed;
+  border: 1px solid #c8e6c9;
+  border-radius: 10px;
+  color: #256029;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+}
+
+.validated-revision-card strong {
+  font-size: 12px;
+}
+
+.validated-revision-card span {
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .pending-draft-copy {

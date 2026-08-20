@@ -87,88 +87,17 @@
 
             <!-- IMAGEN -->
             <div class="image-container">
-              <div v-if="imagenSeleccionada" class="viewer-editor-toolbar">
-                <div class="editor-mode-row">
-                  <div class="viewer-mode-buttons">
-                    <button
-                      class="mode-btn"
-                      :class="{ active: viewerMode === 'NAVIGATE' }"
-                      title="Navegar por la imagen"
-                      :aria-pressed="viewerMode === 'NAVIGATE'"
-                      @click="setViewerMode('NAVIGATE')"
-                    >
-                      Navegar
-                    </button>
-                    <button
-                      class="mode-btn"
-                      :class="{ active: viewerMode === 'EDIT' }"
-                      :disabled="revisionLoading"
-                      title="Editar revision experta"
-                      :aria-pressed="viewerMode === 'EDIT'"
-                      @click="setViewerMode('EDIT')"
-                    >
-                      {{ revisionLoading ? 'Cargando...' : 'Editar' }}
-                    </button>
-                  </div>
-                  <div class="editor-revision-status">
-                    <span
-                      v-if="isEditMode && activeRevision"
-                      class="revision-badge"
-                    >
-                      Revisión #{{ activeRevision.numero_revision }} · {{ activeRevision.estado }}
-                    </span>
-                    <span
-                      v-if="isDraftDirty"
-                      class="revision-badge dirty"
-                    >
-                      Cambios sin guardar
-                    </span>
-                  </div>
-                </div>
-                <div
-                  v-if="isEditMode"
-                  class="editor-tools-row"
-                >
-                  <div class="editor-tool-buttons">
-                    <button
-                      class="mode-btn editor-tool-btn"
-                      :class="{ active: editorTool === 'SELECT' }"
-                      title="Seleccionar máscaras"
-                      :aria-pressed="editorTool === 'SELECT'"
-                      @click="setEditorTool('SELECT')"
-                    >
-                      Seleccionar
-                    </button>
-                    <button
-                      class="mode-btn editor-tool-btn"
-                      :class="{ active: editorTool === 'PAN' }"
-                      title="Mover visor"
-                      :aria-pressed="editorTool === 'PAN'"
-                      @click="setEditorTool('PAN')"
-                    >
-                      Mover
-                    </button>
-                    <button
-                      class="mode-btn editor-tool-btn"
-                      :class="{ active: editorTool === 'DRAW' }"
-                      title="Dibujar máscara"
-                      :aria-pressed="editorTool === 'DRAW'"
-                      @click="setEditorTool('DRAW')"
-                    >
-                      Dibujar
-                    </button>
-                    <button
-                      class="mode-btn editor-tool-btn"
-                      :class="{ active: editorTool === 'VERTEX' }"
-                      title="Editar contorno"
-                      :aria-pressed="editorTool === 'VERTEX'"
-                      @click="setEditorTool('VERTEX')"
-                    >
-                      Editar contorno
-                    </button>
-                  </div>
-                </div>
-              </div>
+              <SegmentationEditorToolbar
+                v-if="imagenSeleccionada"
+                :viewer-mode="viewerMode"
+                :is-edit-mode="isEditMode"
+                :revision-loading="revisionLoading"
+                :active-revision="activeRevision"
+                :is-draft-dirty="isDraftDirty"
+                :editor-tool="editorTool"
+                @change-viewer-mode="setViewerMode"
+                @change-editor-tool="setEditorTool"
+              />
 
               <div
                 v-if="revisionError"
@@ -358,105 +287,22 @@
                 </div>
               </div>
 
-              <div v-if="imagenSeleccionada" class="image-controls">
-                <button
-                  class="control-btn"
-                  title="Aumentar zoom"
-                  aria-label="Aumentar zoom"
-                  @click="zoomImage"
-                >
-                  <span>＋</span> Zoom {{ Math.round(imageZoom * 100) }}%
-                </button>
-                <button
-                  class="control-btn"
-                  title="Reducir zoom"
-                  aria-label="Reducir zoom"
-                  @click="zoomOutImage"
-                >
-                  <span>－</span> Zoom
-                </button>
-                <button
-                  class="control-btn"
-                  title="Rotar imagen"
-                  aria-label="Rotar imagen"
-                  @click="rotateImage"
-                >
-                  <span>↻</span> Rotar
-                </button>
-                <button
-                  class="control-btn"
-                  title="Ajustar vista"
-                  aria-label="Ajustar vista"
-                  @click="resetImageView"
-                >
-                  <span>⊟</span> Ajustar
-                </button>
-              </div>
+              <SegmentationImageControls
+                v-if="imagenSeleccionada"
+                :image-zoom="imageZoom"
+                @zoom-in="zoomImage"
+                @zoom-out="zoomOutImage"
+                @rotate="rotateImage"
+                @reset="resetImageView"
+              />
             </div>
 
             <!-- DATOS -->
             <div class="data-container">
-              <div class="data-header">
-                <h4>Resumen de Conteo</h4>
-              </div>
-
-              <table class="data-table">
-                <thead>
-                  <tr>
-                    <th>Estructura</th>
-                    <th>Cantidad</th>
-                  </tr>
-                </thead>
-
-                <tbody v-if="resumenConteoActivo">
-                  <tr class="data-row membranas">
-                    <td>
-                      <span
-                        class="structure-dot"
-                        :style="{ color: overlayColorForLabel('membrana').stroke }"
-                      >●</span>
-                      Membranas
-                    </td>
-                    <td class="count">{{ resumenConteoActivo.membranas }}</td>
-                  </tr>
-                  <tr class="data-row nucleos">
-                    <td>
-                      <span
-                        class="structure-dot"
-                        :style="{ color: overlayColorForLabel('nucleo').stroke }"
-                      >●</span>
-                      Núcleos
-                    </td>
-                    <td class="count">{{ resumenConteoActivo.nucleos }}</td>
-                  </tr>
-                  <tr class="data-row micronucleos highlight">
-                    <td>
-                      <span
-                        class="structure-dot"
-                        :style="{ color: overlayColorForLabel('micronucleo').stroke }"
-                      >●</span>
-                      Micronúcleos
-                    </td>
-                    <td class="count">{{ resumenConteoActivo.micronucleos }}</td>
-                  </tr>
-                  <tr class="data-row total">
-                    <td>
-                      <span class="structure-total-symbol">Σ</span>
-                      Total
-                    </td>
-                    <td class="count">{{ resumenConteoActivo.total }}</td>
-                  </tr>
-                </tbody>
-
-                <tbody v-else>
-                  <tr>
-                    <td colspan="2" class="no-data">
-                      <div class="no-data-icon">📊</div>
-                      <span>Sin resultados disponibles</span>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+              <SegmentationCountSummary
+                :summary="resumenConteoActivo"
+                :palette="segmentationLabelPalette"
+              />
 
               <div
                 v-if="isEditMode"
@@ -711,180 +557,40 @@
                 </button>
               </div>
 
-              <div v-if="imagenSeleccionada" class="segmentation-panel">
-                <button
-                  class="btn-segment full-width"
-                  :disabled="segmentacionLoading"
-                  @click="ejecutarSegmentacion"
-                >
-                  {{ segmentacionLoading ? 'Segmentando...' : 'Ejecutar segmentacion' }}
-                </button>
-
-                <div v-if="segmentacionError" class="segmentation-status error">
-                  {{ segmentacionError }}
-                </div>
-
-                <div v-if="segmentacionMetadata" class="segmentation-status success">
-                  <div class="status-title">
-                    Segmentacion {{ segmentacionMetadata.estado }}
-                  </div>
-                  <div class="status-grid">
-                    <span>ID resultado</span>
-                    <strong>#{{ segmentacionMetadata.id }}</strong>
-                    <span>Tipo</span>
-                    <strong>{{ segmentacionMetadata.tipo_muestra }}</strong>
-                    <span>Objetos</span>
-                    <strong>{{ segmentacionObjetosCount }}</strong>
-                  </div>
-                </div>
-
-                <div
-                  v-if="effectiveSegmentationLoading"
-                  class="segmentation-status neutral"
-                >
-                  Cargando resultado mostrado...
-                </div>
-
-                <div
-                  v-else-if="effectiveSegmentationError"
-                  class="segmentation-status error"
-                >
-                  {{ effectiveSegmentationError }}
-                </div>
-
-                <div
-                  v-else-if="effectiveSegmentation"
-                  class="effective-result-card"
-                >
-                  <strong>Resultado mostrado</strong>
-                  <span>{{ effectiveSegmentationDisplay }}</span>
-                </div>
-
-                <div
-                  v-if="showPendingDraftNotice"
-                  class="pending-draft-card"
-                >
-                  <div class="pending-draft-copy">
-                    <strong>Revisión pendiente</strong>
-                    <span>
-                      Revisión #{{ pendingDraftRevision.numero_revision }} ·
-                      Cambios guardados, aún no validados.
-                    </span>
-                  </div>
-                  <button
-                    class="control-btn"
-                    @click="setViewerMode('EDIT')"
-                  >
-                    Continuar edición
-                  </button>
-                </div>
-
-                <div
-                  v-else-if="showValidatedRevisionNotice"
-                  class="validated-revision-card"
-                >
-                  <strong>Revisión validada</strong>
-                  <span>
-                    Revisión #{{ latestValidatedRevision.numero_revision }} · VALIDADA
-                    <template v-if="latestValidatedRevision.validado_en">
-                      · {{ formatearFechaResultado(latestValidatedRevision.validado_en) }}
-                    </template>
-                  </span>
-                </div>
-
-                <div
-                  v-else-if="pendingDraftError && !isEditMode"
-                  class="segmentation-status neutral"
-                >
-                  No fue posible consultar revisiones pendientes.
-                </div>
-
-                <div class="segmentation-history">
-                  <div class="history-title">
-                    Ultima segmentacion
-                    <span v-if="historialSegmentacion.length">
-                      {{ historialSegmentacion.length }} resultados
-                    </span>
-                  </div>
-
-                  <div v-if="historialLoading" class="segmentation-status neutral">
-                    Cargando historial...
-                  </div>
-
-                  <div v-else-if="historialError" class="segmentation-status error">
-                    {{ historialError }}
-                  </div>
-
-                  <div v-else-if="!ultimoResultadoSegmentacion" class="segmentation-status neutral">
-                    Sin resultados historicos
-                  </div>
-
-                  <div v-else class="history-compact-card">
-                    <strong>{{ formatearFechaResultado(ultimoResultadoSegmentacion.creado_en) }}</strong>
-                    <span>
-                      {{ ultimoHistorialObjetosCount }} objetos · {{ ultimoResultadoSegmentacion.estado }}
-                    </span>
-                  </div>
-                </div>
-              </div>
+              <SegmentationResultPanel
+                v-if="imagenSeleccionada"
+                :segmentacion-loading="segmentacionLoading"
+                :segmentacion-error="segmentacionError"
+                :segmentacion-metadata="segmentacionMetadata"
+                :segmentacion-objetos-count="segmentacionObjetosCount"
+                :effective-segmentation-loading="effectiveSegmentationLoading"
+                :effective-segmentation-error="effectiveSegmentationError"
+                :effective-segmentation="effectiveSegmentation"
+                :effective-segmentation-display="effectiveSegmentationDisplay"
+                :show-pending-draft-notice="showPendingDraftNotice"
+                :pending-draft-revision="pendingDraftRevision"
+                :show-validated-revision-notice="showValidatedRevisionNotice"
+                :latest-validated-revision="latestValidatedRevision"
+                :pending-draft-error="pendingDraftError"
+                :is-edit-mode="isEditMode"
+                :historial-segmentacion="historialSegmentacion"
+                :historial-loading="historialLoading"
+                :historial-error="historialError"
+                :ultimo-resultado-segmentacion="ultimoResultadoSegmentacion"
+                :ultimo-historial-objetos-count="ultimoHistorialObjetosCount"
+                @run-segmentation="ejecutarSegmentacion"
+                @continue-edit="setViewerMode('EDIT')"
+              />
 
             </div>
 
           </div>
         </div>
 
-        <!-- TARJETA CAPAS -->
-        <div class="card objects-card">
-          <div class="card-header-simple">
-            <h3>Capas visibles</h3>
-            <span class="objects-count">{{ overlayLabels.length }} tipos</span>
-          </div>
-
-          <div class="objects-layout">
-
-            <div class="objects-table-wrapper">
-              <table class="obj-table">
-                <thead>
-                  <tr>
-                    <th>Visible</th>
-                    <th>Capa</th>
-                  </tr>
-                </thead>
-                <tbody v-if="overlayLabels.length">
-                  <tr
-                    v-for="label in overlayLabels"
-                    :key="label.label"
-                    class="obj-row"
-                  >
-                    <td>
-                      <input
-                        type="checkbox"
-                        class="checkbox-custom"
-                        :checked="label.visible"
-                        @change="setOverlayLabelVisibility(label.label, $event.target.checked)"
-                      />
-                    </td>
-                    <td class="obj-type">
-                      <span
-                        class="obj-icon"
-                        :style="{ color: label.stroke }"
-                      >●</span>
-                      {{ overlayLabelDisplayName(label.label) }}
-                    </td>
-                  </tr>
-                </tbody>
-                <tbody v-else>
-                  <tr class="obj-row">
-                    <td colspan="2" class="empty-normalized">
-                      Sin objetos dibujables
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-          </div>
-        </div>
+        <OverlayLayersCard
+          :labels="overlayLabels"
+          @change-visibility="setOverlayLabelVisibility"
+        />
 
       </div>
     </div>
@@ -893,6 +599,11 @@
 
 <script>
 import apiClient from "../services/apiClient";
+import OverlayLayersCard from "./segmentation/OverlayLayersCard.vue";
+import SegmentationCountSummary from "./segmentation/SegmentationCountSummary.vue";
+import SegmentationEditorToolbar from "./segmentation/SegmentationEditorToolbar.vue";
+import SegmentationImageControls from "./segmentation/SegmentationImageControls.vue";
+import SegmentationResultPanel from "./segmentation/SegmentationResultPanel.vue";
 import {
   obtenerResultadosSegmentacion,
   segmentarMuestra,
@@ -904,10 +615,17 @@ import {
   updateSegmentationDraft,
   validateRevision,
 } from "../services/segmentationRevisionService";
+import {
+  ZOOM_MIN,
+  ZOOM_MAX,
+  ZOOM_STEP,
+  calculateImagePanLimits,
+  calculateOverlayContainment,
+  getValidPolygonPoints,
+  scalePointToOverlay,
+  scalePolygonPointsToOverlay,
+} from "../composables/useSegmentationViewport";
 
-const ZOOM_MIN = 1;
-const ZOOM_MAX = 8;
-const ZOOM_STEP = 0.25;
 const SEGMENT_HIT_TOLERANCE_PX = 8;
 const VERTEX_SEGMENT_HIT_TOLERANCE_PX = 8;
 const DRAW_HANDLE_VISIBLE_RADIUS_PX = 2;
@@ -930,6 +648,13 @@ const VERTEX_NEIGHBOR_RADIUS = 3;
 export default {
   name: "MainContent",
   emits: ["segmentation-completed"],
+  components: {
+    OverlayLayersCard,
+    SegmentationCountSummary,
+    SegmentationEditorToolbar,
+    SegmentationImageControls,
+    SegmentationResultPanel,
+  },
 
   props: {
     patientId: {
@@ -1499,76 +1224,18 @@ export default {
     },
 
     imagePanLimits() {
-      const width = this.imageRenderedSize.width;
-      const height = this.imageRenderedSize.height;
-
-      if (!width || !height || this.imageZoom <= 1) {
-        return { maxX: 0, maxY: 0 };
-      }
-
-      const rotation = ((this.imageRotation % 360) + 360) % 360;
-      const rotatedSideways = rotation === 90 || rotation === 270;
-      const transformedWidth = (rotatedSideways ? height : width) * this.imageZoom;
-      const transformedHeight = (rotatedSideways ? width : height) * this.imageZoom;
-
-      return {
-        maxX: Math.max(0, Math.round((transformedWidth - width) / 2)),
-        maxY: Math.max(0, Math.round((transformedHeight - height) / 2)),
-      };
+      return calculateImagePanLimits(
+        this.imageRenderedSize,
+        this.imageZoom,
+        this.imageRotation
+      );
     },
 
     overlayContainment() {
-      const naturalWidth = this.imageNaturalSize.width;
-      const naturalHeight = this.imageNaturalSize.height;
-      const containerWidth = this.imageRenderedSize.width;
-      const containerHeight = this.imageRenderedSize.height;
-
-      if (
-        !naturalWidth ||
-        !naturalHeight ||
-        !containerWidth ||
-        !containerHeight
-      ) {
-        return {
-          canProject: false,
-          displayedSize: { width: 0, height: 0 },
-          offsetX: 0,
-          offsetY: 0,
-          scaleX: null,
-          scaleY: null,
-        };
-      }
-
-      const imageAspect = naturalWidth / naturalHeight;
-      const containerAspect = containerWidth / containerHeight;
-      let displayedImageWidth;
-      let displayedImageHeight;
-      let offsetX;
-      let offsetY;
-
-      if (containerAspect > imageAspect) {
-        displayedImageHeight = containerHeight;
-        displayedImageWidth = containerHeight * imageAspect;
-        offsetX = (containerWidth - displayedImageWidth) / 2;
-        offsetY = 0;
-      } else {
-        displayedImageWidth = containerWidth;
-        displayedImageHeight = containerWidth / imageAspect;
-        offsetX = 0;
-        offsetY = (containerHeight - displayedImageHeight) / 2;
-      }
-
-      return {
-        canProject: true,
-        displayedSize: {
-          width: Math.round(displayedImageWidth),
-          height: Math.round(displayedImageHeight),
-        },
-        offsetX,
-        offsetY,
-        scaleX: displayedImageWidth / naturalWidth,
-        scaleY: displayedImageHeight / naturalHeight,
-      };
+      return calculateOverlayContainment(
+        this.imageNaturalSize,
+        this.imageRenderedSize
+      );
     },
 
     overlayPolygons() {
@@ -3107,32 +2774,15 @@ export default {
     },
 
     validPolygonPoints(points) {
-      if (!Array.isArray(points)) return [];
-
-      return points.filter(point => (
-        Array.isArray(point) &&
-        point.length >= 2 &&
-        Number.isFinite(Number(point[0])) &&
-        Number.isFinite(Number(point[1]))
-      ));
+      return getValidPolygonPoints(points);
     },
 
     scalePoint(point) {
-      const containment = this.overlayContainment;
-
-      if (!containment.canProject) return null;
-      if (!this.validPolygonPoints([point]).length) return null;
-
-      return [
-        Math.round(containment.offsetX + Number(point[0]) * containment.scaleX),
-        Math.round(containment.offsetY + Number(point[1]) * containment.scaleY),
-      ];
+      return scalePointToOverlay(point, this.overlayContainment);
     },
 
     scalePolygonPoints(points) {
-      return this.validPolygonPoints(points)
-        .map(point => this.scalePoint(point))
-        .filter(Boolean);
+      return scalePolygonPointsToOverlay(points, this.overlayContainment);
     },
 
     computeLodVertexIndices(points) {
@@ -3769,43 +3419,6 @@ export default {
   min-height: 0;
 }
 
-.viewer-editor-toolbar {
-  background: #f8fafc;
-  border: 1px solid #d9e2ec;
-  border-radius: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-  padding: 8px;
-}
-
-.editor-mode-row,
-.editor-tools-row {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: space-between;
-  min-width: 0;
-}
-
-.viewer-mode-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  min-width: 0;
-}
-
-.editor-revision-status {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  justify-content: flex-end;
-  min-width: 0;
-}
-
 .mode-btn {
   background: #ffffff;
   border: 2px solid #d9e2ec;
@@ -3826,28 +3439,6 @@ export default {
 .mode-btn:disabled {
   cursor: wait;
   opacity: 0.7;
-}
-
-.revision-badge {
-  background: #f0f4f8;
-  border-radius: 999px;
-  color: #52606d;
-  font-size: 12px;
-  font-weight: 700;
-  padding: 6px 10px;
-  white-space: nowrap;
-}
-
-.revision-badge.dirty {
-  background: #fff8e1;
-  color: #8a6d1d;
-}
-
-.editor-tool-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  min-width: 0;
 }
 
 .editor-tool-btn {
@@ -4112,11 +3703,6 @@ export default {
   font-size: 14px;
 }
 
-.image-controls {
-  display: flex;
-  gap: 8px;
-}
-
 .control-btn {
   flex: 1;
   padding: 8px;
@@ -4169,96 +3755,6 @@ export default {
   display: flex;
   flex-direction: column;
   gap: 16px;
-}
-
-.data-header {
-  padding-bottom: 8px;
-  border-bottom: 2px solid #f0f0f0;
-}
-
-.data-header h4 {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: #2c3e50;
-}
-
-.data-table {
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-  font-size: 13px;
-}
-
-.data-table thead th {
-  padding: 12px;
-  background: #f8f9fa;
-  border-bottom: 2px solid #e0e0e0;
-  text-align: left;
-  font-weight: 600;
-  color: #666;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.data-table tbody td {
-  padding: 14px 12px;
-  border-bottom: 1px solid #f0f0f0;
-}
-
-.data-row {
-  transition: background 0.2s ease;
-}
-
-.data-row:hover {
-  background: #f8f9fa;
-}
-
-.data-row.highlight {
-  background: #fff3e0;
-}
-
-.data-row.highlight:hover {
-  background: #ffe0b2;
-}
-
-.structure-dot,
-.structure-total-symbol {
-  display: inline-block;
-  margin-right: 8px;
-  text-align: center;
-  width: 14px;
-}
-
-.structure-dot {
-  font-size: 16px;
-  line-height: 1;
-}
-
-.structure-total-symbol {
-  color: #2c3e50;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.count {
-  font-weight: 700;
-  font-size: 16px;
-  text-align: right;
-  color: #2c3e50;
-}
-
-.no-data {
-  text-align: center;
-  padding: 40px 20px !important;
-  color: #999;
-}
-
-.no-data-icon {
-  font-size: 48px;
-  margin-bottom: 12px;
-  opacity: 0.3;
 }
 
 .selected-object-panel {
@@ -4380,12 +3876,6 @@ export default {
   color: #8a6d1d;
 }
 
-.segmentation-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
 .btn-segment {
   padding: 12px;
   border: 2px solid #1e88e5;
@@ -4435,142 +3925,8 @@ export default {
   color: #2c3e50;
 }
 
-.pending-draft-card {
-  align-items: center;
-  background: #fff8e1;
-  border: 1px solid #ffe082;
-  border-radius: 10px;
-  color: #5f4b12;
-  display: grid;
-  gap: 10px;
-  grid-template-columns: minmax(0, 1fr) auto;
-  padding: 10px 12px;
-}
-
-.validated-revision-card {
-  background: #edf7ed;
-  border: 1px solid #c8e6c9;
-  border-radius: 10px;
-  color: #256029;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 10px 12px;
-}
-
-.effective-result-card {
-  background: #eef5ff;
-  border: 1px solid #c8dcf5;
-  border-radius: 10px;
-  color: #1f4f82;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 10px 12px;
-}
-
-.validated-revision-card strong {
-  font-size: 12px;
-}
-
-.effective-result-card strong {
-  font-size: 12px;
-}
-
-.validated-revision-card span,
-.effective-result-card span {
-  font-size: 11px;
-  line-height: 1.4;
-}
-
-.pending-draft-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-}
-
-.pending-draft-copy strong {
-  color: #5f4b12;
-  font-size: 13px;
-}
-
-.pending-draft-copy span {
-  color: #7a651a;
-  font-size: 12px;
-  line-height: 1.35;
-}
-
-.segmentation-history {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.empty-normalized {
-  color: #777;
-  font-size: 11px;
-}
-
-.history-title {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 12px;
-  font-weight: 700;
-  color: #2c3e50;
-}
-
-.history-title span {
-  background: #f0f4f8;
-  border-radius: 10px;
-  color: #666;
-  font-size: 11px;
-  padding: 2px 8px;
-}
-
-.status-title {
-  font-weight: 700;
-  margin-bottom: 8px;
-}
-
-.status-grid {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 6px 10px;
-}
-
-.history-compact-card {
-  border: 1px solid #d9e2ec;
-  border-radius: 8px;
-  background: #f8f9fa;
-  color: #2c3e50;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 8px 10px;
-}
-
-.history-compact-card strong {
-  font-size: 12px;
-}
-
-.history-compact-card span {
-  color: #666;
-  font-size: 11px;
-}
-
 .full-width {
   width: 100%;
-}
-
-/* OBJETOS */
-.objects-card {
-  height: auto;
-  min-height: 170px;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
 }
 
 .card-header {
@@ -4582,98 +3938,6 @@ export default {
   background: linear-gradient(to right, #fafbfc, #ffffff);
   flex-shrink: 0;
   height: 50px;
-}
-
-.card-header-simple {
-  padding: 10px 20px;
-  border-bottom: 2px solid #f0f0f0;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: linear-gradient(to right, #fafbfc, #ffffff);
-  flex-shrink: 0;
-}
-
-.card-header-simple h3 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: #2c3e50;
-}
-
-.objects-count {
-  font-size: 12px;
-  color: #999;
-  background: #f0f4f8;
-  padding: 4px 12px;
-  border-radius: 12px;
-}
-
-.objects-layout {
-  display: block;
-  flex: 1;
-  min-height: 0;
-  min-width: 0;
-  overflow: visible;
-}
-
-.objects-table-wrapper {
-  padding: 16px;
-  overflow-y: auto;
-  min-height: 0;
-  min-width: 0;
-}
-
-.obj-table {
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-  font-size: 13px;
-}
-
-.obj-table thead th {
-  padding: 12px;
-  background: #f8f9fa;
-  border-bottom: 2px solid #e0e0e0;
-  text-align: center;
-  font-weight: 600;
-  color: #666;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.obj-table tbody td {
-  padding: 12px;
-  border-bottom: 1px solid #f0f0f0;
-  text-align: center;
-}
-
-.obj-row {
-  transition: background 0.2s ease;
-}
-
-.obj-row:hover {
-  background: #f8f9fa;
-}
-
-.checkbox-custom {
-  width: 18px;
-  height: 18px;
-  cursor: pointer;
-  accent-color: #667eea;
-}
-
-.obj-type {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  font-weight: 500;
-}
-
-.obj-icon {
-  font-size: 16px;
 }
 
 @media (max-width: 1439px) and (min-width: 1024px) {
@@ -4727,8 +3991,7 @@ export default {
     height: clamp(320px, 46vh, 460px);
   }
 
-  .card-header,
-  .card-header-simple {
+  .card-header {
     padding: 10px 14px;
   }
 
@@ -4738,21 +4001,12 @@ export default {
     padding: 12px;
   }
 
-  .data-container,
-  .segmentation-panel {
+  .data-container {
     gap: 10px;
   }
 
   .segmentation-status {
     padding: 8px 10px;
-  }
-
-  .objects-card {
-    min-height: 150px;
-  }
-
-  .objects-table-wrapper {
-    padding: 12px;
   }
 }
 
@@ -4813,10 +4067,6 @@ export default {
 
   .data-container {
     gap: 12px;
-  }
-
-  .objects-table-wrapper {
-    padding: 12px;
   }
 }
 </style>

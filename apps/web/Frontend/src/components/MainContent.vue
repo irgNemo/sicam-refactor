@@ -127,156 +127,51 @@
                     @load="onMainImageLoad"
                     @dragstart.prevent
                   />
-                  <svg
-                    v-if="shouldShowSegmentationOverlay"
-                    class="segmentation-svg-overlay"
-                    :class="{
-                      'is-editable': isEditMode,
-                      'is-pan-mode': effectivePanMode,
-                      'is-draw-mode': isDrawMode,
-                      'is-vertex-mode': isVertexMode,
-                      'is-vertex-insert-mode': isVertexMode && vertexEditMode === 'INSERT'
-                    }"
-                    ref="segmentationSvg"
-                    :width="imageRenderedSize.width"
-                    :height="imageRenderedSize.height"
-                    :viewBox="`0 0 ${imageRenderedSize.width} ${imageRenderedSize.height}`"
-                    @click="handleOverlaySvgClick"
-                  >
-                    <g class="segmentation-polygons">
-                      <polygon
-                        v-for="polygon in overlayPolygons"
-                        :key="polygon.key"
-                        :points="polygon.points"
-                        class="segmentation-polygon"
-                        :class="{
-                          manual: polygon.origin === 'manual',
-                          selected: polygon.selected
-                        }"
-                        :style="{
-                          fill: polygon.fill,
-                          stroke: polygon.stroke,
-                          strokeWidth: overlayStrokeWidth
-                        }"
-                        @pointerdown="handleOverlayPolygonPointerDown"
-                        @click="handleOverlayPolygonClick(polygon.selectionKey, $event)"
-                      />
-                    </g>
-                    <g
-                      class="selection-highlight"
-                      pointer-events="none"
-                    >
-                      <polygon
-                        v-for="polygon in selectionHighlightPolygons"
-                        :key="`highlight-${polygon.key}`"
-                        :points="polygon.points"
-                        class="segmentation-selection-highlight"
-                        :class="{ manual: polygon.origin === 'manual' }"
-                        :style="{
-                          stroke: polygon.stroke,
-                          strokeWidth: selectedOverlayStrokeWidth
-                        }"
-                      />
-                    </g>
-                    <g
-                      v-if="draftPolygonSvgPoints.length"
-                      class="draft-polygon-layer"
-                    >
-                      <polyline
-                        :points="draftPolygonSvgPointsString"
-                        class="draft-polygon-line"
-                        :style="{
-                          stroke: drawingColor.stroke,
-                          strokeWidth: draftStrokeWidth
-                        }"
-                      />
-                      <polygon
-                        v-if="draftPolygonSvgPoints.length >= 3"
-                        :points="draftPolygonSvgPointsString"
-                        class="draft-polygon-fill"
-                        :style="{
-                          fill: overlayFillForLabel(drawingLabel, 'draft'),
-                          stroke: drawingColor.stroke,
-                          strokeWidth: draftStrokeWidth
-                        }"
-                      />
-                      <line
-                        v-for="segment in draftPolygonSegments"
-                        :key="segment.key"
-                        class="draft-segment-hit"
-                        :x1="segment.start[0]"
-                        :y1="segment.start[1]"
-                        :x2="segment.end[0]"
-                        :y2="segment.end[1]"
-                        :stroke-width="draftSegmentHitStrokeWidth"
-                        @pointerdown="handleDraftSegmentPointerDown(segment, $event)"
-                        @click.stop.prevent
-                      />
-                      <circle
-                        v-for="(point, index) in draftPolygonSvgPoints"
-                        :key="`draft-point-hit-${index}`"
-                        :cx="point[0]"
-                        :cy="point[1]"
-                        class="draft-polygon-point-hit"
-                        :r="draftPointHitRadius"
-                        @pointerdown="startDraftPointDrag(index, $event)"
-                        @pointermove="moveDraftPointDrag"
-                        @pointerup="endDraftPointDrag"
-                        @pointercancel="cancelDraftPointDrag"
-                        @lostpointercapture="cancelDraftPointDrag"
-                        @click.stop.prevent
-                      />
-                      <circle
-                        v-for="(point, index) in draftPolygonSvgPoints"
-                        :key="`draft-point-${index}`"
-                        :cx="point[0]"
-                        :cy="point[1]"
-                        class="draft-polygon-point"
-                        :class="{ selected: selectedDraftPointIndex === index }"
-                        :r="selectedDraftPointIndex === index ? draftSelectedPointRadius : draftPointRadius"
-                        :style="{
-                          fill: drawingColor.stroke,
-                          strokeWidth: selectedDraftPointIndex === index
-                            ? draftSelectedPointStrokeWidth
-                            : draftPointStrokeWidth
-                        }"
-                      />
-                    </g>
-                    <g
-                      v-if="selectedVertexHandles.length"
-                      class="vertex-handle-layer"
-                    >
-                      <g
-                        v-for="handle in selectedVertexHandles"
-                        :key="handle.key"
-                      >
-                        <circle
-                          class="vertex-handle-hit"
-                          :class="handle.role"
-                          :cx="handle.x"
-                          :cy="handle.y"
-                          :r="vertexHandleHitRadius"
-                          @pointerdown="startVertexDrag(handle, $event)"
-                          @pointermove="moveVertexDrag"
-                          @pointerup="endVertexDrag"
-                          @pointercancel="cancelVertexDrag"
-                          @lostpointercapture="cancelVertexDrag"
-                        />
-                        <circle
-                          class="vertex-handle"
-                          :class="handle.role"
-                          :cx="handle.x"
-                          :cy="handle.y"
-                          :r="handle.selected ? vertexSelectedHandleRadius : vertexHandleRadius"
-                          :style="{
-                            strokeWidth: handle.selected
-                              ? vertexSelectedHandleStrokeWidth
-                              : vertexHandleStrokeWidth
-                          }"
-                        />
-                      </g>
-                    </g>
-                  </svg>
+                  <SegmentationOverlay
+                    ref="segmentationOverlay"
+                    :show="shouldShowSegmentationOverlay"
+                    :is-edit-mode="isEditMode"
+                    :effective-pan-mode="effectivePanMode"
+                    :is-draw-mode="isDrawMode"
+                    :is-vertex-mode="isVertexMode"
+                    :vertex-edit-mode="vertexEditMode"
+                    :image-rendered-size="imageRenderedSize"
+                    :overlay-polygons="overlayPolygons"
+                    :selection-highlight-polygons="selectionHighlightPolygons"
+                    :overlay-stroke-width="overlayStrokeWidth"
+                    :selected-overlay-stroke-width="selectedOverlayStrokeWidth"
+                    :draft-polygon-svg-points="draftPolygonSvgPoints"
+                    :draft-polygon-svg-points-string="draftPolygonSvgPointsString"
+                    :draft-polygon-fill="overlayFillForLabel(drawingLabel, 'draft')"
+                    :draft-polygon-segments="draftPolygonSegments"
+                    :drawing-color="drawingColor"
+                    :draft-stroke-width="draftStrokeWidth"
+                    :draft-segment-hit-stroke-width="draftSegmentHitStrokeWidth"
+                    :draft-point-hit-radius="draftPointHitRadius"
+                    :draft-point-radius="draftPointRadius"
+                    :draft-selected-point-radius="draftSelectedPointRadius"
+                    :draft-point-stroke-width="draftPointStrokeWidth"
+                    :draft-selected-point-stroke-width="draftSelectedPointStrokeWidth"
+                    :selected-draft-point-index="selectedDraftPointIndex"
+                    :selected-vertex-handles="selectedVertexHandles"
+                    :vertex-handle-hit-radius="vertexHandleHitRadius"
+                    :vertex-handle-radius="vertexHandleRadius"
+                    :vertex-selected-handle-radius="vertexSelectedHandleRadius"
+                    :vertex-handle-stroke-width="vertexHandleStrokeWidth"
+                    :vertex-selected-handle-stroke-width="vertexSelectedHandleStrokeWidth"
+                    @overlay-click="handleOverlaySvgClick"
+                    @polygon-pointerdown="handleOverlayPolygonPointerDown"
+                    @polygon-click="handleOverlayPolygonClick"
+                    @draft-segment-pointerdown="handleDraftSegmentPointerDown"
+                    @draft-point-pointerdown="startDraftPointDrag"
+                    @draft-point-pointermove="moveDraftPointDrag"
+                    @draft-point-pointerup="endDraftPointDrag"
+                    @draft-point-pointercancel="cancelDraftPointDrag"
+                    @vertex-pointerdown="startVertexDrag"
+                    @vertex-pointermove="moveVertexDrag"
+                    @vertex-pointerup="endVertexDrag"
+                    @vertex-pointercancel="cancelVertexDrag"
+                  />
                 </div>
                 <div
                   v-if="!imagenSeleccionada"
@@ -603,6 +498,7 @@ import OverlayLayersCard from "./segmentation/OverlayLayersCard.vue";
 import SegmentationCountSummary from "./segmentation/SegmentationCountSummary.vue";
 import SegmentationEditorToolbar from "./segmentation/SegmentationEditorToolbar.vue";
 import SegmentationImageControls from "./segmentation/SegmentationImageControls.vue";
+import SegmentationOverlay from "./segmentation/SegmentationOverlay.vue";
 import SegmentationResultPanel from "./segmentation/SegmentationResultPanel.vue";
 import {
   obtenerResultadosSegmentacion,
@@ -625,6 +521,7 @@ import {
   scalePointToOverlay,
   scalePolygonPointsToOverlay,
 } from "../composables/useSegmentationViewport";
+import { useSegmentationEditor } from "../composables/useSegmentationEditor";
 
 const SEGMENT_HIT_TOLERANCE_PX = 8;
 const VERTEX_SEGMENT_HIT_TOLERANCE_PX = 8;
@@ -653,6 +550,7 @@ export default {
     SegmentationCountSummary,
     SegmentationEditorToolbar,
     SegmentationImageControls,
+    SegmentationOverlay,
     SegmentationResultPanel,
   },
 
@@ -667,6 +565,10 @@ export default {
     },
   },
 
+  setup() {
+    return useSegmentationEditor();
+  },
+
   data() {
     return {
       analisis: [],
@@ -679,8 +581,6 @@ export default {
       historialLoading: false,
       historialError: "",
       viewerMode: "NAVIGATE",
-      editorTool: "SELECT",
-      vertexEditMode: "MOVE",
       activeRevision: null,
       activeRevisionId: null,
       pendingDraftRevision: null,
@@ -691,28 +591,14 @@ export default {
       effectiveSegmentationRequestToken: 0,
       pendingDraftLoading: false,
       pendingDraftError: "",
-      workingObjects: [],
-      isDraftDirty: false,
       isSavingDraft: false,
       isValidatingRevision: false,
       saveDraftError: "",
       saveDraftMessage: "",
       validateRevisionError: "",
       validateRevisionMessage: "",
-      draftBaselineSignature: "",
-      undoStack: [],
-      redoStack: [],
-      manualObjectIdCursor: 0,
-      drawingLabel: "membrana",
-      draftPolygonPoints: [],
-      selectedDraftPointIndex: null,
-      draftPointDrag: null,
-      selectedVertexIndex: null,
-      invalidDrawMessage: "",
-      vertexDrag: null,
       revisionLoading: false,
       revisionError: "",
-      selectedObjectKey: null,
       isSpacePressed: false,
       activePanPointerId: null,
       panCaptureTarget: null,
@@ -884,35 +770,6 @@ export default {
       }
 
       return "Automático";
-    },
-
-    workingSummary() {
-      const counts = {
-        membrana: 0,
-        nucleo: 0,
-        micronucleo: 0,
-      };
-
-      this.workingObjects.forEach(object => {
-        if (Object.prototype.hasOwnProperty.call(counts, object.label)) {
-          counts[object.label] += 1;
-        }
-      });
-
-      return {
-        counts_by_label: counts,
-        total_objects: this.workingObjects.length,
-      };
-    },
-
-    selectedObject() {
-      if (!this.isEditMode || this.selectedObjectKey === null) return null;
-
-      const selectedItem = this.overlayDrawableObjects.find(
-        item => item.selectionKey === this.selectedObjectKey
-      );
-
-      return selectedItem?.object || null;
     },
 
     resumenConteoActivo() {
@@ -1137,20 +994,6 @@ export default {
           };
         })
         .filter(Boolean);
-    },
-
-    canDeleteSelectedVertex() {
-      const points = this.selectedObject?.geometry?.points;
-      return (
-        this.isVertexMode &&
-        this.selectedVertexIndex !== null &&
-        Array.isArray(points) &&
-        points.length > 3
-      );
-    },
-
-    hasPendingDraftWork() {
-      return this.isDraftDirty || this.draftPolygonPoints.length > 0;
     },
 
     canUndo() {
@@ -1444,8 +1287,7 @@ export default {
         }
         this.viewerMode = "NAVIGATE";
         this.editorTool = "SELECT";
-        this.selectedObjectKey = null;
-        this.selectedVertexIndex = null;
+        this.clearSelection();
         this.isSpacePressed = false;
         this.endImagePan();
         this.didPointerDrag = false;
@@ -1469,8 +1311,7 @@ export default {
         this.viewerMode = "NAVIGATE";
         this.activeRevision = null;
         this.activeRevisionId = null;
-        this.selectedObjectKey = null;
-        this.selectedVertexIndex = null;
+        this.clearSelection();
         this.revisionError = "No hay resultado de segmentacion para editar.";
         return;
       }
@@ -1493,8 +1334,7 @@ export default {
       this.revisionLoading = true;
       this.activeRevision = null;
       this.activeRevisionId = null;
-      this.selectedObjectKey = null;
-      this.selectedVertexIndex = null;
+      this.clearSelection();
 
       try {
         const response = await getOrCreateSegmentationDraft(resultadoId);
@@ -1515,8 +1355,7 @@ export default {
           this.viewerMode = "NAVIGATE";
           this.activeRevision = null;
           this.activeRevisionId = null;
-          this.selectedObjectKey = null;
-          this.selectedVertexIndex = null;
+          this.clearSelection();
           this.revisionError =
             error.response?.data?.error || "No fue posible cargar el borrador experto.";
         }
@@ -1530,8 +1369,7 @@ export default {
     resetEditorState({ clearRevision } = { clearRevision: true }) {
       this.viewerMode = "NAVIGATE";
       this.editorTool = "SELECT";
-      this.selectedObjectKey = null;
-      this.selectedVertexIndex = null;
+      this.clearSelection();
       this.revisionError = "";
       this.revisionLoading = false;
       this.isSpacePressed = false;
@@ -1539,20 +1377,12 @@ export default {
       this.didPointerDrag = false;
       this.activePanPointerId = null;
       this.panCaptureTarget = null;
-      this.cancelDraftPointDrag();
-      this.draftPolygonPoints = [];
-      this.selectedDraftPointIndex = null;
-      this.invalidDrawMessage = "";
       this.cancelVertexDrag();
-      this.isDraftDirty = false;
+      this.cancelDraftPointDrag();
+      this.resetEditor();
       this.isSavingDraft = false;
       this.saveDraftError = "";
       this.saveDraftMessage = "";
-      this.draftBaselineSignature = "";
-      this.undoStack = [];
-      this.redoStack = [];
-      this.workingObjects = [];
-      this.manualObjectIdCursor = 0;
 
       if (clearRevision) {
         this.activeRevision = null;
@@ -1671,180 +1501,6 @@ export default {
       }
     },
 
-    cloneJson(value) {
-      return value == null ? value : JSON.parse(JSON.stringify(value));
-    },
-
-    serializeObjects(objects) {
-      return JSON.stringify(objects || []);
-    },
-
-    loadWorkingRevision(revision) {
-      const objects = Array.isArray(revision?.resultado_editado?.objects)
-        ? revision.resultado_editado.objects
-        : [];
-
-      this.workingObjects = this.cloneJson(objects);
-      this.draftBaselineSignature = this.serializeObjects(this.workingObjects);
-      this.isDraftDirty = false;
-      this.isSavingDraft = false;
-      this.saveDraftError = "";
-      this.saveDraftMessage = "";
-      this.cancelDraftPointDrag();
-      this.draftPolygonPoints = [];
-      this.selectedDraftPointIndex = null;
-      this.invalidDrawMessage = "";
-      this.undoStack = [];
-      this.redoStack = [];
-      this.selectedObjectKey = null;
-      this.selectedVertexIndex = null;
-      this.manualObjectIdCursor = this.maxRevisionObjectId(this.workingObjects);
-    },
-
-    updateDraftDirtyState() {
-      this.isDraftDirty =
-        this.serializeObjects(this.workingObjects) !== this.draftBaselineSignature;
-    },
-
-    maxRevisionObjectId(objects) {
-      return objects.reduce((maxId, object) => {
-        const objectId = Number(object?.id);
-        return Number.isInteger(objectId) && objectId > maxId ? objectId : maxId;
-      }, 0);
-    },
-
-    nextRevisionObjectId() {
-      const usedIds = new Set(
-        this.workingObjects
-          .map(object => Number(object?.id))
-          .filter(objectId => Number.isInteger(objectId) && objectId > 0)
-      );
-      let candidate = Math.max(
-        this.manualObjectIdCursor,
-        this.maxRevisionObjectId(this.workingObjects)
-      ) + 1;
-
-      while (usedIds.has(candidate)) {
-        candidate += 1;
-      }
-
-      this.manualObjectIdCursor = candidate;
-      return candidate;
-    },
-
-    revisionObjectSelectionKey(object) {
-      return `revision-${object.id}`;
-    },
-
-    findWorkingObjectIndexByKey(selectionKey) {
-      return this.workingObjects.findIndex(
-        object => this.revisionObjectSelectionKey(object) === selectionKey
-      );
-    },
-
-    findWorkingObjectIndexById(objectId) {
-      return this.workingObjects.findIndex(object => object.id === objectId);
-    },
-
-    updateWorkingObjectAt(index, updater) {
-      if (index < 0) return;
-
-      const nextObjects = this.cloneJson(this.workingObjects);
-      nextObjects[index] = updater(nextObjects[index]);
-      this.workingObjects = nextObjects;
-    },
-
-    applyRevisionOperation(operation) {
-      const object = this.cloneJson(operation.object);
-
-      if (operation.type === "CREATE_OBJECT") {
-        const index = Math.min(
-          Math.max(operation.index, 0),
-          this.workingObjects.length
-        );
-        this.workingObjects.splice(index, 0, object);
-        this.selectedObjectKey = this.revisionObjectSelectionKey(object);
-      }
-
-      if (operation.type === "DELETE_OBJECT") {
-        this.workingObjects = this.workingObjects.filter(
-          item => item.id !== object.id
-        );
-        if (this.selectedObjectKey === this.revisionObjectSelectionKey(object)) {
-          this.selectedObjectKey = null;
-          this.selectedVertexIndex = null;
-        }
-      }
-
-      if (operation.type === "MOVE_VERTEX") {
-        this.applyVertexMove(
-          operation.objectId,
-          operation.vertexIndex,
-          operation.after,
-          operation.provenanceAfter
-        );
-      }
-
-      if (["INSERT_VERTEX", "DELETE_VERTEX"].includes(operation.type)) {
-        this.applyVertexPointsSnapshot(
-          operation.objectId,
-          operation.afterPoints,
-          operation.provenanceAfter
-        );
-        this.selectedVertexIndex = operation.selectedVertexIndexAfter ?? null;
-      }
-
-      this.updateDraftDirtyState();
-    },
-
-    revertRevisionOperation(operation) {
-      const object = this.cloneJson(operation.object);
-
-      if (operation.type === "CREATE_OBJECT") {
-        this.workingObjects = this.workingObjects.filter(
-          item => item.id !== object.id
-        );
-        if (this.selectedObjectKey === this.revisionObjectSelectionKey(object)) {
-          this.selectedObjectKey = null;
-          this.selectedVertexIndex = null;
-        }
-      }
-
-      if (operation.type === "DELETE_OBJECT") {
-        const index = Math.min(
-          Math.max(operation.index, 0),
-          this.workingObjects.length
-        );
-        this.workingObjects.splice(index, 0, object);
-      }
-
-      if (operation.type === "MOVE_VERTEX") {
-        this.applyVertexMove(
-          operation.objectId,
-          operation.vertexIndex,
-          operation.before,
-          operation.provenanceBefore
-        );
-      }
-
-      if (["INSERT_VERTEX", "DELETE_VERTEX"].includes(operation.type)) {
-        this.applyVertexPointsSnapshot(
-          operation.objectId,
-          operation.beforePoints,
-          operation.provenanceBefore
-        );
-        this.selectedVertexIndex = operation.selectedVertexIndexBefore ?? null;
-      }
-
-      this.updateDraftDirtyState();
-    },
-
-    pushUndoOperation(operation) {
-      this.undoStack.push(this.cloneJson(operation));
-      this.redoStack = [];
-      this.updateDraftDirtyState();
-    },
-
     setEditorTool(tool) {
       if (!["SELECT", "PAN", "DRAW", "VERTEX"].includes(tool)) return;
 
@@ -1872,13 +1528,6 @@ export default {
       };
     },
 
-    buildModifiedProvenance(provenance) {
-      return {
-        ...(this.cloneJson(provenance) || {}),
-        modified: true,
-      };
-    },
-
     setVertexEditMode(mode) {
       if (!["MOVE", "INSERT"].includes(mode)) return;
 
@@ -1886,66 +1535,21 @@ export default {
       this.vertexEditMode = mode;
     },
 
-    applyVertexMove(objectId, vertexIndex, point, provenance) {
-      const objectIndex = this.findWorkingObjectIndexById(objectId);
-      if (objectIndex < 0) return;
-
-      this.updateWorkingObjectAt(objectIndex, object => {
-        const points = Array.isArray(object.geometry?.points)
-          ? this.cloneJson(object.geometry.points)
-          : [];
-        if (!points[vertexIndex]) return object;
-
-        points[vertexIndex] = this.cloneJson(point);
-
-        return {
-          ...object,
-          geometry: {
-            ...object.geometry,
-            points,
-          },
-          provenance: this.cloneJson(provenance || object.provenance),
-        };
-      });
-    },
-
-    applyVertexPointsSnapshot(objectId, points, provenance) {
-      const objectIndex = this.findWorkingObjectIndexById(objectId);
-      if (objectIndex < 0 || !Array.isArray(points)) return;
-
-      this.updateWorkingObjectAt(objectIndex, object => ({
-        ...object,
-        geometry: {
-          ...object.geometry,
-          points: this.cloneJson(points),
-        },
-        provenance: this.cloneJson(provenance || object.provenance),
-      }));
-    },
-
     startVertexDrag(handle, event) {
       if (!this.isVertexMode || this.effectivePanMode || this.vertexEditMode !== "MOVE") return;
-
-      const objectIndex = this.findWorkingObjectIndexById(handle.objectId);
-      const object = this.workingObjects[objectIndex];
-      const beforePoint = object?.geometry?.points?.[handle.vertexIndex];
-      if (!beforePoint) return;
 
       event.preventDefault();
       event.stopPropagation();
       event.currentTarget?.setPointerCapture?.(event.pointerId);
 
-      this.selectedVertexIndex = handle.vertexIndex;
-      this.vertexDrag = {
-        objectId: handle.objectId,
-        vertexIndex: handle.vertexIndex,
+      const started = this.beginVertexDrag(handle, {
         pointerId: event.pointerId,
         captureTarget: event.currentTarget,
-        before: this.cloneJson(beforePoint),
-        after: this.cloneJson(beforePoint),
-        provenanceBefore: this.cloneJson(object.provenance),
-        provenanceAfter: this.buildModifiedProvenance(object.provenance),
-      };
+      });
+
+      if (!started) {
+        this.releaseVertexPointerCapture(event);
+      }
     },
 
     moveVertexDrag(event) {
@@ -1959,14 +1563,7 @@ export default {
       const point = this.screenPointToNaturalImagePoint(event);
       if (!point) return;
 
-      this.vertexDrag.after = this.cloneJson(point);
-      this.applyVertexMove(
-        this.vertexDrag.objectId,
-        this.vertexDrag.vertexIndex,
-        point,
-        this.vertexDrag.provenanceAfter
-      );
-      this.updateDraftDirtyState();
+      this.updateVertexDrag(point);
     },
 
     endVertexDrag(event) {
@@ -1976,42 +1573,16 @@ export default {
       event?.preventDefault?.();
       event?.stopPropagation?.();
 
-      const operation = {
-        type: "MOVE_VERTEX",
-        objectId: this.vertexDrag.objectId,
-        vertexIndex: this.vertexDrag.vertexIndex,
-        before: this.cloneJson(this.vertexDrag.before),
-        after: this.cloneJson(this.vertexDrag.after),
-        provenanceBefore: this.cloneJson(this.vertexDrag.provenanceBefore),
-        provenanceAfter: this.cloneJson(this.vertexDrag.provenanceAfter),
-      };
-      const changed =
-        this.serializeObjects([operation.before]) !==
-        this.serializeObjects([operation.after]);
-
       this.releaseVertexPointerCapture(event);
-      this.vertexDrag = null;
-
-      if (changed) {
-        this.pushUndoOperation(operation);
-      } else {
-        this.updateDraftDirtyState();
-      }
+      this.finishVertexDrag();
     },
 
     cancelVertexDrag(event) {
       if (!this.vertexDrag) return;
       if (event && event.pointerId !== this.vertexDrag.pointerId) return;
 
-      this.applyVertexMove(
-        this.vertexDrag.objectId,
-        this.vertexDrag.vertexIndex,
-        this.vertexDrag.before,
-        this.vertexDrag.provenanceBefore
-      );
       this.releaseVertexPointerCapture(event);
-      this.vertexDrag = null;
-      this.updateDraftDirtyState();
+      this.cancelVertexDragState();
     },
 
     releaseVertexPointerCapture(event) {
@@ -2037,77 +1608,15 @@ export default {
       const point = this.svgPointToNaturalImagePoint(segmentHit.hit.projectedSvgPoint);
       if (!point) return false;
 
-      const object = this.selectedObject;
-      const beforePoints = Array.isArray(object.geometry?.points)
-        ? this.cloneJson(object.geometry.points)
-        : [];
-      if (beforePoints.length < 3) return false;
-
-      const insertIndex = segmentHit.segment.endIndex === 0
-        ? beforePoints.length
-        : segmentHit.segment.startIndex + 1;
-      const afterPoints = [
-        ...beforePoints.slice(0, insertIndex),
-        point,
-        ...beforePoints.slice(insertIndex),
-      ];
-      const provenanceBefore = this.cloneJson(object.provenance);
-      const provenanceAfter = this.buildModifiedProvenance(object.provenance);
-      const selectedVertexIndexBefore = this.selectedVertexIndex;
-
       event.preventDefault();
       event.stopPropagation();
 
-      this.applyVertexPointsSnapshot(object.id, afterPoints, provenanceAfter);
-      this.selectedObjectKey = this.revisionObjectSelectionKey(object);
-      this.selectedVertexIndex = insertIndex;
-      this.pushUndoOperation({
-        type: "INSERT_VERTEX",
-        objectId: object.id,
-        vertexIndex: insertIndex,
-        point: this.cloneJson(point),
-        beforePoints,
-        afterPoints,
-        provenanceBefore,
-        provenanceAfter,
-        selectedVertexIndexBefore,
-        selectedVertexIndexAfter: insertIndex,
-      });
-      return true;
+      return this.insertVertexInSelectedObject(segmentHit.segment, point);
     },
 
     deleteSelectedVertex() {
-      if (!this.canDeleteSelectedVertex || !this.selectedObject) return;
-
-      const object = this.selectedObject;
-      const beforePoints = this.cloneJson(object.geometry.points);
-      const point = this.cloneJson(beforePoints[this.selectedVertexIndex]);
-      const afterPoints = beforePoints.filter(
-        (_item, index) => index !== this.selectedVertexIndex
-      );
-      const selectedVertexIndexBefore = this.selectedVertexIndex;
-      const selectedVertexIndexAfter = Math.min(
-        selectedVertexIndexBefore,
-        afterPoints.length - 1
-      );
-      const provenanceBefore = this.cloneJson(object.provenance);
-      const provenanceAfter = this.buildModifiedProvenance(object.provenance);
-
       this.cancelVertexDrag();
-      this.applyVertexPointsSnapshot(object.id, afterPoints, provenanceAfter);
-      this.selectedVertexIndex = selectedVertexIndexAfter;
-      this.pushUndoOperation({
-        type: "DELETE_VERTEX",
-        objectId: object.id,
-        vertexIndex: selectedVertexIndexBefore,
-        point,
-        beforePoints,
-        afterPoints,
-        provenanceBefore,
-        provenanceAfter,
-        selectedVertexIndexBefore,
-        selectedVertexIndexAfter,
-      });
+      this.deleteSelectedVertexEdit();
     },
 
     findSelectedObjectSegmentNearScreenPoint(event) {
@@ -2127,24 +1636,20 @@ export default {
     startDraftPointDrag(index, event) {
       if (!this.isDrawMode || this.effectivePanMode) return;
 
-      const beforePoint = this.draftPolygonPoints[index];
-      if (!beforePoint) return;
-
       event.preventDefault();
       event.stopPropagation();
       event.currentTarget?.setPointerCapture?.(event.pointerId);
 
-      this.selectedDraftPointIndex = index;
-      this.draftPointDrag = {
-        index,
+      const started = this.beginDraftPointDrag(index, {
         pointerId: event.pointerId,
         captureTarget: event.currentTarget,
-        before: this.cloneJson(beforePoint),
-        after: this.cloneJson(beforePoint),
         startClientX: event.clientX,
         startClientY: event.clientY,
-        didDrag: false,
-      };
+      });
+
+      if (!started) {
+        this.releaseDraftPointerCapture(event);
+      }
     },
 
     moveDraftPointDrag(event) {
@@ -2160,15 +1665,11 @@ export default {
 
       const deltaX = event.clientX - this.draftPointDrag.startClientX;
       const deltaY = event.clientY - this.draftPointDrag.startClientY;
-      if (
+      const didDrag =
         Math.abs(deltaX) > this.dragThreshold ||
-        Math.abs(deltaY) > this.dragThreshold
-      ) {
-        this.draftPointDrag.didDrag = true;
-      }
+        Math.abs(deltaY) > this.dragThreshold;
 
-      this.draftPointDrag.after = this.cloneJson(point);
-      this.updateDraftPointAt(this.draftPointDrag.index, point);
+      this.updateDraftPointDrag(point, didDrag);
     },
 
     endDraftPointDrag(event) {
@@ -2183,16 +1684,15 @@ export default {
       }
 
       this.releaseDraftPointerCapture(event);
-      this.draftPointDrag = null;
+      this.finishDraftPointDrag();
     },
 
     cancelDraftPointDrag(event) {
       if (!this.draftPointDrag) return;
       if (event && event.pointerId !== this.draftPointDrag.pointerId) return;
 
-      this.updateDraftPointAt(this.draftPointDrag.index, this.draftPointDrag.before);
       this.releaseDraftPointerCapture(event);
-      this.draftPointDrag = null;
+      this.cancelDraftPointDragState();
     },
 
     releaseDraftPointerCapture(event) {
@@ -2207,31 +1707,9 @@ export default {
       }
     },
 
-    updateDraftPointAt(index, point) {
-      if (index < 0 || index >= this.draftPolygonPoints.length) return;
-
-      const nextPoints = this.cloneJson(this.draftPolygonPoints);
-      nextPoints[index] = this.cloneJson(point);
-      this.draftPolygonPoints = nextPoints;
-      this.invalidDrawMessage = "";
-    },
-
     deleteSelectedDraftPoint() {
-      if (this.selectedDraftPointIndex === null) return;
-      if (
-        this.selectedDraftPointIndex < 0 ||
-        this.selectedDraftPointIndex >= this.draftPolygonPoints.length
-      ) {
-        this.selectedDraftPointIndex = null;
-        return;
-      }
-
       this.cancelDraftPointDrag();
-      this.draftPolygonPoints = this.draftPolygonPoints.filter(
-        (_point, index) => index !== this.selectedDraftPointIndex
-      );
-      this.selectedDraftPointIndex = null;
-      this.invalidDrawMessage = "";
+      this.deleteSelectedDraftPointEdit();
     },
 
     handleDraftSegmentPointerDown(segment, event) {
@@ -2254,13 +1732,7 @@ export default {
         ? this.draftPolygonPoints.length
         : segment.endIndex;
 
-      this.draftPolygonPoints = [
-        ...this.draftPolygonPoints.slice(0, insertIndex),
-        point,
-        ...this.draftPolygonPoints.slice(insertIndex),
-      ];
-      this.selectedDraftPointIndex = insertIndex;
-      this.invalidDrawMessage = "";
+      this.insertDraftPoint(insertIndex, point);
     },
 
     findDraftSegmentNearScreenPoint(event) {
@@ -2295,8 +1767,12 @@ export default {
       };
     },
 
+    getSegmentationSvgElement() {
+      return this.$refs.segmentationOverlay?.getSvgElement?.() || null;
+    },
+
     svgArrayPointToScreenPoint(point) {
-      const svg = this.$refs.segmentationSvg;
+      const svg = this.getSegmentationSvgElement();
       if (!svg || !Array.isArray(point)) return null;
 
       const ctm = svg.getScreenCTM?.();
@@ -2360,16 +1836,11 @@ export default {
       if (!point) return;
 
       event.stopPropagation();
-      this.invalidDrawMessage = "";
-      this.draftPolygonPoints = [
-        ...this.draftPolygonPoints,
-        point,
-      ];
-      this.selectedDraftPointIndex = this.draftPolygonPoints.length - 1;
+      this.appendDraftPoint(point);
     },
 
     screenPointToSvgPoint(event) {
-      const svg = this.$refs.segmentationSvg;
+      const svg = this.getSegmentationSvgElement();
       if (!svg) return null;
 
       const ctm = svg.getScreenCTM?.();
@@ -2414,85 +1885,21 @@ export default {
     },
 
     finishDraftPolygon() {
-      if (this.draftPolygonPoints.length < 3) return;
       this.cancelDraftPointDrag();
-
-      const newObject = {
-        id: this.nextRevisionObjectId(),
-        label: this.drawingLabel,
-        geometry: {
-          type: "polygon",
-          points: this.cloneJson(this.draftPolygonPoints),
-        },
-        provenance: {
-          origin: "manual",
-          base_object_id: null,
-        },
-      };
-      const index = this.workingObjects.length;
-
-      this.workingObjects = [
-        ...this.workingObjects,
-        newObject,
-      ];
-      this.draftPolygonPoints = [];
-      this.selectedDraftPointIndex = null;
-      this.invalidDrawMessage = "";
-      this.selectedObjectKey = this.revisionObjectSelectionKey(newObject);
-      this.pushUndoOperation({
-        type: "CREATE_OBJECT",
-        object: newObject,
-        index,
-      });
-      this.showOverlayLabel(newObject.label);
+      const newObject = this.finishDraftPolygonEdit();
+      if (newObject) {
+        this.showOverlayLabel(newObject.label);
+      }
     },
 
     cancelDraftPolygon() {
       this.cancelDraftPointDrag();
-      this.draftPolygonPoints = [];
-      this.selectedDraftPointIndex = null;
-      this.invalidDrawMessage = "";
+      this.cancelDraftPolygonEdit();
     },
 
     deleteSelectedObject() {
-      if (!this.selectedObjectKey) return;
-
-      const index = this.findWorkingObjectIndexByKey(this.selectedObjectKey);
-      if (index < 0) return;
-
       this.cancelVertexDrag();
-      const object = this.cloneJson(this.workingObjects[index]);
-      this.workingObjects.splice(index, 1);
-      this.selectedObjectKey = null;
-      this.selectedVertexIndex = null;
-      this.pushUndoOperation({
-        type: "DELETE_OBJECT",
-        object,
-        index,
-      });
-    },
-
-    undoRevisionEdit() {
-      const operation = this.undoStack.pop();
-      if (!operation) return;
-
-      this.revertRevisionOperation(operation);
-      this.redoStack.push(this.cloneJson(operation));
-    },
-
-    redoRevisionEdit() {
-      const operation = this.redoStack.pop();
-      if (!operation) return;
-
-      this.applyRevisionOperation(operation);
-      this.undoStack.push(this.cloneJson(operation));
-    },
-
-    buildEditableSnapshot() {
-      return {
-        ...this.cloneJson(this.activeRevision?.resultado_editado || {}),
-        objects: this.cloneJson(this.workingObjects),
-      };
+      this.deleteSelectedObjectEdit();
     },
 
     async saveDraft() {
@@ -2507,7 +1914,7 @@ export default {
       try {
         const response = await updateSegmentationDraft(
           this.activeRevisionId,
-          this.buildEditableSnapshot()
+          this.buildEditableSnapshot(this.activeRevision?.resultado_editado || {})
         );
         const selectedKey = this.selectedObjectKey;
 
@@ -2522,7 +1929,7 @@ export default {
             object => this.revisionObjectSelectionKey(object) === selectedKey
           )
         ) {
-          this.selectedObjectKey = selectedKey;
+          this.selectObjectVertex(selectedKey, null);
         }
 
         this.viewerMode = "EDIT";
@@ -2563,16 +1970,7 @@ export default {
         this.activeRevisionId = response.data.id_revision_segmentacion;
         this.pendingDraftRevision = null;
         this.latestValidatedRevision = response.data;
-        this.workingObjects = this.cloneJson(response.data.resultado_editado?.objects || []);
-        this.draftBaselineSignature = this.serializeObjects(this.workingObjects);
-        this.isDraftDirty = false;
-        this.undoStack = [];
-        this.redoStack = [];
-        this.selectedObjectKey = null;
-        this.selectedVertexIndex = null;
-        this.selectedDraftPointIndex = null;
-        this.draftPolygonPoints = [];
-        this.invalidDrawMessage = "";
+        this.loadWorkingRevision(response.data);
         this.saveDraftError = "";
         this.saveDraftMessage = "";
         this.validateRevisionMessage = "Revisión validada.";
@@ -2647,22 +2045,13 @@ export default {
           objectItem?.object,
           event
         );
-        const changedObject = this.selectedObjectKey !== selectionKey;
-
-        this.selectedObjectKey = selectionKey;
-        if (nearestVertexIndex !== null) {
-          this.selectedVertexIndex = nearestVertexIndex;
-        } else if (changedObject) {
-          this.selectedVertexIndex = null;
-        }
+        this.selectObjectVertex(selectionKey, nearestVertexIndex);
         return;
       }
 
       if (this.editorTool !== "SELECT") return;
 
-      this.selectedVertexIndex = null;
-      this.selectedObjectKey =
-        this.selectedObjectKey === selectionKey ? null : selectionKey;
+      this.selectObject(selectionKey);
     },
 
     provenanceDisplayName(origin) {
@@ -3064,8 +2453,7 @@ export default {
 
       if (!visible && this.selectedObject?.label === label) {
         this.cancelVertexDrag();
-        this.selectedObjectKey = null;
-        this.selectedVertexIndex = null;
+        this.clearSelection();
       }
     },
   },
@@ -3503,186 +2891,6 @@ export default {
 
 .image-transform-layer.is-edit-mode.is-effective-pan-mode.is-panning {
   cursor: grabbing;
-}
-
-.segmentation-svg-overlay {
-  display: block;
-  height: 100%;
-  inset: 0;
-  pointer-events: none;
-  position: absolute;
-  width: 100%;
-  z-index: 2;
-}
-
-.segmentation-svg-overlay.is-editable {
-  pointer-events: auto;
-}
-
-.segmentation-svg-overlay.is-pan-mode .segmentation-polygons {
-  pointer-events: none;
-}
-
-.segmentation-svg-overlay.is-pan-mode .segmentation-polygon {
-  pointer-events: none;
-}
-
-.segmentation-svg-overlay.is-draw-mode .segmentation-polygons {
-  pointer-events: none;
-}
-
-.segmentation-svg-overlay.is-draw-mode .segmentation-polygon {
-  pointer-events: none;
-}
-
-.segmentation-svg-overlay.is-vertex-mode .segmentation-polygon {
-  pointer-events: none;
-}
-
-.segmentation-svg-overlay.is-vertex-mode .segmentation-polygon.selected {
-  pointer-events: visiblePainted;
-}
-
-.segmentation-polygon {
-  fill: rgba(30, 136, 229, 0.16);
-  stroke: rgba(30, 136, 229, 0.92);
-  stroke-linejoin: round;
-  vector-effect: non-scaling-stroke;
-}
-
-.segmentation-svg-overlay.is-editable .segmentation-polygon {
-  cursor: pointer;
-  pointer-events: visiblePainted;
-}
-
-.segmentation-svg-overlay.is-editable.is-pan-mode .segmentation-polygon,
-.segmentation-svg-overlay.is-editable.is-draw-mode .segmentation-polygon {
-  pointer-events: none;
-}
-
-.segmentation-svg-overlay.is-editable.is-vertex-mode .segmentation-polygon {
-  pointer-events: none;
-}
-
-.segmentation-svg-overlay.is-editable.is-vertex-mode .segmentation-polygon.selected {
-  pointer-events: visiblePainted;
-}
-
-.segmentation-polygon.manual {
-  stroke-dasharray: 7 4;
-}
-
-.selection-highlight {
-  pointer-events: none;
-}
-
-.segmentation-selection-highlight {
-  fill: transparent;
-  filter: drop-shadow(0 0 5px rgba(0, 0, 0, 0.55));
-  pointer-events: none;
-  stroke-linejoin: round;
-  vector-effect: non-scaling-stroke;
-}
-
-.segmentation-selection-highlight.manual {
-  stroke-dasharray: 7 4;
-}
-
-.draft-polygon-layer {
-  pointer-events: auto;
-}
-
-.segmentation-svg-overlay.is-pan-mode .draft-polygon-layer {
-  pointer-events: none;
-}
-
-.draft-polygon-line,
-.draft-polygon-fill {
-  stroke-linejoin: round;
-  vector-effect: non-scaling-stroke;
-}
-
-.draft-polygon-line {
-  fill: none;
-  stroke-dasharray: 6 4;
-}
-
-.draft-polygon-fill {
-  opacity: 0.85;
-}
-
-.draft-segment-hit {
-  cursor: copy;
-  opacity: 0;
-  pointer-events: stroke;
-  stroke: #000;
-  stroke-linecap: round;
-  vector-effect: non-scaling-stroke;
-}
-
-.draft-polygon-point-hit {
-  cursor: grab;
-  fill: transparent;
-  pointer-events: all;
-  stroke: transparent;
-}
-
-.draft-polygon-point-hit:active {
-  cursor: grabbing;
-}
-
-.draft-polygon-point {
-  pointer-events: none;
-  stroke: white;
-  stroke-width: 1.25;
-  vector-effect: non-scaling-stroke;
-}
-
-.draft-polygon-point.selected {
-  stroke: #263238;
-  stroke-width: 1.5;
-}
-
-.vertex-handle-layer {
-  pointer-events: auto;
-}
-
-.segmentation-svg-overlay.is-pan-mode .vertex-handle-layer {
-  pointer-events: none;
-}
-
-.segmentation-svg-overlay.is-vertex-insert-mode .vertex-handle-layer {
-  pointer-events: none;
-}
-
-.vertex-handle-hit {
-  cursor: grab;
-  fill: transparent;
-  pointer-events: all;
-  stroke: transparent;
-}
-
-.vertex-handle-hit:active {
-  cursor: grabbing;
-}
-
-.vertex-handle {
-  fill: #ffffff;
-  pointer-events: none;
-  stroke: #263238;
-  stroke-width: 1.5;
-  vector-effect: non-scaling-stroke;
-}
-
-.vertex-handle.neighbor {
-  fill: #f8fafc;
-  stroke: #607d8b;
-}
-
-.vertex-handle.selected {
-  fill: #263238;
-  stroke: #ffffff;
-  stroke-width: 1.5;
 }
 
 .empty-image-state {

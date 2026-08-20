@@ -202,10 +202,12 @@ No se cambiaron servicios HTTP ni endpoints.
 Permanecen en `MainContent.vue`:
 
 - `imageFrame`;
-- `mainImage`;
-- `segmentationSvg`.
+- `mainImage`.
 
-Esto evita exponer nodos internos desde componentes hijos y preserva `screenPointToNaturalImagePoint`.
+Despues de Sprint 14B, el nodo SVG vive dentro de `SegmentationOverlay.vue`.
+`MainContent.vue` conserva la orquestacion de coordenadas mediante
+`getSegmentationSvgElement()`, que obtiene el nodo desde el componente hijo con
+`getSvgElement()`.
 
 ## Pointer Capture y Listeners
 
@@ -257,8 +259,6 @@ Dentro del sandbox aparecio el bloqueo conocido de Vite/esbuild al resolver `vit
 
 ## Pendientes Fuera de Alcance
 
-- Extraer `SegmentationOverlay.vue`.
-- Evaluar `useSegmentationEditor.js`.
 - Evaluar `useSegmentationRevision.js`.
 - Agregar tests frontend si se incorpora infraestructura futura.
 - Resolver detalles visuales menores en un sprint separado.
@@ -306,6 +306,260 @@ Confirmacion funcional:
 - no modifica API;
 - no modifica resultado efectivo;
 - no modifica DRAW, VERTEX, Undo/Redo, viewport ni geometria del overlay.
+
+## Sprint 14B - Extraccion del overlay SVG
+
+Sprint 14B extrajo el render SVG del overlay a:
+
+```text
+apps/web/Frontend/src/components/segmentation/SegmentationOverlay.vue
+```
+
+Objetivo:
+
+- reducir responsabilidades visuales de `MainContent.vue`;
+- mantener en `MainContent.vue` el estado editorial, pointer capture, Undo/Redo,
+  revisiones y calculos de coordenadas;
+- preservar el mismo sistema de transformacion compartido entre imagen y SVG.
+
+Responsabilidades de `SegmentationOverlay.vue`:
+
+- renderizar el `<svg>` absoluto sobre la imagen;
+- renderizar poligonos visibles, highlights, poligono en construccion y handles
+  de vertices;
+- contener los estilos scoped del overlay SVG;
+- emitir intenciones de interaccion al padre.
+
+Responsabilidades que permanecen en `MainContent.vue`:
+
+- construir `overlayPolygons` y `selectionHighlightPolygons`;
+- calcular LOD, vertices visibles, segmentos cercanos y handles;
+- manejar `DRAW`, `VERTEX`, seleccion, borrador, Undo/Redo y persistencia;
+- mantener pointer capture y conversiones con `getScreenCTM()`;
+- conservar `image-transform-layer` como wrapper comun de imagen y overlay.
+
+Contrato principal del componente:
+
+- props: estado de modo (`isEditMode`, `effectivePanMode`, `isDrawMode`,
+  `isVertexMode`, `vertexEditMode`), medidas de imagen, colecciones ya
+  calculadas, estilos de stroke/fill y radios de handles;
+- emits: `overlay-click`, `polygon-pointerdown`, `polygon-click`,
+  `draft-segment-pointerdown`, eventos de drag de puntos de borrador y eventos
+  de drag de vertices.
+
+Manejo del ref SVG:
+
+- `SegmentationOverlay.vue` expone `getSvgElement()`;
+- `MainContent.vue` usa `getSegmentationSvgElement()`;
+- `svgArrayPointToScreenPoint()` y `screenPointToSvgPoint()` siguen viviendo en
+  el padre y siguen usando el mismo nodo SVG para `getScreenCTM()`.
+
+Fuente de verdad de geometria:
+
+- no se duplicaron formulas de coordenadas;
+- `useSegmentationViewport.js` conserva las funciones puras de viewport;
+- `MainContent.vue` conserva las computadas editoriales que dependen del estado
+  de revision, seleccion y pointer events.
+
+Conteo de lineas observado:
+
+```text
+MainContent.vue antes de Sprint 14B: 4072 lineas
+MainContent.vue despues de Sprint 14B: 3793 lineas
+SegmentationOverlay.vue: 482 lineas
+```
+
+Validacion automatica ejecutada:
+
+```powershell
+npm.cmd run build
+git diff --check
+```
+
+Resultado:
+
+```text
+PASS
+```
+
+Nota: dentro del sandbox se reprodujo el bloqueo conocido de Vite/esbuild al
+resolver `vite.config.js`; el build paso fuera del sandbox.
+
+Checklist manual especifico:
+
+1. `NAVIGATE`: overlay visible y capas visibles funcionales.
+2. Zoom, Zoom Out, Rotar, Ajustar y pan mantienen imagen y overlay alineados.
+3. `EDIT/SELECT`: seleccion de objetos automatizados y manuales.
+4. `DRAW`: crear mascara, insertar/mover/eliminar vertices de borrador.
+5. `VERTEX`: handles visibles, INSERT/MOVE/DELETE sin cambio de comportamiento.
+6. Guardar `BORRADOR`, recargar y validar revision.
+
+## Sprint 14C - Extraccion del dominio editorial
+
+Sprint 14C extrajo el estado y las operaciones editoriales en memoria a:
+
+```text
+apps/web/Frontend/src/composables/useSegmentationEditor.js
+```
+
+Objetivo:
+
+- hacer que `workingObjects` tenga una unica fuente de verdad editorial;
+- mover operaciones de dominio como crear/eliminar mascaras, modificar vertices,
+  Undo/Redo y dirty state fuera de `MainContent.vue`;
+- mantener en `MainContent.vue` la orquestacion de API, revision efectiva,
+  seleccion de muestra, DOM refs, pointer capture y conversion de coordenadas.
+
+Arquitectura despues de Sprint 14C:
+
+```text
+MainContent
+   |
+   |-- revisions / effective / data
+   |-- useSegmentationViewport
+   |-- useSegmentationEditor
+   |      |-- workingObjects
+   |      |-- DRAW
+   |      |-- VERTEX
+   |      |-- Undo/Redo
+   |
+   |-- SegmentationOverlay
+   |-- Toolbar
+   `-- Panels
+```
+
+Ownership de `useSegmentationEditor.js`:
+
+- `workingObjects`;
+- `selectedObjectKey`;
+- `selectedObject`;
+- `selectedVertexIndex`;
+- `selectedDraftPointIndex`;
+- `draftPolygonPoints`;
+- `draftPointDrag`;
+- `vertexDrag`;
+- `editorTool`;
+- `vertexEditMode`;
+- `drawingLabel`;
+- `undoStack`;
+- `redoStack`;
+- `isDraftDirty`;
+- `draftBaselineSignature`;
+- `manualObjectIdCursor`;
+- `workingSummary`.
+
+Operaciones movidas:
+
+- `loadRevisionSnapshot()` / `loadWorkingRevision()`;
+- `resetEditor()`;
+- `buildEditableSnapshot()`;
+- asignacion monotona de IDs editoriales manuales;
+- mutaciones de `provenance.modified`;
+- `CREATE_OBJECT`;
+- `DELETE_OBJECT`;
+- `MOVE_VERTEX`;
+- `INSERT_VERTEX`;
+- `DELETE_VERTEX`;
+- `undoRevisionEdit()`;
+- `redoRevisionEdit()`;
+- operaciones de borrador DRAW: append, insert, move, delete, finish y cancel.
+
+Responsabilidades que permanecen en `MainContent.vue`:
+
+- `RevisionSegmentacion` API;
+- guardar `BORRADOR` por HTTP;
+- validar revision por HTTP;
+- resultado efectivo;
+- historial y seleccion de muestra;
+- refs DOM `imageFrame`, `mainImage` y SVG via `SegmentationOverlay`;
+- `getScreenCTM()`, `DOMPoint` y conversiones screen/SVG/natural;
+- `setPointerCapture()` y `releasePointerCapture()`;
+- listeners globales de teclado, blur y beforeunload;
+- `Space + Pan` y pan del visor;
+- deteccion de segmentos cercanos en pantalla.
+
+Flujo de coordenadas:
+
+```text
+PointerEvent
+   -> MainContent screenPointToNaturalImagePoint()
+   -> useSegmentationEditor opera con punto natural
+   -> workingObjects
+   -> MainContent computa overlay visual
+   -> SegmentationOverlay renderiza SVG
+```
+
+Sincronizacion revision -> editor:
+
+- al entrar a `EDIT`, `MainContent.vue` solicita o reutiliza el `BORRADOR`;
+- despues llama `loadWorkingRevision(response.data)`;
+- el composable deep-clonea `resultado_editado.objects`, reinicia seleccion,
+  limpia DRAW/VERTEX/Undo/Redo y deja `isDraftDirty=false`.
+
+Sincronizacion save exitoso -> editor:
+
+- `MainContent.vue` ejecuta `updateSegmentationDraft()`;
+- al recibir respuesta del backend actualiza `activeRevision`;
+- despues llama `loadWorkingRevision(response.data)`;
+- el composable sincroniza el snapshot confirmado y deja `isDraftDirty=false`.
+
+Interaccion con `SegmentationOverlay.vue`:
+
+- el overlay sigue siendo presentacional;
+- emite eventos de puntero;
+- `MainContent.vue` traduce eventos y coordenadas;
+- `useSegmentationEditor.js` aplica la mutacion editorial.
+
+Garantias preservadas:
+
+- no se modifico backend;
+- no se modificaron endpoints;
+- no se modifico `segmentationRevisionService.js`;
+- no se modificaron microservicios;
+- no se cambiaron contratos de `resultado_editado`;
+- no se cambiaron IDs, `raw_id`, `raw_type` ni `provenance` salvo las mismas
+  mutaciones editoriales ya existentes.
+
+Conteo de lineas observado:
+
+```text
+MainContent.vue antes de Sprint 14C: 3793 lineas
+MainContent.vue despues de Sprint 14C: 3280 lineas
+useSegmentationEditor.js: 690 lineas
+```
+
+Validacion automatica ejecutada:
+
+```powershell
+npm.cmd run build
+git diff --check
+rg -n "console\.(log|debug|table)" apps/web/Frontend/src/components/MainContent.vue apps/web/Frontend/src/components/segmentation apps/web/Frontend/src/composables apps/web/Frontend/src/services -g "*.vue" -g "*.js"
+```
+
+Resultado:
+
+```text
+PASS
+```
+
+Nota: dentro del sandbox se reprodujo el bloqueo conocido de Vite/esbuild al
+resolver `vite.config.js`; el build paso fuera del sandbox.
+`git diff --check` no reporto errores de whitespace, solo el aviso conocido de
+LF/CRLF en este documento. La busqueda de logs temporales no encontro
+coincidencias.
+
+Checklist manual especifico:
+
+1. `SELECT`: seleccionar membrana, nucleo y micronucleo; eliminar, Undo y Redo.
+2. `DRAW`: append, insertar punto en segmento, mover punto, eliminar punto,
+   finalizar y cancelar.
+3. `VERTEX`: MOVE, INSERT, DELETE, minimo de 3 puntos y Undo/Redo.
+4. Secuencia mixta: `CREATE_OBJECT`, `INSERT_VERTEX`, `MOVE_VERTEX`,
+   `DELETE_VERTEX`, `DELETE_OBJECT`, luego Undo x5 y Redo x5.
+5. Dirty/save: modificar, guardar `BORRADOR`, recargar y continuar edicion.
+6. Validar: guardar, validar, volver a `NAVIGATE` y confirmar resultado efectivo.
+7. Cambio de imagen: A -> B -> A sin arrastrar estado editorial entre muestras.
+8. Space/Pan en DRAW y VERTEX sin romper prioridad de eventos.
 
 ## Checklist Manual Pendiente
 

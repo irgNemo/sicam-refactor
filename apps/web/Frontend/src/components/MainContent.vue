@@ -505,13 +505,6 @@ import {
   segmentarMuestra,
 } from "../services/segmentationService";
 import {
-  getEffectiveSegmentation,
-  getSegmentationRevisions,
-  getOrCreateSegmentationDraft,
-  updateSegmentationDraft,
-  validateRevision,
-} from "../services/segmentationRevisionService";
-import {
   ZOOM_MIN,
   ZOOM_MAX,
   ZOOM_STEP,
@@ -522,6 +515,7 @@ import {
   scalePolygonPointsToOverlay,
 } from "../composables/useSegmentationViewport";
 import { useSegmentationEditor } from "../composables/useSegmentationEditor";
+import { useSegmentationRevision } from "../composables/useSegmentationRevision";
 
 const SEGMENT_HIT_TOLERANCE_PX = 8;
 const VERTEX_SEGMENT_HIT_TOLERANCE_PX = 8;
@@ -566,7 +560,10 @@ export default {
   },
 
   setup() {
-    return useSegmentationEditor();
+    return {
+      ...useSegmentationEditor(),
+      ...useSegmentationRevision(),
+    };
   },
 
   data() {
@@ -581,24 +578,6 @@ export default {
       historialLoading: false,
       historialError: "",
       viewerMode: "NAVIGATE",
-      activeRevision: null,
-      activeRevisionId: null,
-      pendingDraftRevision: null,
-      latestValidatedRevision: null,
-      effectiveSegmentation: null,
-      effectiveSegmentationLoading: false,
-      effectiveSegmentationError: "",
-      effectiveSegmentationRequestToken: 0,
-      pendingDraftLoading: false,
-      pendingDraftError: "",
-      isSavingDraft: false,
-      isValidatingRevision: false,
-      saveDraftError: "",
-      saveDraftMessage: "",
-      validateRevisionError: "",
-      validateRevisionMessage: "",
-      revisionLoading: false,
-      revisionError: "",
       isSpacePressed: false,
       activePanPointerId: null,
       panCaptureTarget: null,
@@ -1184,7 +1163,7 @@ export default {
         }
         this.resetEditorState({ clearRevision: true });
         this.loadEffectiveSegmentation(newId);
-        this.loadPendingDraftRevision(newId);
+        this.loadRevisionState(newId);
       }
     },
 
@@ -1237,7 +1216,9 @@ export default {
             ? response.data
             : [];
           this.syncOverlayLabelVisibility();
-          this.ensureRevisionBelongsToActiveResult();
+          if (!this.ensureRevisionBelongsToResult(this.activeResultadoSegmentacionId)) {
+            this.resetEditorState({ clearRevision: true });
+          }
         }
       } catch (error) {
         console.error("Error al cargar historial de segmentacion:", error);
@@ -1267,6 +1248,7 @@ export default {
         this.syncOverlayLabelVisibility();
         await this.cargarHistorialSegmentacion(this.imagenSeleccionada.id_muestra);
         await this.loadEffectiveSegmentation(this.activeResultadoSegmentacionId);
+        this.syncOverlayLabelVisibility();
         this.$emit("segmentation-completed", {
           caseId: this.caseId,
           muestraId: this.imagenSeleccionada.id_muestra,
@@ -1309,8 +1291,7 @@ export default {
 
       if (!resultadoId) {
         this.viewerMode = "NAVIGATE";
-        this.activeRevision = null;
-        this.activeRevisionId = null;
+        this.setActiveRevision(null);
         this.clearSelection();
         this.revisionError = "No hay resultado de segmentacion para editar.";
         return;
@@ -1323,7 +1304,6 @@ export default {
       ) {
         this.viewerMode = "EDIT";
         this.editorTool = "SELECT";
-        this.pendingDraftRevision = this.activeRevision;
         if (!this.workingObjects.length) {
           this.loadWorkingRevision(this.activeRevision);
         }
@@ -1331,39 +1311,20 @@ export default {
         return;
       }
 
-      this.revisionLoading = true;
-      this.activeRevision = null;
-      this.activeRevisionId = null;
       this.clearSelection();
 
-      try {
-        const response = await getOrCreateSegmentationDraft(resultadoId);
+      const draft = await this.getOrCreateDraft(resultadoId);
 
-        if (this.activeResultadoSegmentacionId !== resultadoId) return;
-
-        this.activeRevision = response.data;
-        this.activeRevisionId = response.data.id_revision_segmentacion;
-        this.pendingDraftRevision = response.data;
-        this.loadWorkingRevision(response.data);
-        this.viewerMode = "EDIT";
-        this.editorTool = "SELECT";
-        this.syncOverlayLabelVisibility();
-      } catch (error) {
-        console.error("Error al cargar borrador de revision:", error);
-
-        if (this.activeResultadoSegmentacionId === resultadoId) {
-          this.viewerMode = "NAVIGATE";
-          this.activeRevision = null;
-          this.activeRevisionId = null;
-          this.clearSelection();
-          this.revisionError =
-            error.response?.data?.error || "No fue posible cargar el borrador experto.";
-        }
-      } finally {
-        if (this.activeResultadoSegmentacionId === resultadoId) {
-          this.revisionLoading = false;
-        }
+      if (!draft || this.activeResultadoSegmentacionId !== resultadoId) {
+        this.viewerMode = "NAVIGATE";
+        this.clearSelection();
+        return;
       }
+
+      this.loadWorkingRevision(draft);
+      this.viewerMode = "EDIT";
+      this.editorTool = "SELECT";
+      this.syncOverlayLabelVisibility();
     },
 
     resetEditorState({ clearRevision } = { clearRevision: true }) {
@@ -1380,124 +1341,9 @@ export default {
       this.cancelVertexDrag();
       this.cancelDraftPointDrag();
       this.resetEditor();
-      this.isSavingDraft = false;
-      this.saveDraftError = "";
-      this.saveDraftMessage = "";
 
       if (clearRevision) {
-        this.activeRevision = null;
-        this.activeRevisionId = null;
-        this.pendingDraftRevision = null;
-        this.latestValidatedRevision = null;
-        this.pendingDraftLoading = false;
-        this.pendingDraftError = "";
-      }
-    },
-
-    clearEffectiveSegmentation() {
-      this.effectiveSegmentation = null;
-      this.effectiveSegmentationError = "";
-      this.effectiveSegmentationLoading = false;
-      this.effectiveSegmentationRequestToken += 1;
-    },
-
-    ensureRevisionBelongsToActiveResult() {
-      if (
-        this.activeRevision &&
-        this.activeRevision.resultado_segmentacion !== this.activeResultadoSegmentacionId
-      ) {
-        this.resetEditorState({ clearRevision: true });
-      }
-    },
-
-    async loadPendingDraftRevision(resultadoId = this.activeResultadoSegmentacionId) {
-      this.pendingDraftRevision = null;
-      this.latestValidatedRevision = null;
-      this.pendingDraftError = "";
-
-      if (!resultadoId) return;
-
-      if (
-        this.activeRevision?.resultado_segmentacion === resultadoId &&
-        this.activeRevision?.estado === "BORRADOR"
-      ) {
-        this.pendingDraftRevision = this.activeRevision;
-      }
-
-      this.pendingDraftLoading = true;
-
-      try {
-        const response = await getSegmentationRevisions(resultadoId);
-
-        if (this.activeResultadoSegmentacionId !== resultadoId) return;
-
-        const revisions = Array.isArray(response.data) ? response.data : [];
-        this.pendingDraftRevision =
-          revisions.find(revision => revision.estado === "BORRADOR") || null;
-        this.latestValidatedRevision = this.findLatestValidatedRevision(revisions);
-      } catch (error) {
-        if (this.activeResultadoSegmentacionId === resultadoId) {
-          this.pendingDraftError =
-            error.response?.data?.error ||
-            "No fue posible consultar revisiones pendientes.";
-        }
-      } finally {
-        if (this.activeResultadoSegmentacionId === resultadoId) {
-          this.pendingDraftLoading = false;
-        }
-      }
-    },
-
-    findLatestValidatedRevision(revisions) {
-      if (!Array.isArray(revisions)) return null;
-
-      return revisions
-        .filter(revision => revision.estado === "VALIDADA")
-        .sort((a, b) => Number(b.numero_revision) - Number(a.numero_revision))[0] || null;
-    },
-
-    async loadEffectiveSegmentation(resultadoId = this.activeResultadoSegmentacionId) {
-      const requestToken = this.effectiveSegmentationRequestToken + 1;
-      this.effectiveSegmentationRequestToken = requestToken;
-      this.effectiveSegmentation = null;
-      this.effectiveSegmentationError = "";
-
-      if (!resultadoId) {
-        this.effectiveSegmentationLoading = false;
-        return;
-      }
-
-      this.effectiveSegmentationLoading = true;
-
-      try {
-        const response = await getEffectiveSegmentation(resultadoId);
-
-        if (
-          this.activeResultadoSegmentacionId !== resultadoId ||
-          this.effectiveSegmentationRequestToken !== requestToken
-        ) {
-          return;
-        }
-
-        this.effectiveSegmentation = response.data || null;
-        this.syncOverlayLabelVisibility();
-      } catch (error) {
-        if (
-          this.activeResultadoSegmentacionId === resultadoId &&
-          this.effectiveSegmentationRequestToken === requestToken
-        ) {
-          this.effectiveSegmentation = null;
-          this.effectiveSegmentationError =
-            error.response?.data?.error ||
-            "No fue posible cargar el resultado mostrado.";
-        }
-      } finally {
-        if (
-          this.activeResultadoSegmentacionId === resultadoId &&
-          this.effectiveSegmentationRequestToken === requestToken
-        ) {
-          this.effectiveSegmentationLoading = false;
-        }
+        this.resetRevisionState();
       }
     },
 
@@ -1905,43 +1751,25 @@ export default {
     async saveDraft() {
       if (!this.canSaveDraft || !this.activeRevisionId) return;
 
-      this.isSavingDraft = true;
-      this.saveDraftError = "";
-      this.saveDraftMessage = "";
-      this.validateRevisionError = "";
-      this.validateRevisionMessage = "";
+      const selectedKey = this.selectedObjectKey;
+      const savedRevision = await this.saveActiveDraft(
+        this.buildEditableSnapshot(this.activeRevision?.resultado_editado || {})
+      );
 
-      try {
-        const response = await updateSegmentationDraft(
-          this.activeRevisionId,
-          this.buildEditableSnapshot(this.activeRevision?.resultado_editado || {})
-        );
-        const selectedKey = this.selectedObjectKey;
+      if (!savedRevision) return;
 
-        this.activeRevision = response.data;
-        this.activeRevisionId = response.data.id_revision_segmentacion;
-        this.pendingDraftRevision = response.data;
-        this.loadWorkingRevision(response.data);
+      this.loadWorkingRevision(savedRevision);
 
-        if (
-          selectedKey &&
-          this.workingObjects.some(
-            object => this.revisionObjectSelectionKey(object) === selectedKey
-          )
-        ) {
-          this.selectObjectVertex(selectedKey, null);
-        }
-
-        this.viewerMode = "EDIT";
-        this.saveDraftMessage = "Borrador guardado.";
-      } catch (error) {
-        this.saveDraftError =
-          error.response?.data?.resultado_editado?.[0] ||
-          error.response?.data?.detail ||
-          "No fue posible guardar el borrador.";
-      } finally {
-        this.isSavingDraft = false;
+      if (
+        selectedKey &&
+        this.workingObjects.some(
+          object => this.revisionObjectSelectionKey(object) === selectedKey
+        )
+      ) {
+        this.selectObjectVertex(selectedKey, null);
       }
+
+      this.viewerMode = "EDIT";
     },
 
     async confirmAndValidateRevision() {
@@ -1956,48 +1784,23 @@ export default {
 
       if (!this.canValidateRevision || !this.activeRevisionId) return;
 
-      this.isValidatingRevision = true;
-      this.validateRevisionError = "";
-      this.validateRevisionMessage = "";
+      const resultadoId = this.activeResultadoSegmentacionId;
+      const validatedRevision = await this.validateActiveRevision(resultadoId);
+      if (!validatedRevision) return;
 
-      try {
-        const resultadoId = this.activeResultadoSegmentacionId;
-        const response = await validateRevision(this.activeRevisionId);
-
-        this.cancelVertexDrag();
-        this.cancelDraftPointDrag();
-        this.activeRevision = response.data;
-        this.activeRevisionId = response.data.id_revision_segmentacion;
-        this.pendingDraftRevision = null;
-        this.latestValidatedRevision = response.data;
-        this.loadWorkingRevision(response.data);
-        this.saveDraftError = "";
-        this.saveDraftMessage = "";
-        this.validateRevisionMessage = "Revisión validada.";
-        this.viewerMode = "NAVIGATE";
-        this.editorTool = "SELECT";
-        this.vertexEditMode = "MOVE";
-        this.isSpacePressed = false;
-        this.endImagePan();
-        await this.loadEffectiveSegmentation(resultadoId);
-        await this.loadPendingDraftRevision(resultadoId);
-        this.$emit("segmentation-completed", {
-          caseId: this.caseId,
-          resultadoId,
-        });
-      } catch (error) {
-        const status = error.response?.status;
-        this.validateRevisionError =
-          status === 409
-            ? "La revisión ya no está disponible como BORRADOR."
-            : error.response?.data?.error || "No fue posible validar la revisión.";
-
-        if (status === 409) {
-          this.loadPendingDraftRevision(this.activeResultadoSegmentacionId);
-        }
-      } finally {
-        this.isValidatingRevision = false;
-      }
+      this.cancelVertexDrag();
+      this.cancelDraftPointDrag();
+      this.loadWorkingRevision(validatedRevision);
+      this.viewerMode = "NAVIGATE";
+      this.editorTool = "SELECT";
+      this.vertexEditMode = "MOVE";
+      this.isSpacePressed = false;
+      this.endImagePan();
+      this.syncOverlayLabelVisibility();
+      this.$emit("segmentation-completed", {
+        caseId: this.caseId,
+        resultadoId,
+      });
     },
 
     confirmDiscardDraftChanges() {

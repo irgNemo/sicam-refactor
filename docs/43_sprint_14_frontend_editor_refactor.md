@@ -259,7 +259,6 @@ Dentro del sandbox aparecio el bloqueo conocido de Vite/esbuild al resolver `vit
 
 ## Pendientes Fuera de Alcance
 
-- Evaluar `useSegmentationRevision.js`.
 - Agregar tests frontend si se incorpora infraestructura futura.
 - Resolver detalles visuales menores en un sprint separado.
 
@@ -560,6 +559,156 @@ Checklist manual especifico:
 6. Validar: guardar, validar, volver a `NAVIGATE` y confirmar resultado efectivo.
 7. Cambio de imagen: A -> B -> A sin arrastrar estado editorial entre muestras.
 8. Space/Pan en DRAW y VERTEX sin romper prioridad de eventos.
+
+## Sprint 14D - Extraccion del dominio de revisiones
+
+Sprint 14D extrajo el ciclo frontend de `RevisionSegmentacion`, persistencia de
+`BORRADOR` y resultado efectivo a:
+
+```text
+apps/web/Frontend/src/composables/useSegmentationRevision.js
+```
+
+Objetivo:
+
+- mover el estado y networking de revisiones fuera de `MainContent.vue`;
+- preservar a `MainContent.vue` como orquestador entre muestra, historial,
+  editor, viewport, overlay y comunicacion con `App`/`SideBar`;
+- mantener separadas las responsabilidades de revision y editor.
+
+Arquitectura despues de Sprint 14D:
+
+```text
+MainContent
+   |
+   |-- sample/history orchestration
+   |-- DOM / pointer coordination
+   |
+   |-- useSegmentationViewport
+   |
+   |-- useSegmentationEditor
+   |      |-- workingObjects
+   |      |-- DRAW / VERTEX
+   |      `-- Undo/Redo
+   |
+   |-- useSegmentationRevision
+   |      |-- BORRADOR
+   |      |-- VALIDADA
+   |      |-- save / validate
+   |      `-- effective result
+   |
+   `-- SegmentationOverlay
+```
+
+Ownership de `useSegmentationRevision.js`:
+
+- `activeRevision`;
+- `activeRevisionId`;
+- `pendingDraftRevision`;
+- `latestValidatedRevision`;
+- `effectiveSegmentation`;
+- `effectiveSegmentationLoading`;
+- `effectiveSegmentationError`;
+- `pendingDraftLoading`;
+- `pendingDraftError`;
+- `isSavingDraft`;
+- `saveDraftError`;
+- `saveDraftMessage`;
+- `isValidatingRevision`;
+- `validateRevisionError`;
+- `validateRevisionMessage`;
+- `revisionLoading`;
+- `revisionError`.
+
+Operaciones movidas:
+
+- `loadRevisionState()` / `loadPendingDraftRevision()`;
+- `loadEffectiveSegmentation()`;
+- `getOrCreateDraft()`;
+- `saveActiveDraft()`;
+- `validateActiveRevision()`;
+- `resetRevisionState()`;
+- `clearEffectiveSegmentation()`;
+- deteccion de `latestValidatedRevision`;
+- proteccion contra respuestas stale por `resultadoId` y token de effective.
+
+Interaccion revision -> editor:
+
+- `useSegmentationRevision.js` no importa `useSegmentationEditor.js`;
+- `MainContent.vue` coordina ambos dominios;
+- al entrar a `EDIT`, `getOrCreateDraft(resultadoId)` devuelve el `BORRADOR` y
+  `MainContent.vue` llama `loadWorkingRevision(draft)`;
+- al guardar, `saveActiveDraft(snapshot)` devuelve la revision guardada y
+  `MainContent.vue` vuelve a sincronizar el editor con `loadWorkingRevision()`;
+- al validar, `validateActiveRevision(resultadoId)` devuelve la revision
+  `VALIDADA`, refresca effective y revisiones, y `MainContent.vue` vuelve a
+  `NAVIGATE`.
+
+Resultado efectivo:
+
+- sigue viniendo del backend;
+- `BORRADOR` nunca se trata como resultado efectivo;
+- despues de validar, el composable refresca immediately el effective result
+  para que `NAVIGATE` muestre la revision validada sin `F5`.
+
+Responsabilidades que permanecen en `MainContent.vue`:
+
+- seleccion de muestra;
+- historial de resultados de segmentacion;
+- `activeResultadoSegmentacionId`;
+- cambios de `viewerMode`;
+- confirmacion con `window.confirm`;
+- condiciones mixtas como `canValidateRevision`, porque dependen de revision
+  y editor;
+- llamada a `editor.loadWorkingRevision()`;
+- emision de `segmentation-completed` para refrescar Resumen del Caso;
+- DOM refs, pointer capture, viewport y overlay.
+
+Manejo de errores/loading:
+
+- se conservan estados separados para carga de revisiones, carga de effective,
+  guardado y validacion;
+- save error conserva `EDIT`, `workingObjects`, dirty state y Undo/Redo;
+- validate con `409` refresca el estado de revision del resultado activo.
+
+Conteo de lineas observado:
+
+```text
+MainContent.vue antes de Sprint 14D: 3280 lineas
+MainContent.vue despues de Sprint 14D: 3083 lineas
+useSegmentationRevision.js: 323 lineas
+```
+
+Validacion automatica ejecutada:
+
+```powershell
+npm.cmd run build
+git diff --check
+rg -n "console\.(log|debug|table)" apps/web/Frontend/src/components/MainContent.vue apps/web/Frontend/src/components/segmentation apps/web/Frontend/src/composables apps/web/Frontend/src/services -g "*.vue" -g "*.js"
+```
+
+Resultado:
+
+```text
+PASS
+```
+
+Nota: dentro del sandbox se reprodujo el bloqueo conocido de Vite/esbuild al
+resolver `vite.config.js`; el build paso fuera del sandbox.
+
+Checklist manual especifico:
+
+1. Imagen A con `VALIDADA`: `NAVIGATE` muestra `VALIDADA`.
+2. Imagen B sin validada: `NAVIGATE` muestra `AUTOMATICO`.
+3. Entrar a `EDIT` sin `BORRADOR`: crea `BORRADOR`.
+4. Entrar a `EDIT` con `BORRADOR`: reutiliza el mismo.
+5. Guardar: un solo PATCH, dirty=false y geometria intacta.
+6. Validar: `BORRADOR -> VALIDADA -> effective -> NAVIGATE` sin `F5`.
+7. `#1 VALIDADA`, editar, crear `#2 BORRADOR`: `NAVIGATE` sigue en `#1`.
+8. Guardar/validar `#2`: `NAVIGATE` muestra `#2`.
+9. `F5` con `BORRADOR` guardado: se detecta revision pendiente.
+10. Alternar A/B/C sin contaminar `activeRevision`, `pendingDraft`,
+    `latestValidated` ni `effective`.
 
 ## Checklist Manual Pendiente
 

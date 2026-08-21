@@ -49,9 +49,13 @@ from .services.segmentation.revisions import (
     clone_revision_snapshot,
     validate_revision_snapshot,
 )
+from .services.segmentation.types import (
+    SampleType,
+    get_allowed_revision_labels,
+)
 
 
-SUMMARY_LABELS = ('membrana', 'nucleo', 'micronucleo')
+SUMMARY_LABELS = get_allowed_revision_labels(SampleType.SALIVA)
 
 
 def _is_valid_number(value):
@@ -129,7 +133,10 @@ def _get_or_create_revision_draft(resultado_segmentacion_id):
         else:
             resultado_editado = build_revision_snapshot_from_normalized(resultado)
 
-        resumen = calculate_revision_summary(resultado_editado)
+        resumen = calculate_revision_summary(
+            resultado_editado,
+            sample_type=resultado.tipo_muestra,
+        )
         revision = RevisionSegmentacion.objects.create(
             resultado_segmentacion=resultado,
             numero_revision=numero_revision,
@@ -319,7 +326,7 @@ class MuestraSalivaViewSet(viewsets.ModelViewSet):
 
         try:
             result = segment_image(
-                'SALIVA',
+                SampleType.SALIVA,
                 image_bytes,
                 filename=muestra.imagen.name
             )
@@ -352,7 +359,7 @@ class MuestraSalivaViewSet(viewsets.ModelViewSet):
         try:
             normalized_result = normalize_segmentation_result(
                 result,
-                sample_type='SALIVA'
+                sample_type=SampleType.SALIVA
             )
         except ValueError as exc:
             return Response(
@@ -368,7 +375,7 @@ class MuestraSalivaViewSet(viewsets.ModelViewSet):
         try:
             resultado = ResultadoSegmentacion.objects.create(
                 muestra=muestra,
-                tipo_muestra='SALIVA',
+                tipo_muestra=SampleType.SALIVA,
                 respuesta_json=result,
                 resultado_normalizado=normalized_result,
                 estado='COMPLETADO',
@@ -458,9 +465,13 @@ class RevisionSegmentacionViewSet(
             )
 
         try:
-            validate_revision_snapshot(revision.resultado_editado)
+            validate_revision_snapshot(
+                revision.resultado_editado,
+                sample_type=revision.resultado_segmentacion.tipo_muestra,
+            )
             revision.resumen = calculate_revision_summary(
-                revision.resultado_editado
+                revision.resultado_editado,
+                sample_type=revision.resultado_segmentacion.tipo_muestra,
             )
         except Exception as exc:
             return Response(

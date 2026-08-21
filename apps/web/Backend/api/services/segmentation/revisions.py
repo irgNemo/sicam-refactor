@@ -3,12 +3,14 @@ import math
 
 from rest_framework import serializers
 
+from .types import SampleType, get_allowed_revision_labels
 
-ALLOWED_REVISION_LABELS = ('membrana', 'nucleo', 'micronucleo')
+ALLOWED_REVISION_LABELS = get_allowed_revision_labels(SampleType.SALIVA)
 REVISION_SNAPSHOT_VERSION = '1.0'
 
 
 def build_revision_snapshot_from_normalized(resultado_segmentacion):
+    sample_type = resultado_segmentacion.tipo_muestra
     normalized = resultado_segmentacion.resultado_normalizado
     if not isinstance(normalized, dict):
         raise serializers.ValidationError(
@@ -33,7 +35,7 @@ def build_revision_snapshot_from_normalized(resultado_segmentacion):
             in zip(raw_objects, revision_object_ids)
         ],
     }
-    validate_revision_snapshot(snapshot)
+    validate_revision_snapshot(snapshot, sample_type=sample_type)
     return snapshot
 
 
@@ -75,11 +77,14 @@ def assign_revision_object_ids(raw_objects):
 
 def clone_revision_snapshot(revision):
     snapshot = copy.deepcopy(revision.resultado_editado)
-    validate_revision_snapshot(snapshot)
+    validate_revision_snapshot(
+        snapshot,
+        sample_type=revision.resultado_segmentacion.tipo_muestra
+    )
     return snapshot
 
 
-def validate_revision_snapshot(snapshot):
+def validate_revision_snapshot(snapshot, sample_type=SampleType.SALIVA):
     if not isinstance(snapshot, dict):
         raise serializers.ValidationError(
             'resultado_editado debe ser un objeto JSON'
@@ -92,18 +97,24 @@ def validate_revision_snapshot(snapshot):
         )
 
     seen_ids = set()
+    allowed_labels = get_allowed_revision_labels(sample_type)
     for index, revision_object in enumerate(objects):
-        _validate_revision_object(revision_object, index, seen_ids)
+        _validate_revision_object(
+            revision_object,
+            index,
+            seen_ids,
+            allowed_labels,
+        )
 
     return True
 
 
-def calculate_revision_summary(snapshot):
-    validate_revision_snapshot(snapshot)
+def calculate_revision_summary(snapshot, sample_type=SampleType.SALIVA):
+    validate_revision_snapshot(snapshot, sample_type=sample_type)
 
     counts_by_label = {
         label: 0
-        for label in ALLOWED_REVISION_LABELS
+        for label in get_allowed_revision_labels(sample_type)
     }
 
     for revision_object in snapshot['objects']:
@@ -132,7 +143,7 @@ def _build_automatic_revision_object(raw_object, revision_object_id):
     }
 
 
-def _validate_revision_object(revision_object, index, seen_ids):
+def _validate_revision_object(revision_object, index, seen_ids, allowed_labels):
     if not isinstance(revision_object, dict):
         raise serializers.ValidationError(
             f'objects[{index}] debe ser un objeto JSON'
@@ -150,7 +161,7 @@ def _validate_revision_object(revision_object, index, seen_ids):
     seen_ids.add(object_id)
 
     label = revision_object.get('label')
-    if label not in ALLOWED_REVISION_LABELS:
+    if label not in allowed_labels:
         raise serializers.ValidationError(
             f'objects[{index}].label no es valido'
         )

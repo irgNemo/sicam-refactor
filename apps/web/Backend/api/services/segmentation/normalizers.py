@@ -1,8 +1,13 @@
+from .types import get_segmentation_type_config, normalize_sample_type
+
+
 def normalize_segmentation_result(raw_result, sample_type="SALIVA"):
     if not isinstance(raw_result, dict):
         raise ValueError("El resultado de segmentacion debe ser un objeto JSON")
 
-    if sample_type != "SALIVA":
+    sample_type = normalize_sample_type(sample_type)
+    config = get_segmentation_type_config(sample_type)
+    if not config or config.get("normalizer") != "default_polygon_objects":
         raise ValueError(f"Tipo de muestra no soportado: {sample_type}")
 
     raw_objects = raw_result.get("objetos", [])
@@ -16,7 +21,7 @@ def normalize_segmentation_result(raw_result, sample_type="SALIVA"):
     counts_by_label = {}
 
     for index, raw_object in enumerate(raw_objects, start=1):
-        normalized_object = _normalize_saliva_object(raw_object, index)
+        normalized_object = _normalize_polygon_object(raw_object, index)
         normalized_objects.append(normalized_object)
 
         label = normalized_object["label"]
@@ -33,7 +38,7 @@ def normalize_segmentation_result(raw_result, sample_type="SALIVA"):
     }
 
 
-def _normalize_saliva_object(raw_object, fallback_id):
+def _normalize_polygon_object(raw_object, fallback_id):
     if not isinstance(raw_object, dict):
         return {
             "id": fallback_id,

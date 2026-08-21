@@ -33,7 +33,7 @@
                   class="obj-icon"
                   :style="{ color: label.stroke }"
                 >●</span>
-                {{ overlayLabelDisplayName(label.label) }}
+                {{ label.displayName || label.label }}
               </td>
             </tr>
           </tbody>
@@ -58,17 +58,6 @@ export default {
     labels: {
       type: Array,
       required: true,
-    },
-  },
-  methods: {
-    overlayLabelDisplayName(label) {
-      const displayNames = {
-        membrana: "Membranas",
-        nucleo: "Núcleos",
-        micronucleo: "Micronúcleos",
-      };
-
-      return displayNames[label] || label;
     },
   },
 };
@@ -146,15 +135,11 @@ export default {
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.5px;
-  padding: 12px;
-  text-align: center;
+  padding: 8px 12px;
+  position: sticky;
+  text-align: left;
   text-transform: uppercase;
-}
-
-.obj-table tbody td {
-  border-bottom: 1px solid #f0f0f0;
-  padding: 12px;
-  text-align: center;
+  top: 0;
 }
 
 .obj-row {
@@ -165,45 +150,43 @@ export default {
   background: #f8f9fa;
 }
 
+.obj-table td {
+  border-bottom: 1px solid #f0f0f0;
+  padding: 10px 12px;
+}
+
 .checkbox-custom {
-  accent-color: #667eea;
   cursor: pointer;
-  height: 18px;
-  width: 18px;
+  height: 16px;
+  width: 16px;
 }
 
 .obj-type {
-  align-items: center;
-  display: flex;
+  color: #2c3e50;
   font-weight: 500;
-  gap: 8px;
-  justify-content: center;
 }
 
 .obj-icon {
-  font-size: 16px;
+  display: inline-block;
+  font-size: 14px;
+  line-height: 1;
+  margin-right: 6px;
+  text-align: center;
+  width: 14px;
 }
 
 .empty-normalized {
-  color: #777;
-  font-size: 11px;
+  color: #64748b;
+  font-size: 13px;
+  padding: 16px !important;
+  text-align: center;
 }
 
-@media (max-width: 1439px) and (min-width: 1024px) {
+@media (max-width: 1439px) {
   .card-header-simple {
-    padding: 10px 14px;
+    padding: 8px 14px;
   }
 
-  .objects-card {
-    min-height: 150px;
-  }
-
-  .objects-table-wrapper {
-    padding: 12px;
-  }
-}
-
-@media (max-width: 1023px) {
   .objects-table-wrapper {
     padding: 12px;
   }

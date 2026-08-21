@@ -13,35 +13,20 @@
       </thead>
 
       <tbody v-if="summary">
-        <tr class="data-row membranas">
+        <tr
+          v-for="row in displayRows"
+          :key="row.label"
+          class="data-row"
+          :class="{ highlight: row.label === 'micronucleo' }"
+        >
           <td>
             <span
               class="structure-dot"
-              :style="{ color: colorForLabel('membrana').stroke }"
+              :style="{ color: row.color.stroke }"
             >●</span>
-            Membranas
+            {{ row.displayName || row.label }}
           </td>
-          <td class="count">{{ summary.membranas }}</td>
-        </tr>
-        <tr class="data-row nucleos">
-          <td>
-            <span
-              class="structure-dot"
-              :style="{ color: colorForLabel('nucleo').stroke }"
-            >●</span>
-            Núcleos
-          </td>
-          <td class="count">{{ summary.nucleos }}</td>
-        </tr>
-        <tr class="data-row micronucleos highlight">
-          <td>
-            <span
-              class="structure-dot"
-              :style="{ color: colorForLabel('micronucleo').stroke }"
-            >●</span>
-            Micronúcleos
-          </td>
-          <td class="count">{{ summary.micronucleos }}</td>
+          <td class="count">{{ row.count }}</td>
         </tr>
         <tr class="data-row total">
           <td>
@@ -75,6 +60,38 @@ export default {
     palette: {
       type: Object,
       required: true,
+    },
+    rows: {
+      type: Array,
+      default: () => [],
+    },
+  },
+  computed: {
+    displayRows() {
+      if (this.rows.length) {
+        return this.rows;
+      }
+
+      return [
+        {
+          label: "membrana",
+          displayName: "Membranas",
+          count: this.summary?.membranas || 0,
+          color: this.colorForLabel("membrana"),
+        },
+        {
+          label: "nucleo",
+          displayName: "Núcleos",
+          count: this.summary?.nucleos || 0,
+          color: this.colorForLabel("nucleo"),
+        },
+        {
+          label: "micronucleo",
+          displayName: "Micronúcleos",
+          count: this.summary?.micronucleos || 0,
+          color: this.colorForLabel("micronucleo"),
+        },
+      ];
     },
   },
   methods: {

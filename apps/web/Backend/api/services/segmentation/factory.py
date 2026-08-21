@@ -12,6 +12,7 @@ from .base_client import SegmentationClient
 from .saliva_client import SalivaSegmentationClient
 from .blood_client import BloodSegmentationClient
 from .exceptions import SegmentationServiceError
+from .types import SampleType, normalize_sample_type
 
 
 def get_segmentation_client(sample_type: str) -> SegmentationClient:
@@ -31,7 +32,7 @@ def get_segmentation_client(sample_type: str) -> SegmentationClient:
         >>> client = get_segmentation_client('SALIVA')
         >>> result = client.segment(image_bytes)
     """
-    sample_type = sample_type.upper()
+    sample_type = normalize_sample_type(sample_type)
     
     # Obtener configuración desde settings
     services_config = getattr(settings, 'SEGMENTATION_SERVICES', {})
@@ -47,9 +48,9 @@ def get_segmentation_client(sample_type: str) -> SegmentationClient:
     timeout = config.get('timeout', 30)
     
     # Crear cliente específico
-    if sample_type == 'SALIVA':
+    if sample_type == SampleType.SALIVA:
         return SalivaSegmentationClient(base_url, timeout)
-    elif sample_type == 'SANGRE':
+    elif sample_type == SampleType.BLOOD:
         return BloodSegmentationClient(base_url, timeout)
     else:
         raise SegmentationServiceError(

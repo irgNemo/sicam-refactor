@@ -13,7 +13,7 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import override_settings
 from django.urls import reverse
-from rest_framework import status
+from rest_framework import serializers, status
 from rest_framework.test import APITestCase
 
 from .models import (
@@ -31,6 +31,15 @@ from .services.segmentation.exceptions import (
     SegmentationTimeoutError,
 )
 from .services.segmentation.normalizers import normalize_segmentation_result
+from .services.segmentation.revisions import (
+    calculate_revision_summary,
+    validate_revision_snapshot,
+)
+from .services.segmentation.types import (
+    SampleType,
+    get_allowed_revision_labels,
+    get_segmentation_type_config,
+)
 from .services.segmentation.effective import (
     FUENTE_AUTOMATICO,
     FUENTE_VALIDADA,
@@ -337,6 +346,99 @@ class SegmentationResultNormalizerTests(APITestCase):
             assert 'objeto JSON' in str(exc)
         else:
             raise AssertionError('normalize_segmentation_result must fail')
+
+
+class SegmentationSampleTypeContractTests(APITestCase):
+    def _revision_object(self, object_id, label):
+        return {
+            'id': object_id,
+            'label': label,
+            'geometry': {
+                'type': 'polygon',
+                'points': [[0, 0], [10, 0], [10, 10]],
+            },
+            'provenance': {
+                'origin': 'manual',
+                'base_object_id': None,
+            },
+        }
+
+    def _snapshot(self, labels):
+        return {
+            'version': '1.0',
+            'base_result_id': 1,
+            'objects': [
+                self._revision_object(index, label)
+                for index, label in enumerate(labels, start=1)
+            ],
+        }
+
+    def test_sample_type_configs_declare_expected_labels(self):
+        saliva_config = get_segmentation_type_config(SampleType.SALIVA)
+        blood_config = get_segmentation_type_config(SampleType.BLOOD)
+
+        assert get_allowed_revision_labels(SampleType.SALIVA) == (
+            'membrana',
+            'nucleo',
+            'micronucleo',
+        )
+        assert get_allowed_revision_labels(SampleType.BLOOD) == (
+            'membrana',
+            'micronucleo',
+        )
+        assert saliva_config['supports_segmentation'] is True
+        assert blood_config['supports_segmentation'] is False
+        assert blood_config['supports_expert_review'] is True
+
+    def test_blood_normalizer_uses_common_polygon_contract(self):
+        raw_result = {
+            'objetos': [
+                {'id': 1, 'tipo': 'membrana', 'puntos': [[1, 1], [2, 2]]},
+                {'id': 255, 'tipo': 'micronucleo', 'puntos': [[3, 3]]},
+            ]
+        }
+
+        result = normalize_segmentation_result(
+            raw_result,
+            sample_type=SampleType.BLOOD,
+        )
+
+        assert result['version'] == '1.1'
+        assert result['sample_type'] == SampleType.BLOOD
+        assert [item['id'] for item in result['objects']] == [1, 2]
+        assert result['objects'][1]['source']['raw_id'] == 255
+        assert result['summary']['total_objects'] == 2
+        assert result['summary']['counts_by_label'] == {
+            'membrana': 1,
+            'micronucleo': 1,
+        }
+
+    def test_revision_validation_uses_saliva_labels_by_default(self):
+        snapshot = self._snapshot(['membrana', 'nucleo', 'micronucleo'])
+
+        assert validate_revision_snapshot(snapshot) is True
+
+    def test_revision_validation_rejects_nucleus_for_blood(self):
+        snapshot = self._snapshot(['membrana', 'nucleo'])
+
+        with self.assertRaises(serializers.ValidationError):
+            validate_revision_snapshot(snapshot, sample_type=SampleType.BLOOD)
+
+    def test_revision_summary_uses_blood_labels(self):
+        snapshot = self._snapshot(['membrana', 'micronucleo', 'micronucleo'])
+
+        summary = calculate_revision_summary(
+            snapshot,
+            sample_type=SampleType.BLOOD,
+        )
+
+        assert summary == {
+            'counts_by_label': {
+                'membrana': 1,
+                'micronucleo': 2,
+            },
+            'total_objects': 3,
+        }
 
 
 class MuestraSalivaSegmentationEndpointTests(APITestCase):

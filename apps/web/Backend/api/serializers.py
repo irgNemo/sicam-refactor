@@ -79,7 +79,8 @@ class RevisionSegmentacionSerializer(serializers.ModelSerializer):
         )
 
     def validate_resultado_editado(self, value):
-        validate_revision_snapshot(value)
+        sample_type = self.instance.resultado_segmentacion.tipo_muestra
+        validate_revision_snapshot(value, sample_type=sample_type)
         return value
 
     def update(self, instance, validated_data):
@@ -91,7 +92,10 @@ class RevisionSegmentacionSerializer(serializers.ModelSerializer):
         resultado_editado = validated_data.get('resultado_editado')
         if resultado_editado is not None:
             instance.resultado_editado = resultado_editado
-            instance.resumen = calculate_revision_summary(resultado_editado)
+            instance.resumen = calculate_revision_summary(
+                resultado_editado,
+                sample_type=instance.resultado_segmentacion.tipo_muestra,
+            )
             instance.save(update_fields=[
                 'resultado_editado',
                 'resumen',

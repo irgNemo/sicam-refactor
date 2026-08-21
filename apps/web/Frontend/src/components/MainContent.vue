@@ -197,6 +197,7 @@
               <SegmentationCountSummary
                 :summary="resumenConteoActivo"
                 :palette="segmentationLabelPalette"
+                :rows="resumenConteoRows"
               />
 
               <div
@@ -329,9 +330,13 @@
                       class="drawing-label-select"
                       :disabled="!isEditMode"
                     >
-                      <option value="membrana">Membranas</option>
-                      <option value="nucleo">Núcleos</option>
-                      <option value="micronucleo">Micronúcleos</option>
+                      <option
+                        v-for="labelConfig in editableDrawingLabels"
+                        :key="labelConfig.label"
+                        :value="labelConfig.label"
+                      >
+                        {{ labelConfig.displayName }}
+                      </option>
                     </select>
                   </div>
                   <div
@@ -516,6 +521,13 @@ import {
 } from "../composables/useSegmentationViewport";
 import { useSegmentationEditor } from "../composables/useSegmentationEditor";
 import { useSegmentationRevision } from "../composables/useSegmentationRevision";
+import {
+  OVERLAY_FALLBACK_PALETTE,
+  SAMPLE_TYPES,
+  getLabelConfig,
+  getLabelPalette,
+  getSegmentationTypeConfig,
+} from "../domain/segmentationTypes";
 
 const SEGMENT_HIT_TOLERANCE_PX = 8;
 const VERTEX_SEGMENT_HIT_TOLERANCE_PX = 8;
@@ -597,28 +609,6 @@ export default {
       panStartX: 0,
       panStartY: 0,
       overlayLabelVisibility: {},
-      segmentationLabelPalette: {
-        membrana: {
-          stroke: "rgba(30, 136, 229, 0.92)",
-          fill: "rgba(30, 136, 229, 0.16)",
-        },
-        micronucleo: {
-          stroke: "rgba(67, 160, 71, 0.92)",
-          fill: "rgba(67, 160, 71, 0.16)",
-        },
-        nucleo: {
-          stroke: "rgba(239, 83, 80, 0.92)",
-          fill: "rgba(239, 83, 80, 0.16)",
-        },
-      },
-      overlayFallbackPalette: [
-        { stroke: "rgba(30, 136, 229, 0.92)", fill: "rgba(30, 136, 229, 0.16)" },
-        { stroke: "rgba(67, 160, 71, 0.92)", fill: "rgba(67, 160, 71, 0.16)" },
-        { stroke: "rgba(239, 83, 80, 0.92)", fill: "rgba(239, 83, 80, 0.16)" },
-        { stroke: "rgba(251, 140, 0, 0.92)", fill: "rgba(251, 140, 0, 0.16)" },
-        { stroke: "rgba(142, 68, 173, 0.92)", fill: "rgba(142, 68, 173, 0.16)" },
-        { stroke: "rgba(0, 137, 123, 0.92)", fill: "rgba(0, 137, 123, 0.16)" },
-      ],
     };
   },
 
@@ -669,6 +659,27 @@ export default {
 
     resultadoNormalizadoActivo() {
       return this.resultadoSegmentacionActivo?.resultado_normalizado || null;
+    },
+
+    activeSampleType() {
+      return (
+        this.resultadoSegmentacionActivo?.tipo_muestra ||
+        this.resultadoSegmentacionActivo?.resultado_segmentacion?.tipo_muestra ||
+        this.resultadoNormalizadoActivo?.sample_type ||
+        SAMPLE_TYPES.SALIVA
+      );
+    },
+
+    activeSegmentationConfig() {
+      return getSegmentationTypeConfig(this.activeSampleType);
+    },
+
+    editableDrawingLabels() {
+      return this.activeSegmentationConfig.labels.filter(label => label.editable);
+    },
+
+    segmentationLabelPalette() {
+      return getLabelPalette(this.activeSampleType);
     },
 
     isEditMode() {
@@ -769,7 +780,10 @@ export default {
       const totalValue = Number(summary.total_objects);
       const total = Number.isFinite(totalValue)
         ? totalValue
-        : membranas + nucleos + micronucleos;
+        : Object.values(counts).reduce((accumulator, value) => {
+          const parsed = Number(value);
+          return Number.isFinite(parsed) ? accumulator + parsed : accumulator;
+        }, 0);
 
       return {
         membranas,
@@ -777,6 +791,24 @@ export default {
         micronucleos,
         total,
       };
+    },
+
+    resumenConteoRows() {
+      const summary = this.activeOverlaySummary;
+      if (!summary || typeof summary !== "object") return [];
+
+      const counts = summary.counts_by_label;
+      if (!counts || typeof counts !== "object") return [];
+
+      return this.activeSegmentationConfig.labels.map(labelConfig => {
+        const value = Number(counts[labelConfig.label]);
+        return {
+          label: labelConfig.label,
+          displayName: labelConfig.displayName,
+          count: Number.isFinite(value) ? value : 0,
+          color: this.overlayColorForLabel(labelConfig.label),
+        };
+      });
     },
 
     imageTransformStyle() {
@@ -1140,6 +1172,7 @@ export default {
         const color = this.overlayColorForLabel(label);
         return {
           label,
+          displayName: this.overlayLabelDisplayName(label),
           count: this.overlayDrawableObjects.filter(
             item => item.label === label
           ).length,
@@ -1170,6 +1203,16 @@ export default {
     drawingLabel(label) {
       if (this.isEditMode && this.editorTool === "DRAW") {
         this.showOverlayLabel(label);
+      }
+    },
+
+    activeSampleType() {
+      const allowedLabels = this.editableDrawingLabels.map(
+        labelConfig => labelConfig.label
+      );
+
+      if (!allowedLabels.includes(this.drawingLabel)) {
+        this.drawingLabel = this.activeSegmentationConfig.defaultDrawingLabel;
       }
     },
   },
@@ -2185,7 +2228,7 @@ export default {
       }
 
       const index = Math.max(this.overlayLabelNames.indexOf(label), 0);
-      return this.overlayFallbackPalette[index % this.overlayFallbackPalette.length];
+      return OVERLAY_FALLBACK_PALETTE[index % OVERLAY_FALLBACK_PALETTE.length];
     },
 
     overlayFillForLabel(label, context = "overlay") {
@@ -2216,23 +2259,11 @@ export default {
     },
 
     overlayLabelRenderOrder(label) {
-      const order = {
-        membrana: 1,
-        nucleo: 2,
-        micronucleo: 3,
-      };
-
-      return order[label] || 10;
+      return getLabelConfig(this.activeSampleType, label)?.order || 10;
     },
 
     overlayLabelDisplayName(label) {
-      const displayNames = {
-        membrana: "Membranas",
-        nucleo: "Núcleos",
-        micronucleo: "Micronúcleos",
-      };
-
-      return displayNames[label] || label;
+      return getLabelConfig(this.activeSampleType, label)?.displayName || label;
     },
 
     syncOverlayLabelVisibility() {

@@ -74,6 +74,23 @@ class MuestraSaliva(models.Model):
     def __str__(self):
         return f"Muestra Saliva {self.id_muestra}"
 
+
+# Modelo de Muestra de Sangre
+class MuestraSangre(models.Model):
+    id_muestra = models.AutoField(primary_key=True)
+    analisis = models.ForeignKey(
+        AnalisisPred,
+        on_delete=models.CASCADE,
+        related_name='muestras_sangre'
+    )
+    imagen = models.ImageField(
+        upload_to='muestras/sangre/%Y/%m/'
+    )
+    fecha_subida = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Muestra Sangre {self.id_muestra}"
+
 # Modelo de Resultado
 class ResultadoAnalisis(models.Model):
     id_resultado = models.AutoField(primary_key=True)
@@ -97,7 +114,16 @@ class ResultadoSegmentacion(models.Model):
     muestra = models.ForeignKey(
         MuestraSaliva,
         on_delete=models.CASCADE,
-        related_name='resultados_segmentacion'
+        related_name='resultados_segmentacion',
+        blank=True,
+        null=True,
+    )
+    muestra_sangre = models.ForeignKey(
+        MuestraSangre,
+        on_delete=models.CASCADE,
+        related_name='resultados_segmentacion',
+        blank=True,
+        null=True,
     )
     tipo_muestra = models.CharField(max_length=20, default='SALIVA')
     respuesta_json = models.JSONField()
@@ -106,6 +132,25 @@ class ResultadoSegmentacion(models.Model):
     error = models.TextField(blank=True, null=True)
     creado_en = models.DateTimeField(auto_now_add=True)
     actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    (
+                        models.Q(tipo_muestra='SALIVA') &
+                        models.Q(muestra__isnull=False) &
+                        models.Q(muestra_sangre__isnull=True)
+                    ) |
+                    (
+                        models.Q(tipo_muestra='SANGRE') &
+                        models.Q(muestra__isnull=True) &
+                        models.Q(muestra_sangre__isnull=False)
+                    )
+                ),
+                name='resultado_segmentacion_sample_type_consistency',
+            ),
+        ]
 
     def __str__(self):
         return (

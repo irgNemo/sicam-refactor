@@ -8,12 +8,17 @@ class ResultadoSegmentacionAdmin(admin.ModelAdmin):
     list_display = (
         'id_resultado_segmentacion',
         'muestra',
+        'muestra_sangre',
         'tipo_muestra',
         'estado',
         'creado_en',
     )
     list_filter = ('tipo_muestra', 'estado', 'creado_en')
-    search_fields = ('id_resultado_segmentacion', 'muestra__id_muestra')
+    search_fields = (
+        'id_resultado_segmentacion',
+        'muestra__id_muestra',
+        'muestra_sangre__id_muestra',
+    )
 
 
 @admin.register(RevisionSegmentacion)

@@ -247,13 +247,11 @@ Para sangre, el mismo contrato puede usar:
 
 ## Pendientes para activar sangre end-to-end
 
-Antes de activar un flujo real de sangre se requiere definir:
+Actualizacion Sprint 16A: ya existe una solucion transicional de persistencia relacional para sangre mediante `MuestraSangre` y `ResultadoSegmentacion.muestra_sangre`. `ResultadoSegmentacion.muestra` se preserva para saliva.
 
-- si se creara `MuestraSangre`;
-- si se creara un modelo comun, por ejemplo `ImagenMuestra`;
-- como migrar o compatibilizar `ResultadoSegmentacion.muestra`, que hoy apunta a `MuestraSaliva`;
+Antes de activar un flujo real de sangre todavia se requiere definir:
+
 - endpoint Django para segmentar una muestra de sangre;
-- persistencia de resultados de sangre;
 - origen de imagenes de sangre en frontend;
 - filtros de galeria por tipo de muestra;
 - resumen de caso combinando saliva y sangre;
@@ -262,10 +260,10 @@ Antes de activar un flujo real de sangre se requiere definir:
 
 ## Riesgos actuales
 
-- `ResultadoSegmentacion` sigue acoplado a `MuestraSaliva` por `ForeignKey`.
+- `ResultadoSegmentacion` ya puede apuntar a `MuestraSaliva` o `MuestraSangre`, pero usa una estrategia transicional de dos FK y todavia no existe un modelo comun `ImagenMuestra`.
 - El frontend puede renderizar configuracion para `SANGRE`, pero no tiene todavia galeria ni flujo de carga de muestras de sangre.
 - El microservicio de sangre puede cargar modelos pesados al arrancar; este sprint no lo ejecuta.
-- `supports_segmentation` para `SANGRE` queda desactivado a nivel de dominio Django hasta que exista modelo/ruta/persistencia.
+- `supports_segmentation` para `SANGRE` queda desactivado a nivel de dominio Django hasta que exista endpoint/ruta E2E.
 - Los historicos existentes no se migraron ni se recalcularon.
 
 ## Pruebas agregadas
@@ -334,10 +332,10 @@ Nota: el primer intento dentro del sandbox fallo por el bloqueo conocido de Vite
 
 ## Sprint siguiente recomendado
 
-Sprint 16 deberia decidir el cambio de dominio estructural:
+Sprint 16A resolvio el cambio relacional minimo con `MuestraSangre` y una estrategia transicional compatible con `MuestraSaliva`.
 
-- opcion A: agregar `MuestraSangre` manteniendo `MuestraSaliva`;
-- opcion B: crear un modelo comun `ImagenMuestra`;
-- opcion C: estrategia de transicion con compatibilidad hacia `MuestraSaliva`.
+Los siguientes sprints deberian decidir si:
 
-Esa decision probablemente requiere migraciones y debe tratarse como sprint explicito de modelo de dominio.
+- se mantiene la estrategia transicional de dos FK mientras se integra sangre;
+- se agrega endpoint Django para sangre sobre `MuestraSangre`;
+- se evalua mas adelante un modelo comun `ImagenMuestra` con una migracion mas amplia.

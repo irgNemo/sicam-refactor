@@ -13,6 +13,7 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import override_settings
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework import serializers, status
 from rest_framework.test import APITestCase
 
@@ -20,6 +21,7 @@ from .models import (
     AnalisisPred,
     Caso,
     MuestraSaliva,
+    MuestraSangre,
     Paciente,
     ResultadoSegmentacion,
     RevisionSegmentacion,
@@ -439,6 +441,242 @@ class SegmentationSampleTypeContractTests(APITestCase):
             },
             'total_objects': 3,
         }
+
+
+class BloodSamplePersistenceDomainTests(APITestCase):
+    def setUp(self):
+        self.media_root = tempfile.mkdtemp()
+        self.override = override_settings(MEDIA_ROOT=self.media_root)
+        self.override.enable()
+
+        self.paciente = Paciente.objects.create(
+            nombre='Paciente',
+            apellido='Sangre',
+            fecha_nacimiento=date(1988, 2, 20),
+            identificacion='PAC-BLOOD-001',
+        )
+        self.caso = Caso.objects.create(
+            paciente=self.paciente,
+            titulo='Caso sangre',
+        )
+        self.analisis = AnalisisPred.objects.create(
+            id_paciente_fk=self.paciente,
+            id_caso_fk=self.caso,
+        )
+        self.muestra_saliva = MuestraSaliva.objects.create(
+            analisis=self.analisis,
+            imagen=SimpleUploadedFile(
+                'saliva.jpg',
+                b'fake saliva bytes',
+                content_type='image/jpeg',
+            ),
+        )
+        self.muestra_sangre = MuestraSangre.objects.create(
+            analisis=self.analisis,
+            imagen=SimpleUploadedFile(
+                'sangre.jpg',
+                b'fake blood bytes',
+                content_type='image/jpeg',
+            ),
+        )
+
+    def tearDown(self):
+        self.override.disable()
+        shutil.rmtree(self.media_root, ignore_errors=True)
+
+    def _normalized_blood(self):
+        return {
+            'version': '1.1',
+            'sample_type': SampleType.BLOOD,
+            'objects': [
+                {
+                    'id': 1,
+                    'label': 'membrana',
+                    'geometry': {
+                        'type': 'polygon',
+                        'points': [[0, 0], [10, 0], [10, 10]],
+                    },
+                    'source': {
+                        'raw_id': 1,
+                        'raw_type': 'membrana',
+                    },
+                },
+                {
+                    'id': 2,
+                    'label': 'micronucleo',
+                    'geometry': {
+                        'type': 'polygon',
+                        'points': [[2, 2], [6, 2], [6, 6]],
+                    },
+                    'source': {
+                        'raw_id': 1,
+                        'raw_type': 'micronucleo',
+                    },
+                },
+            ],
+            'summary': {
+                'counts_by_label': {
+                    'membrana': 1,
+                    'micronucleo': 1,
+                },
+                'total_objects': 2,
+            },
+        }
+
+    def _blood_snapshot(self, labels=None):
+        labels = labels or ['membrana', 'micronucleo']
+        return {
+            'version': '1.0',
+            'base_result_id': 1,
+            'objects': [
+                {
+                    'id': index,
+                    'label': label,
+                    'geometry': {
+                        'type': 'polygon',
+                        'points': [[0, 0], [10, 0], [10, 10]],
+                    },
+                    'provenance': {
+                        'origin': 'manual',
+                        'base_object_id': None,
+                    },
+                }
+                for index, label in enumerate(labels, start=1)
+            ],
+        }
+
+    def _create_blood_result(self):
+        return ResultadoSegmentacion.objects.create(
+            muestra_sangre=self.muestra_sangre,
+            tipo_muestra=SampleType.BLOOD,
+            respuesta_json={'objetos': []},
+            resultado_normalizado=self._normalized_blood(),
+            estado='COMPLETADO',
+        )
+
+    def _assert_invalid_resultado(self, **kwargs):
+        payload = {
+            'respuesta_json': {'objetos': []},
+            'resultado_normalizado': {},
+            'estado': 'COMPLETADO',
+        }
+        payload.update(kwargs)
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                ResultadoSegmentacion.objects.create(**payload)
+
+    def test_saliva_result_keeps_legacy_muestra_relation(self):
+        resultado = ResultadoSegmentacion.objects.create(
+            muestra=self.muestra_saliva,
+            tipo_muestra=SampleType.SALIVA,
+            respuesta_json={'objetos': []},
+            resultado_normalizado={},
+            estado='COMPLETADO',
+        )
+
+        assert resultado.muestra == self.muestra_saliva
+        assert resultado.muestra_sangre is None
+
+    def test_blood_sample_and_result_can_be_persisted(self):
+        resultado = self._create_blood_result()
+
+        assert resultado.muestra is None
+        assert resultado.muestra_sangre == self.muestra_sangre
+        assert resultado.tipo_muestra == SampleType.BLOOD
+
+    def test_blood_revision_allows_membrana_and_micronucleo(self):
+        resultado = self._create_blood_result()
+        revision = RevisionSegmentacion.objects.create(
+            resultado_segmentacion=resultado,
+            numero_revision=1,
+            estado=RevisionSegmentacion.ESTADO_BORRADOR,
+            resultado_editado=self._blood_snapshot(),
+            resumen={'counts_by_label': {}, 'total_objects': 0},
+        )
+
+        summary = calculate_revision_summary(
+            revision.resultado_editado,
+            sample_type=resultado.tipo_muestra,
+        )
+
+        assert summary == {
+            'counts_by_label': {
+                'membrana': 1,
+                'micronucleo': 1,
+            },
+            'total_objects': 2,
+        }
+
+    def test_blood_revision_rejects_nucleo(self):
+        resultado = self._create_blood_result()
+        snapshot = self._blood_snapshot(['membrana', 'nucleo'])
+
+        with self.assertRaises(serializers.ValidationError):
+            validate_revision_snapshot(
+                snapshot,
+                sample_type=resultado.tipo_muestra,
+            )
+
+    def test_blood_effective_automatic_uses_normalized_result(self):
+        resultado = self._create_blood_result()
+
+        effective = resolve_effective_segmentation(resultado)
+
+        assert effective['fuente'] == FUENTE_AUTOMATICO
+        assert effective['resultado'] == resultado.resultado_normalizado
+        assert effective['resumen'] == resultado.resultado_normalizado['summary']
+
+    def test_blood_effective_validated_revision_overrides_automatic(self):
+        resultado = self._create_blood_result()
+        revision = RevisionSegmentacion.objects.create(
+            resultado_segmentacion=resultado,
+            numero_revision=1,
+            estado=RevisionSegmentacion.ESTADO_VALIDADA,
+            resultado_editado=self._blood_snapshot(['micronucleo']),
+            resumen={
+                'counts_by_label': {
+                    'membrana': 0,
+                    'micronucleo': 1,
+                },
+                'total_objects': 1,
+            },
+            validado_en=timezone.now(),
+        )
+
+        effective = resolve_effective_segmentation(resultado)
+
+        assert effective['fuente'] == FUENTE_VALIDADA
+        assert effective['revision']['id_revision_segmentacion'] == (
+            revision.id_revision_segmentacion
+        )
+        assert effective['resultado'] == revision.resultado_editado
+        assert effective['resumen'] == revision.resumen
+
+    def test_saliva_without_saliva_sample_is_rejected(self):
+        self._assert_invalid_resultado(tipo_muestra=SampleType.SALIVA)
+
+    def test_blood_without_blood_sample_is_rejected(self):
+        self._assert_invalid_resultado(tipo_muestra=SampleType.BLOOD)
+
+    def test_saliva_with_blood_sample_is_rejected(self):
+        self._assert_invalid_resultado(
+            muestra_sangre=self.muestra_sangre,
+            tipo_muestra=SampleType.SALIVA,
+        )
+
+    def test_blood_with_saliva_sample_is_rejected(self):
+        self._assert_invalid_resultado(
+            muestra=self.muestra_saliva,
+            tipo_muestra=SampleType.BLOOD,
+        )
+
+    def test_result_with_both_sample_relations_is_rejected(self):
+        self._assert_invalid_resultado(
+            muestra=self.muestra_saliva,
+            muestra_sangre=self.muestra_sangre,
+            tipo_muestra=SampleType.SALIVA,
+        )
 
 
 class MuestraSalivaSegmentationEndpointTests(APITestCase):

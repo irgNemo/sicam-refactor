@@ -5,6 +5,7 @@ from .views import (
     CasoViewSet,
     AnalisisViewSet,
     MuestraSalivaViewSet,
+    MuestraSangreViewSet,
     ResultadoSegmentacionViewSet,
     RevisionSegmentacionViewSet,
 )
@@ -14,6 +15,11 @@ router.register(r'pacientes', PacienteViewSet, basename='paciente')
 router.register(r'casos', CasoViewSet, basename='caso')
 router.register(r'analisis', AnalisisViewSet, basename='analisis')
 router.register(r'muestras', MuestraSalivaViewSet, basename='muestra')
+router.register(
+    r'muestras-sangre',
+    MuestraSangreViewSet,
+    basename='muestra-sangre'
+)
 router.register(
     r'resultados-segmentacion',
     ResultadoSegmentacionViewSet,

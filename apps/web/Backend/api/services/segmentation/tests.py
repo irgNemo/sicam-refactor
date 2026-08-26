@@ -9,8 +9,13 @@ O con cobertura:
 """
 
 import pytest
+from django.conf import settings
 from unittest.mock import Mock, patch, MagicMock
-from requests.exceptions import Timeout, ConnectionError as RequestsConnectionError
+from requests.exceptions import (
+    RequestException,
+    Timeout,
+    ConnectionError as RequestsConnectionError,
+)
 
 from .base_client import SegmentationClient
 from .saliva_client import SalivaSegmentationClient
@@ -192,10 +197,70 @@ class TestBloodSegmentationClient:
         assert result == expected_response
         call_args = mock_post.call_args
         assert 'http://localhost:8002/api/v1/segmentar' in call_args[0]
+        assert call_args[1]['files']['file'][0] == 'image.jpg'
+        assert call_args[1]['files']['file'][1] == b'fake_image'
+        assert call_args[1]['timeout'] == 30
+
+    @patch('requests.post')
+    def test_segment_timeout(self, mock_post):
+        client = BloodSegmentationClient('http://localhost:8002', timeout=5)
+
+        mock_post.side_effect = Timeout('Request timeout')
+
+        with pytest.raises(SegmentationTimeoutError):
+            client.segment(b'fake_image')
+
+    @patch('requests.post')
+    def test_segment_connection_error(self, mock_post):
+        client = BloodSegmentationClient('http://localhost:8002')
+
+        mock_post.side_effect = RequestsConnectionError('Connection refused')
+
+        with pytest.raises(SegmentationConnectionError):
+            client.segment(b'fake_image')
+
+    @patch('requests.post')
+    def test_segment_http_error(self, mock_post):
+        client = BloodSegmentationClient('http://localhost:8002')
+
+        mock_response = Mock()
+        mock_response.raise_for_status.side_effect = RequestException('500')
+        mock_post.return_value = mock_response
+
+        with pytest.raises(SegmentationServiceError):
+            client.segment(b'fake_image')
+
+    @patch('requests.post')
+    def test_segment_invalid_json(self, mock_post):
+        client = BloodSegmentationClient('http://localhost:8002')
+
+        mock_response = Mock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.side_effect = ValueError('Invalid JSON')
+        mock_post.return_value = mock_response
+
+        with pytest.raises(InvalidSegmentationResponseError):
+            client.segment(b'fake_image')
+
+    @patch('requests.post')
+    def test_segment_invalid_response_structure(self, mock_post):
+        client = BloodSegmentationClient('http://localhost:8002')
+
+        mock_response = Mock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {'invalid': 'data'}
+        mock_post.return_value = mock_response
+
+        with pytest.raises(InvalidSegmentationResponseError):
+            client.segment(b'fake_image')
 
 
 class TestFactory:
     """Tests para factory y helpers."""
+
+    def test_default_service_timeouts_are_component_specific(self):
+        assert settings.SEGMENTATION_SERVICES['SALIVA']['timeout'] == 30
+        assert settings.SEGMENTATION_SERVICES['SANGRE']['timeout'] == 240
 
     @patch('api.services.segmentation.factory.settings')
     def test_get_segmentation_client_saliva(self, mock_settings):
@@ -254,6 +319,22 @@ class TestFactory:
         
         with pytest.raises(SegmentationServiceError):
             get_segmentation_client('SALIVA')
+
+    @patch('api.services.segmentation.factory.settings')
+    def test_get_segmentation_client_invalid_type(self, mock_settings):
+        mock_settings.SEGMENTATION_SERVICES = {
+            'SALIVA': {
+                'url': 'http://localhost:8001',
+                'timeout': 30,
+            },
+            'SANGRE': {
+                'url': 'http://localhost:8002',
+                'timeout': 30,
+            },
+        }
+
+        with pytest.raises(SegmentationServiceError):
+            get_segmentation_client('ORINA')
 
     @patch.object(SalivaSegmentationClient, 'segment')
     @patch('api.services.segmentation.factory.settings')

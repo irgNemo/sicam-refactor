@@ -389,7 +389,7 @@ class SegmentationSampleTypeContractTests(APITestCase):
             'micronucleo',
         )
         assert saliva_config['supports_segmentation'] is True
-        assert blood_config['supports_segmentation'] is False
+        assert blood_config['supports_segmentation'] is True
         assert blood_config['supports_expert_review'] is True
 
     def test_blood_normalizer_uses_common_polygon_contract(self):
@@ -891,6 +891,327 @@ class MuestraSalivaSegmentationEndpointTests(APITestCase):
         assert response.status_code == status.HTTP_502_BAD_GATEWAY
         assert 'error' in response.data
         assert ResultadoSegmentacion.objects.count() == 0
+
+
+class MuestraSangreSegmentationEndpointTests(APITestCase):
+    def setUp(self):
+        self.media_root = tempfile.mkdtemp()
+        self.override = override_settings(MEDIA_ROOT=self.media_root)
+        self.override.enable()
+
+        self.paciente = Paciente.objects.create(
+            nombre='Paciente',
+            apellido='Sangre Endpoint',
+            fecha_nacimiento=date(1990, 1, 1),
+            identificacion='PAC-BLOOD-ENDPOINT-001',
+        )
+        self.caso = Caso.objects.create(
+            paciente=self.paciente,
+            titulo='Caso sangre endpoint',
+        )
+        self.analisis = AnalisisPred.objects.create(
+            id_paciente_fk=self.paciente,
+            id_caso_fk=self.caso,
+        )
+
+    def tearDown(self):
+        self.override.disable()
+        shutil.rmtree(self.media_root, ignore_errors=True)
+
+    def _create_muestra(self, content=b'fake blood image bytes'):
+        return MuestraSangre.objects.create(
+            analisis=self.analisis,
+            imagen=SimpleUploadedFile(
+                'blood.jpg',
+                content,
+                content_type='image/jpeg',
+            ),
+        )
+
+    def _url(self, muestra_id):
+        return reverse('muestra-sangre-segmentar', kwargs={'pk': muestra_id})
+
+    def _history_url(self, muestra_id):
+        return reverse(
+            'muestra-sangre-resultados-segmentacion',
+            kwargs={'pk': muestra_id},
+        )
+
+    def _effective_url(self, resultado_id):
+        return reverse(
+            'resultado-segmentacion-efectivo',
+            kwargs={'pk': resultado_id},
+        )
+
+    def _revisions_url(self, resultado_id):
+        return reverse(
+            'resultado-segmentacion-revisiones',
+            kwargs={'pk': resultado_id},
+        )
+
+    def _revision_url(self, revision_id):
+        return reverse(
+            'revision-segmentacion-detail',
+            kwargs={'pk': revision_id},
+        )
+
+    def _validar_url(self, revision_id):
+        return reverse(
+            'revision-segmentacion-validar',
+            kwargs={'pk': revision_id},
+        )
+
+    def _valid_blood_response(self):
+        return {
+            'objetos': [
+                {
+                    'id': 1,
+                    'tipo': 'membrana',
+                    'puntos': [[1, 1], [10, 1], [10, 10]],
+                },
+                {
+                    'id': 1,
+                    'tipo': 'micronucleo',
+                    'puntos': [[4, 4], [5, 4], [5, 5]],
+                },
+            ],
+        }
+
+    @patch('api.views.segment_image')
+    def test_segmentar_muestra_sangre_success(self, mock_segment_image):
+        muestra = self._create_muestra()
+        raw_response = self._valid_blood_response()
+        mock_segment_image.return_value = raw_response
+
+        response = self.client.post(self._url(muestra.id_muestra))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data['objetos'] == raw_response['objetos']
+        assert response.data['resultado_segmentacion']['estado'] == 'COMPLETADO'
+        assert response.data['resultado_segmentacion']['tipo_muestra'] == SampleType.BLOOD
+        assert response.data['resultado_normalizado']['version'] == '1.1'
+        assert response.data['resultado_normalizado']['sample_type'] == SampleType.BLOOD
+        assert response.data['resultado_normalizado']['summary'] == {
+            'total_objects': 2,
+            'counts_by_label': {
+                'membrana': 1,
+                'micronucleo': 1,
+            },
+        }
+
+        normalized_objects = response.data['resultado_normalizado']['objects']
+        assert [item['id'] for item in normalized_objects] == [1, 2]
+        assert len({item['id'] for item in normalized_objects}) == 2
+        assert [item['label'] for item in normalized_objects] == [
+            'membrana',
+            'micronucleo',
+        ]
+        assert [item['source']['raw_id'] for item in normalized_objects] == [1, 1]
+        assert [item['source']['raw_type'] for item in normalized_objects] == [
+            'membrana',
+            'micronucleo',
+        ]
+
+        mock_segment_image.assert_called_once()
+        sample_type, image_bytes = mock_segment_image.call_args.args[:2]
+        assert sample_type == SampleType.BLOOD
+        assert image_bytes == b'fake blood image bytes'
+        assert mock_segment_image.call_args.kwargs['filename'].endswith('.jpg')
+
+        resultado = ResultadoSegmentacion.objects.get(muestra_sangre=muestra)
+        assert resultado.muestra is None
+        assert resultado.tipo_muestra == SampleType.BLOOD
+        assert resultado.estado == 'COMPLETADO'
+        assert resultado.respuesta_json == raw_response
+        assert resultado.resultado_normalizado == response.data['resultado_normalizado']
+
+    @patch('api.views.segment_image')
+    def test_segmentar_muestra_sangre_timeout_creates_error_result(
+        self,
+        mock_segment_image,
+    ):
+        muestra = self._create_muestra()
+        mock_segment_image.side_effect = SegmentationTimeoutError('timeout')
+
+        response = self.client.post(self._url(muestra.id_muestra))
+
+        assert response.status_code == status.HTTP_504_GATEWAY_TIMEOUT
+        resultado = ResultadoSegmentacion.objects.get(muestra_sangre=muestra)
+        assert resultado.estado == 'ERROR'
+        assert resultado.tipo_muestra == SampleType.BLOOD
+        assert resultado.muestra is None
+        assert resultado.resultado_normalizado is None
+        assert 'timeout' in resultado.error
+
+    @patch('api.views.segment_image')
+    def test_segmentar_muestra_sangre_invalid_label_creates_error_result(
+        self,
+        mock_segment_image,
+    ):
+        muestra = self._create_muestra()
+        mock_segment_image.return_value = {
+            'objetos': [
+                {
+                    'id': 1,
+                    'tipo': 'nucleo',
+                    'puntos': [[1, 1], [10, 1], [10, 10]],
+                }
+            ],
+        }
+
+        response = self.client.post(self._url(muestra.id_muestra))
+
+        assert response.status_code == status.HTTP_502_BAD_GATEWAY
+        resultado = ResultadoSegmentacion.objects.get(muestra_sangre=muestra)
+        assert resultado.estado == 'ERROR'
+        assert resultado.resultado_normalizado is None
+        assert resultado.respuesta_json['objetos'][0]['tipo'] == 'nucleo'
+        assert 'label no es valido' in resultado.error
+
+    @patch('api.views.segment_image')
+    def test_segmentar_muestra_sangre_invalid_geometry_creates_error_result(
+        self,
+        mock_segment_image,
+    ):
+        muestra = self._create_muestra()
+        mock_segment_image.return_value = {
+            'objetos': [
+                {
+                    'id': 1,
+                    'tipo': 'membrana',
+                    'puntos': [[1, 1], [10, 1]],
+                }
+            ],
+        }
+
+        response = self.client.post(self._url(muestra.id_muestra))
+
+        assert response.status_code == status.HTTP_502_BAD_GATEWAY
+        resultado = ResultadoSegmentacion.objects.get(muestra_sangre=muestra)
+        assert resultado.estado == 'ERROR'
+        assert resultado.resultado_normalizado is None
+        assert 'al menos 3 puntos' in resultado.error
+
+    @patch('api.views.segment_image')
+    def test_resultados_segmentacion_sangre_history(self, mock_segment_image):
+        muestra = self._create_muestra()
+        mock_segment_image.return_value = self._valid_blood_response()
+
+        first = self.client.post(self._url(muestra.id_muestra))
+        second = self.client.post(self._url(muestra.id_muestra))
+
+        assert first.status_code == status.HTTP_200_OK
+        assert second.status_code == status.HTTP_200_OK
+
+        response = self.client.get(self._history_url(muestra.id_muestra))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data) == 2
+        assert response.data[0]['tipo_muestra'] == SampleType.BLOOD
+        assert response.data[0]['estado'] == 'COMPLETADO'
+
+    @patch('api.views.segment_image')
+    def test_effective_endpoint_sangre_automatic_and_validated(
+        self,
+        mock_segment_image,
+    ):
+        muestra = self._create_muestra()
+        mock_segment_image.return_value = self._valid_blood_response()
+        segment_response = self.client.post(self._url(muestra.id_muestra))
+        resultado_id = segment_response.data['resultado_segmentacion']['id']
+
+        automatic = self.client.get(self._effective_url(resultado_id))
+
+        assert automatic.status_code == status.HTTP_200_OK
+        assert automatic.data['fuente'] == FUENTE_AUTOMATICO
+        assert automatic.data['resultado']['sample_type'] == SampleType.BLOOD
+
+        resultado = ResultadoSegmentacion.objects.get(
+            pk=resultado_id,
+        )
+        revision = RevisionSegmentacion.objects.create(
+            resultado_segmentacion=resultado,
+            numero_revision=1,
+            estado=RevisionSegmentacion.ESTADO_VALIDADA,
+            resultado_editado={
+                'version': '1.0',
+                'base_result_id': resultado_id,
+                'objects': [
+                    {
+                        'id': 1,
+                        'label': 'micronucleo',
+                        'geometry': {
+                            'type': 'polygon',
+                            'points': [[4, 4], [5, 4], [5, 5]],
+                        },
+                        'provenance': {
+                            'origin': 'manual',
+                            'base_object_id': None,
+                        },
+                    },
+                ],
+            },
+            resumen={
+                'counts_by_label': {
+                    'membrana': 0,
+                    'micronucleo': 1,
+                },
+                'total_objects': 1,
+            },
+            validado_en=timezone.now(),
+        )
+
+        validated = self.client.get(self._effective_url(resultado_id))
+
+        assert validated.status_code == status.HTTP_200_OK
+        assert validated.data['fuente'] == FUENTE_VALIDADA
+        assert validated.data['revision']['id_revision_segmentacion'] == (
+            revision.id_revision_segmentacion
+        )
+        assert validated.data['resumen']['counts_by_label'] == {
+            'membrana': 0,
+            'micronucleo': 1,
+        }
+
+    @patch('api.views.segment_image')
+    def test_blood_revision_can_be_saved_and_validated(self, mock_segment_image):
+        muestra = self._create_muestra()
+        mock_segment_image.return_value = self._valid_blood_response()
+        segment_response = self.client.post(self._url(muestra.id_muestra))
+        resultado_id = segment_response.data['resultado_segmentacion']['id']
+
+        draft_response = self.client.post(self._revisions_url(resultado_id))
+
+        assert draft_response.status_code == status.HTTP_201_CREATED
+        revision_id = draft_response.data['id_revision_segmentacion']
+        snapshot = draft_response.data['resultado_editado']
+        snapshot['objects'][0]['geometry']['points'] = [
+            [2, 2],
+            [12, 2],
+            [12, 12],
+        ]
+
+        patch_response = self.client.patch(
+            self._revision_url(revision_id),
+            {'resultado_editado': snapshot},
+            format='json',
+        )
+
+        assert patch_response.status_code == status.HTTP_200_OK
+        assert patch_response.data['resumen']['counts_by_label'] == {
+            'membrana': 1,
+            'micronucleo': 1,
+        }
+
+        validar_response = self.client.post(self._validar_url(revision_id))
+
+        assert validar_response.status_code == status.HTTP_200_OK
+        assert validar_response.data['estado'] == RevisionSegmentacion.ESTADO_VALIDADA
+
+        effective_response = self.client.get(self._effective_url(resultado_id))
+
+        assert effective_response.status_code == status.HTTP_200_OK
+        assert effective_response.data['fuente'] == FUENTE_VALIDADA
 
 
 class MuestraSalivaSegmentationResultsReadTests(APITestCase):

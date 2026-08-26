@@ -198,6 +198,6 @@ SEGMENTATION_SERVICES = {
     },
     'SANGRE': {
         'url': env('BLOOD_SEGMENTATION_SERVICE_URL', default='http://localhost:8002'),
-        'timeout': env.int('BLOOD_SERVICE_TIMEOUT', default=30),
+        'timeout': env.int('BLOOD_SERVICE_TIMEOUT', default=240),
     },
 }

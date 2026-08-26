@@ -5,5 +5,24 @@ numpy
 opencv-python-headless
 scikit-image
 scikit-learn
-# cellpose: instalar con --> pip install -e ./cellpose
- 
+tqdm
+scipy
+
+# Exposes segmentacion_core/cellpose as the top-level import package "cellpose".
+# Do not install external "cellpose" from PyPI for this microservice.
+-e .
+
+# Runtime dependencies used by the vendored BLOOD Cellpose import/inference path.
+fastremap
+fill-voids
+roifile
+
+# Official Segment Anything implementation required by the vendored Cellpose-SAM code.
+# The PyPI package named "segment-anything" is not used here because it does not prove
+# the original facebookresearch source in this environment audit.
+segment-anything @ https://github.com/facebookresearch/segment-anything/archive/refs/heads/main.zip
+
+# PyTorch must remain CPU-only in the local sicam environment.
+# Install or update torch/torchvision only with an explicit compatibility check.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torchvision==0.27.1+cpu

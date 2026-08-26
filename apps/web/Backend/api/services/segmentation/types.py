@@ -21,7 +21,7 @@ SEGMENTATION_TYPE_CONFIG = {
     SampleType.BLOOD: {
         'sample_type': SampleType.BLOOD,
         'allowed_labels': ('membrana', 'micronucleo'),
-        'supports_segmentation': False,
+        'supports_segmentation': True,
         'supports_expert_review': True,
         'normalizer': 'default_polygon_objects',
     },

@@ -230,9 +230,9 @@ python manage.py test
 git diff --check
 ```
 
-## Pendiente para Sprint 16B
+## Actualizacion Sprint 16B
 
-Sprint 16B deberia encargarse de conectar el flujo Django hacia `apps/segmentation-blood`:
+Sprint 16B conecto el flujo Django hacia `apps/segmentation-blood`:
 
 - endpoint Django para segmentar una `MuestraSangre`;
 - lectura de bytes de `MuestraSangre.imagen`;
@@ -240,3 +240,5 @@ Sprint 16B deberia encargarse de conectar el flujo Django hacia `apps/segmentati
 - normalizacion `sample_type="SANGRE"`;
 - persistencia de `ResultadoSegmentacion(muestra_sangre=...)`;
 - pruebas con mocks, sin levantar el microservicio real.
+
+Queda pendiente para Sprint 16C la integracion frontend de sangre.

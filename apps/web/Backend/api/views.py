@@ -22,6 +22,7 @@ from .models import (
     AnalisisPred,
     Caso,
     MuestraSaliva,
+    MuestraSangre,
     Paciente,
     ResultadoSegmentacion,
     RevisionSegmentacion,
@@ -31,6 +32,7 @@ from .serializers import (
     CasoSerializer, 
     AnalisisSerializer,
     MuestraSalivaSerializer,
+    MuestraSangreSerializer,
     ResultadoSegmentacionSerializer,
     RevisionSegmentacionSerializer,
 )
@@ -42,7 +44,10 @@ from .services.segmentation.exceptions import (
 )
 from .services.segmentation.factory import segment_image
 from .services.segmentation.effective import resolve_effective_segmentation
-from .services.segmentation.normalizers import normalize_segmentation_result
+from .services.segmentation.normalizers import (
+    normalize_segmentation_result,
+    validate_normalized_segmentation_result,
+)
 from .services.segmentation.revisions import (
     build_revision_snapshot_from_normalized,
     calculate_revision_summary,
@@ -56,6 +61,14 @@ from .services.segmentation.types import (
 
 
 SUMMARY_LABELS = get_allowed_revision_labels(SampleType.SALIVA)
+
+
+SEGMENTATION_ERROR_STATUS_MAP = {
+    SegmentationTimeoutError: status.HTTP_504_GATEWAY_TIMEOUT,
+    SegmentationConnectionError: status.HTTP_503_SERVICE_UNAVAILABLE,
+    InvalidSegmentationResponseError: status.HTTP_502_BAD_GATEWAY,
+    SegmentationServiceError: status.HTTP_502_BAD_GATEWAY,
+}
 
 
 def _is_valid_number(value):
@@ -101,6 +114,65 @@ def _extract_valid_summary(summary):
         },
         'total_objects': total_objects,
     }
+
+
+def _read_muestra_image(muestra):
+    if not muestra.imagen:
+        raise ValueError('La muestra no tiene imagen asociada')
+
+    try:
+        muestra.imagen.open('rb')
+        try:
+            image_bytes = muestra.imagen.read()
+        finally:
+            muestra.imagen.close()
+    except (OSError, ValueError) as exc:
+        raise ValueError(
+            f'No se pudo leer la imagen de la muestra: {str(exc)}'
+        )
+
+    if not image_bytes:
+        raise ValueError('La imagen de la muestra esta vacia')
+
+    return image_bytes
+
+
+def _create_segmentation_result(
+    *,
+    muestra=None,
+    muestra_sangre=None,
+    sample_type,
+    raw_result=None,
+    normalized_result=None,
+    estado='COMPLETADO',
+    error=None,
+):
+    return ResultadoSegmentacion.objects.create(
+        muestra=muestra,
+        muestra_sangre=muestra_sangre,
+        tipo_muestra=sample_type,
+        respuesta_json=raw_result or {},
+        resultado_normalizado=normalized_result,
+        estado=estado,
+        error=error,
+    )
+
+
+def _build_segmentation_response(result, resultado, normalized_result):
+    return {
+        **result,
+        'resultado_segmentacion': {
+            'id': resultado.id_resultado_segmentacion,
+            'estado': resultado.estado,
+            'tipo_muestra': resultado.tipo_muestra,
+            'creado_en': resultado.creado_en.isoformat(),
+        },
+        'resultado_normalizado': normalized_result,
+    }
+
+
+def _controlled_segmentation_error(exc):
+    return str(exc) or 'Error al solicitar segmentacion'
 
 
 def _get_or_create_revision_draft(resultado_segmentacion_id):
@@ -300,27 +372,11 @@ class MuestraSalivaViewSet(viewsets.ModelViewSet):
         """Solicitar segmentacion de una muestra de saliva existente."""
         muestra = self.get_object()
 
-        if not muestra.imagen:
-            return Response(
-                {'error': 'La muestra no tiene imagen asociada'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
         try:
-            muestra.imagen.open('rb')
-            try:
-                image_bytes = muestra.imagen.read()
-            finally:
-                muestra.imagen.close()
-        except (OSError, ValueError) as exc:
+            image_bytes = _read_muestra_image(muestra)
+        except ValueError as exc:
             return Response(
-                {'error': f'No se pudo leer la imagen de la muestra: {str(exc)}'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        if not image_bytes:
-            return Response(
-                {'error': 'La imagen de la muestra esta vacia'},
+                {'error': str(exc)},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -373,12 +429,11 @@ class MuestraSalivaViewSet(viewsets.ModelViewSet):
             )
 
         try:
-            resultado = ResultadoSegmentacion.objects.create(
+            resultado = _create_segmentation_result(
                 muestra=muestra,
-                tipo_muestra=SampleType.SALIVA,
-                respuesta_json=result,
-                resultado_normalizado=normalized_result,
-                estado='COMPLETADO',
+                sample_type=SampleType.SALIVA,
+                raw_result=result,
+                normalized_result=normalized_result,
             )
         except Exception:
             return Response(
@@ -386,18 +441,164 @@ class MuestraSalivaViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-        response_data = {
-            **result,
-            'resultado_segmentacion': {
-                'id': resultado.id_resultado_segmentacion,
-                'estado': resultado.estado,
-                'tipo_muestra': resultado.tipo_muestra,
-                'creado_en': resultado.creado_en.isoformat(),
-            },
-            'resultado_normalizado': normalized_result,
-        }
+        return Response(
+            _build_segmentation_response(result, resultado, normalized_result),
+            status=status.HTTP_200_OK,
+        )
 
-        return Response(response_data, status=status.HTTP_200_OK)
+
+class MuestraSangreViewSet(viewsets.ModelViewSet):
+    queryset = MuestraSangre.objects.all()
+    serializer_class = MuestraSangreSerializer
+    parser_classes = (MultiPartParser, FormParser)
+
+    def create(self, request, *args, **kwargs):
+        """Crear nueva muestra de sangre con imagen."""
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get'], url_path='resultados-segmentacion')
+    def resultados_segmentacion(self, request, pk=None):
+        """Consultar resultados de segmentacion asociados a la muestra."""
+        muestra = self.get_object()
+        resultados = muestra.resultados_segmentacion.order_by(
+            '-creado_en',
+            '-id_resultado_segmentacion'
+        )
+        serializer = ResultadoSegmentacionSerializer(resultados, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'])
+    def segmentar(self, request, pk=None):
+        """Solicitar segmentacion de una muestra de sangre existente."""
+        muestra = self.get_object()
+
+        try:
+            image_bytes = _read_muestra_image(muestra)
+        except ValueError as exc:
+            return Response(
+                {'error': str(exc)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            result = segment_image(
+                SampleType.BLOOD,
+                image_bytes,
+                filename=muestra.imagen.name
+            )
+        except tuple(SEGMENTATION_ERROR_STATUS_MAP.keys()) as exc:
+            error_message = _controlled_segmentation_error(exc)
+            resultado = _create_segmentation_result(
+                muestra_sangre=muestra,
+                sample_type=SampleType.BLOOD,
+                estado='ERROR',
+                error=error_message,
+            )
+            return Response(
+                {
+                    'error': error_message,
+                    'resultado_segmentacion': {
+                        'id': resultado.id_resultado_segmentacion,
+                        'estado': resultado.estado,
+                        'tipo_muestra': resultado.tipo_muestra,
+                        'creado_en': resultado.creado_en.isoformat(),
+                    },
+                },
+                status=SEGMENTATION_ERROR_STATUS_MAP[type(exc)],
+            )
+        except Exception:
+            error_message = 'Error inesperado al solicitar segmentacion'
+            resultado = _create_segmentation_result(
+                muestra_sangre=muestra,
+                sample_type=SampleType.BLOOD,
+                estado='ERROR',
+                error=error_message,
+            )
+            return Response(
+                {
+                    'error': error_message,
+                    'resultado_segmentacion': {
+                        'id': resultado.id_resultado_segmentacion,
+                        'estado': resultado.estado,
+                        'tipo_muestra': resultado.tipo_muestra,
+                        'creado_en': resultado.creado_en.isoformat(),
+                    },
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        try:
+            normalized_result = normalize_segmentation_result(
+                result,
+                sample_type=SampleType.BLOOD
+            )
+            validate_normalized_segmentation_result(
+                normalized_result,
+                sample_type=SampleType.BLOOD
+            )
+        except ValueError as exc:
+            error_message = str(exc)
+            resultado = _create_segmentation_result(
+                muestra_sangre=muestra,
+                sample_type=SampleType.BLOOD,
+                raw_result=result,
+                estado='ERROR',
+                error=error_message,
+            )
+            return Response(
+                {
+                    'error': error_message,
+                    'resultado_segmentacion': {
+                        'id': resultado.id_resultado_segmentacion,
+                        'estado': resultado.estado,
+                        'tipo_muestra': resultado.tipo_muestra,
+                        'creado_en': resultado.creado_en.isoformat(),
+                    },
+                },
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+        except Exception:
+            error_message = 'Error inesperado al normalizar resultado de segmentacion'
+            resultado = _create_segmentation_result(
+                muestra_sangre=muestra,
+                sample_type=SampleType.BLOOD,
+                raw_result=result,
+                estado='ERROR',
+                error=error_message,
+            )
+            return Response(
+                {
+                    'error': error_message,
+                    'resultado_segmentacion': {
+                        'id': resultado.id_resultado_segmentacion,
+                        'estado': resultado.estado,
+                        'tipo_muestra': resultado.tipo_muestra,
+                        'creado_en': resultado.creado_en.isoformat(),
+                    },
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        try:
+            resultado = _create_segmentation_result(
+                muestra_sangre=muestra,
+                sample_type=SampleType.BLOOD,
+                raw_result=result,
+                normalized_result=normalized_result,
+            )
+        except Exception:
+            return Response(
+                {'error': 'Error al persistir resultado de segmentacion'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        return Response(
+            _build_segmentation_response(result, resultado, normalized_result),
+            status=status.HTTP_200_OK,
+        )
 
 
 class ResultadoSegmentacionViewSet(viewsets.GenericViewSet):

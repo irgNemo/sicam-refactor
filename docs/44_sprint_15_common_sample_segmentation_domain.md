@@ -135,11 +135,11 @@ SANGRE:
   allowed_labels:
     - membrana
     - micronucleo
-  supports_segmentation: false
+  supports_segmentation: true
   supports_expert_review: true
 ```
 
-`supports_segmentation: false` en `SANGRE` significa que Django aun no tiene flujo E2E de muestra de sangre, endpoint propio ni persistencia relacional para sangre. No significa que el cliente del microservicio de sangre haya sido eliminado.
+Actualizacion Sprint 16B: `supports_segmentation: true` en `SANGRE` significa que Django ya tiene endpoint backend para segmentar `MuestraSangre` usando el cliente de sangre. La UI de sangre queda pendiente.
 
 Se actualizaron:
 
@@ -249,9 +249,10 @@ Para sangre, el mismo contrato puede usar:
 
 Actualizacion Sprint 16A: ya existe una solucion transicional de persistencia relacional para sangre mediante `MuestraSangre` y `ResultadoSegmentacion.muestra_sangre`. `ResultadoSegmentacion.muestra` se preserva para saliva.
 
+Actualizacion Sprint 16B: ya existe endpoint backend para segmentar `MuestraSangre`; todavia falta integracion frontend.
+
 Antes de activar un flujo real de sangre todavia se requiere definir:
 
-- endpoint Django para segmentar una muestra de sangre;
 - origen de imagenes de sangre en frontend;
 - filtros de galeria por tipo de muestra;
 - resumen de caso combinando saliva y sangre;
@@ -263,7 +264,7 @@ Antes de activar un flujo real de sangre todavia se requiere definir:
 - `ResultadoSegmentacion` ya puede apuntar a `MuestraSaliva` o `MuestraSangre`, pero usa una estrategia transicional de dos FK y todavia no existe un modelo comun `ImagenMuestra`.
 - El frontend puede renderizar configuracion para `SANGRE`, pero no tiene todavia galeria ni flujo de carga de muestras de sangre.
 - El microservicio de sangre puede cargar modelos pesados al arrancar; este sprint no lo ejecuta.
-- `supports_segmentation` para `SANGRE` queda desactivado a nivel de dominio Django hasta que exista endpoint/ruta E2E.
+- `supports_segmentation` para `SANGRE` ya esta activo a nivel de backend Django; falta integracion UI.
 - Los historicos existentes no se migraron ni se recalcularon.
 
 ## Pruebas agregadas
@@ -332,10 +333,10 @@ Nota: el primer intento dentro del sandbox fallo por el bloqueo conocido de Vite
 
 ## Sprint siguiente recomendado
 
-Sprint 16A resolvio el cambio relacional minimo con `MuestraSangre` y una estrategia transicional compatible con `MuestraSaliva`.
+Sprint 16A resolvio el cambio relacional minimo con `MuestraSangre` y una estrategia transicional compatible con `MuestraSaliva`. Sprint 16B agrego el endpoint backend de segmentacion de sangre.
 
 Los siguientes sprints deberian decidir si:
 
 - se mantiene la estrategia transicional de dos FK mientras se integra sangre;
-- se agrega endpoint Django para sangre sobre `MuestraSangre`;
+- se agrega UI para sangre sobre `MuestraSangre`;
 - se evalua mas adelante un modelo comun `ImagenMuestra` con una migracion mas amplia.

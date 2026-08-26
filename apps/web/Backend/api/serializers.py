@@ -3,6 +3,7 @@ from .models import (
     AnalisisPred,
     Caso,
     MuestraSaliva,
+    MuestraSangre,
     Paciente,
     ResultadoAnalisis,
     ResultadoSegmentacion,
@@ -27,6 +28,13 @@ class MuestraSalivaSerializer(serializers.ModelSerializer):
     class Meta:
         model = MuestraSaliva
         fields = '__all__'
+
+
+class MuestraSangreSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MuestraSangre
+        fields = '__all__'
+
 
 class ResultadoAnalisisSerializer(serializers.ModelSerializer):
     class Meta:

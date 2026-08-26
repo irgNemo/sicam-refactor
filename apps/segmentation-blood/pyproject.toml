@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sicam-segmentation-blood-cellpose-vendor"
+version = "0.1.0"
+description = "Local packaging for the vendored Cellpose runtime used by SICAM blood segmentation."
+requires-python = ">=3.10"
+
+[tool.setuptools]
+packages = ["cellpose", "cellpose.contrib"]
+package-dir = { "cellpose" = "segmentacion_core/cellpose" }

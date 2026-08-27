@@ -38,32 +38,66 @@
       <!-- GALERÍA -->
       <div class="gallery-column">
         <div class="gallery-header">
-          <h3>Galería</h3>
+          <div class="gallery-title-group">
+            <h3>Galería</h3>
+            <span>{{ activeSampleTypeDisplayName }}</span>
+          </div>
           <span class="gallery-count">{{ imagenes.length }}</span>
         </div>
 
-        <div class="gallery-grid">
-          <div
-            v-for="muestra in imagenes"
-            :key="muestra.id_muestra"
-            class="thumb"
-            :class="{ active: muestra === imagenSeleccionada }"
-            @click="selectImagen(muestra)"
+        <div class="sample-type-tabs" role="tablist" aria-label="Tipo de muestra">
+          <button
+            v-for="tab in sampleTypeTabs"
+            :key="tab.sampleType"
+            type="button"
+            class="sample-type-tab"
+            :class="{ active: activeSampleType === tab.sampleType }"
+            :aria-selected="activeSampleType === tab.sampleType"
+            :disabled="segmentacionLoading"
+            role="tab"
+            @click="setActiveSampleType(tab.sampleType)"
           >
-            <img
-              :src="muestra.imagen"
-              alt="Muestra"
-            />
-            <div class="thumb-overlay">
-              <span class="thumb-id">#{{ muestra.id_muestra }}</span>
-            </div>
+            {{ tab.displayName }}
+          </button>
+        </div>
+
+        <div class="gallery-grid">
+          <div v-if="galleryLoading" class="empty-gallery">
+            <div class="empty-icon">🖼️</div>
+            <p>Cargando muestras...</p>
           </div>
 
-          <div v-if="imagenes.length === 0" class="empty-gallery">
+          <div v-else-if="galleryError" class="empty-gallery error">
             <div class="empty-icon">🖼️</div>
-            <p>No hay imágenes disponibles</p>
-            <span>Seleccione un caso válido</span>
+            <p>{{ galleryError }}</p>
           </div>
+
+          <template v-else>
+            <div
+              v-for="muestra in imagenes"
+              :key="sampleKey(muestra)"
+              class="thumb"
+              :class="{
+                active: isSelectedSample(muestra),
+                disabled: segmentacionLoading && !isSelectedSample(muestra),
+              }"
+              @click="selectImagen(muestra)"
+            >
+              <img
+                :src="muestra.imagen"
+                alt="Muestra"
+              />
+              <div class="thumb-overlay">
+                <span class="thumb-id">#{{ muestra.id_muestra }}</span>
+              </div>
+            </div>
+
+            <div v-if="imagenes.length === 0" class="empty-gallery">
+              <div class="empty-icon">🖼️</div>
+              <p>{{ emptyGalleryTitle }}</p>
+              <span>{{ emptyGallerySubtitle }}</span>
+            </div>
+          </template>
         </div>
       </div>
 
@@ -75,7 +109,7 @@
           <div class="card-header">
             <div class="card-title-section">
               <h3>
-                {{ imagenSeleccionada ? 'Muestra #' + imagenSeleccionada.id_muestra : 'Vista previa' }}
+                {{ imagenSeleccionada ? activeSampleTypeDisplayName + ' #' + imagenSeleccionada.id_muestra : 'Vista previa' }}
               </h3>
               <span v-if="imagenSeleccionada" class="card-subtitle">
                 Análisis microscópico
@@ -463,6 +497,9 @@
                 :segmentacion-error="segmentacionError"
                 :segmentacion-metadata="segmentacionMetadata"
                 :segmentacion-objetos-count="segmentacionObjetosCount"
+                :active-sample-type="activeSampleType"
+                :active-sample-type-display-name="activeSampleTypeDisplayName"
+                :is-blood-sample-type="isBloodSampleType"
                 :effective-segmentation-loading="effectiveSegmentationLoading"
                 :effective-segmentation-error="effectiveSegmentationError"
                 :effective-segmentation="effectiveSegmentation"
@@ -506,6 +543,7 @@ import SegmentationImageControls from "./segmentation/SegmentationImageControls.
 import SegmentationOverlay from "./segmentation/SegmentationOverlay.vue";
 import SegmentationResultPanel from "./segmentation/SegmentationResultPanel.vue";
 import {
+  listarMuestras,
   obtenerResultadosSegmentacion,
   segmentarMuestra,
 } from "../services/segmentationService";
@@ -550,7 +588,7 @@ const VERTEX_NEIGHBOR_RADIUS = 3;
 
 export default {
   name: "MainContent",
-  emits: ["segmentation-completed"],
+  emits: ["sample-type-changed", "segmentation-completed"],
   components: {
     OverlayLayersCard,
     SegmentationCountSummary,
@@ -569,6 +607,10 @@ export default {
       type: Number,
       default: null,
     },
+    activeSampleType: {
+      type: String,
+      default: SAMPLE_TYPES.SALIVA,
+    },
   },
 
   setup() {
@@ -581,6 +623,9 @@ export default {
   data() {
     return {
       analisis: [],
+      muestrasSangre: [],
+      muestrasSangreLoading: false,
+      muestrasSangreError: "",
       loading: true,
       imagenSeleccionada: null,
       segmentacionLoading: false,
@@ -624,7 +669,62 @@ export default {
     },
 
     imagenes() {
-      return this.analisisActual?.muestras_saliva || [];
+      if (!this.analisisActual) return [];
+
+      if (this.activeSampleType === SAMPLE_TYPES.BLOOD) {
+        return this.muestrasSangre.filter(
+          muestra => Number(muestra.analisis) === Number(this.analisisActual.id_analisis)
+        );
+      }
+
+      return this.analisisActual.muestras_saliva || [];
+    },
+
+    sampleTypeTabs() {
+      return [SAMPLE_TYPES.SALIVA, SAMPLE_TYPES.BLOOD].map(sampleType => ({
+        sampleType,
+        displayName: getSegmentationTypeConfig(sampleType).displayName,
+      }));
+    },
+
+    activeSampleTypeDisplayName() {
+      return this.activeSegmentationConfig.displayName || this.activeSampleType;
+    },
+
+    isBloodSampleType() {
+      return this.activeSampleType === SAMPLE_TYPES.BLOOD;
+    },
+
+    galleryLoading() {
+      return this.activeSampleType === SAMPLE_TYPES.BLOOD
+        ? this.muestrasSangreLoading
+        : this.loading;
+    },
+
+    galleryError() {
+      return this.activeSampleType === SAMPLE_TYPES.BLOOD
+        ? this.muestrasSangreError
+        : "";
+    },
+
+    emptyGalleryTitle() {
+      if (!this.patientId || !this.caseId) {
+        return "No hay imágenes disponibles";
+      }
+
+      return this.activeSampleType === SAMPLE_TYPES.BLOOD
+        ? "No hay muestras de sangre cargadas."
+        : "No hay muestras de saliva cargadas.";
+    },
+
+    emptyGallerySubtitle() {
+      if (!this.patientId || !this.caseId) {
+        return "Seleccione un caso válido";
+      }
+
+      return this.activeSampleType === SAMPLE_TYPES.BLOOD
+        ? "Cargue muestras de sangre desde Registro o API."
+        : "Cargue muestras de saliva desde Registro.";
     },
 
     segmentacionMetadata() {
@@ -659,15 +759,6 @@ export default {
 
     resultadoNormalizadoActivo() {
       return this.resultadoSegmentacionActivo?.resultado_normalizado || null;
-    },
-
-    activeSampleType() {
-      return (
-        this.resultadoSegmentacionActivo?.tipo_muestra ||
-        this.resultadoSegmentacionActivo?.resultado_segmentacion?.tipo_muestra ||
-        this.resultadoNormalizadoActivo?.sample_type ||
-        SAMPLE_TYPES.SALIVA
-      );
     },
 
     activeSegmentationConfig() {
@@ -1206,7 +1297,7 @@ export default {
       }
     },
 
-    activeSampleType() {
+    activeSampleType(newType, oldType) {
       const allowedLabels = this.editableDrawingLabels.map(
         labelConfig => labelConfig.label
       );
@@ -1214,11 +1305,100 @@ export default {
       if (!allowedLabels.includes(this.drawingLabel)) {
         this.drawingLabel = this.activeSegmentationConfig.defaultDrawingLabel;
       }
+
+      if (newType !== oldType) {
+        this.resetCurrentSampleState();
+
+        if (newType === SAMPLE_TYPES.BLOOD && !this.muestrasSangre.length) {
+          this.cargarMuestrasSangre();
+        }
+
+        this.$nextTick(() => {
+          this.selectImagen(this.imagenes[0] || null);
+        });
+      }
     },
   },
 
   methods: {
+    sampleKey(muestra) {
+      return `${this.activeSampleType}-${muestra?.id_muestra || "sin-id"}`;
+    },
+
+    isSelectedSample(muestra) {
+      return Boolean(
+        this.imagenSeleccionada &&
+        muestra &&
+        this.imagenSeleccionada.id_muestra === muestra.id_muestra
+      );
+    },
+
+    isCurrentSample(muestraId, sampleType = this.activeSampleType) {
+      return Boolean(
+        this.imagenSeleccionada &&
+        this.imagenSeleccionada.id_muestra === muestraId &&
+        this.activeSampleType === sampleType
+      );
+    },
+
+    setActiveSampleType(sampleType) {
+      if (
+        sampleType === this.activeSampleType ||
+        !this.sampleTypeTabs.some(tab => tab.sampleType === sampleType) ||
+        this.segmentacionLoading
+      ) {
+        return;
+      }
+
+      if (this.hasPendingDraftWork && !this.confirmDiscardDraftChanges()) {
+        return;
+      }
+
+      this.$emit("sample-type-changed", sampleType);
+    },
+
+    resetCurrentSampleState() {
+      this.imagenSeleccionada = null;
+      this.segmentacionResultado = null;
+      this.segmentacionError = "";
+      this.historialSegmentacion = [];
+      this.historialError = "";
+      this.historialLoading = false;
+      this.clearEffectiveSegmentation();
+      this.resetImageMeasurements();
+      this.resetImageView();
+      this.resetEditorState({ clearRevision: true });
+      this.overlayLabelVisibility = {};
+      this.drawingLabel = this.activeSegmentationConfig.defaultDrawingLabel;
+    },
+
+    async cargarMuestrasSangre() {
+      this.muestrasSangreLoading = true;
+      this.muestrasSangreError = "";
+
+      try {
+        const response = await listarMuestras(SAMPLE_TYPES.BLOOD);
+        this.muestrasSangre = Array.isArray(response.data)
+          ? response.data
+          : [];
+      } catch (error) {
+        console.error("Error al cargar muestras de sangre:", error);
+        this.muestrasSangre = [];
+        this.muestrasSangreError = "No fue posible cargar muestras de sangre";
+      } finally {
+        this.muestrasSangreLoading = false;
+      }
+    },
+
     selectImagen(muestra) {
+      if (
+        this.segmentacionLoading &&
+        this.imagenSeleccionada &&
+        muestra?.id_muestra !== this.imagenSeleccionada.id_muestra
+      ) {
+        return;
+      }
+
       if (
         this.imagenSeleccionada &&
         muestra?.id_muestra !== this.imagenSeleccionada.id_muestra &&
@@ -1231,7 +1411,6 @@ export default {
       this.imagenSeleccionada = muestra;
       this.segmentacionResultado = null;
       this.segmentacionError = "";
-      this.segmentacionLoading = false;
       this.historialSegmentacion = [];
       this.historialError = "";
       this.historialLoading = false;
@@ -1240,21 +1419,22 @@ export default {
       this.resetImageView();
       this.resetEditorState({ clearRevision: true });
       this.overlayLabelVisibility = {};
+      this.drawingLabel = this.activeSegmentationConfig.defaultDrawingLabel;
 
       if (muestra) {
-        this.cargarHistorialSegmentacion(muestra.id_muestra);
+        this.cargarHistorialSegmentacion(muestra.id_muestra, this.activeSampleType);
         this.$nextTick(this.updateImageMeasurements);
       }
     },
 
-    async cargarHistorialSegmentacion(muestraId) {
+    async cargarHistorialSegmentacion(muestraId, sampleType = this.activeSampleType) {
       this.historialLoading = true;
       this.historialError = "";
 
       try {
-        const response = await obtenerResultadosSegmentacion(muestraId);
+        const response = await obtenerResultadosSegmentacion(muestraId, sampleType);
 
-        if (this.imagenSeleccionada?.id_muestra === muestraId) {
+        if (this.isCurrentSample(muestraId, sampleType)) {
           this.historialSegmentacion = Array.isArray(response.data)
             ? response.data
             : [];
@@ -1266,13 +1446,13 @@ export default {
       } catch (error) {
         console.error("Error al cargar historial de segmentacion:", error);
 
-        if (this.imagenSeleccionada?.id_muestra === muestraId) {
+        if (this.isCurrentSample(muestraId, sampleType)) {
           this.historialSegmentacion = [];
           this.historialError =
             error.response?.data?.error || "No fue posible cargar el historial";
         }
       } finally {
-        if (this.imagenSeleccionada?.id_muestra === muestraId) {
+        if (this.isCurrentSample(muestraId, sampleType)) {
           this.historialLoading = false;
         }
       }
@@ -1284,24 +1464,33 @@ export default {
       this.segmentacionLoading = true;
       this.segmentacionResultado = null;
       this.segmentacionError = "";
+      const sampleType = this.activeSampleType;
+      const muestraId = this.imagenSeleccionada.id_muestra;
 
       try {
-        const response = await segmentarMuestra(this.imagenSeleccionada.id_muestra);
+        const response = await segmentarMuestra(muestraId, sampleType);
+        if (!this.isCurrentSample(muestraId, sampleType)) {
+          return;
+        }
         this.segmentacionResultado = response.data;
         this.syncOverlayLabelVisibility();
-        await this.cargarHistorialSegmentacion(this.imagenSeleccionada.id_muestra);
+        await this.cargarHistorialSegmentacion(muestraId, sampleType);
         await this.loadEffectiveSegmentation(this.activeResultadoSegmentacionId);
         this.syncOverlayLabelVisibility();
         this.$emit("segmentation-completed", {
           caseId: this.caseId,
-          muestraId: this.imagenSeleccionada.id_muestra,
+          muestraId,
+          sampleType,
         });
       } catch (error) {
+        if (!this.isCurrentSample(muestraId, sampleType)) return;
         console.error("Error al segmentar muestra:", error);
         this.segmentacionError =
           error.response?.data?.error || "No fue posible segmentar la muestra";
       } finally {
-        this.segmentacionLoading = false;
+        if (this.isCurrentSample(muestraId, sampleType)) {
+          this.segmentacionLoading = false;
+        }
       }
     },
 
@@ -2310,6 +2499,8 @@ export default {
       .finally(() => {
         this.loading = false;
       });
+
+    this.cargarMuestrasSangre();
   },
 
   beforeUnmount() {
@@ -2463,11 +2654,23 @@ export default {
   border-bottom: 2px solid #f0f0f0;
 }
 
+.gallery-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
 .gallery-header h3 {
   margin: 0;
   font-size: 14px;
   font-weight: 600;
   color: #2c3e50;
+}
+
+.gallery-title-group span {
+  color: #64748b;
+  font-size: 11px;
 }
 
 .gallery-count {
@@ -2477,6 +2680,36 @@ export default {
   border-radius: 12px;
   font-size: 11px;
   font-weight: 600;
+}
+
+.sample-type-tabs {
+  display: grid;
+  flex-shrink: 0;
+  gap: 6px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 12px;
+}
+
+.sample-type-tab {
+  background: #f8fafc;
+  border: 1px solid #d9e2ec;
+  border-radius: 8px;
+  color: #52606d;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 7px 8px;
+}
+
+.sample-type-tab.active {
+  background: #e3f2fd;
+  border-color: #1e88e5;
+  color: #1565c0;
+}
+
+.sample-type-tab:disabled {
+  cursor: wait;
+  opacity: 0.65;
 }
 
 .gallery-grid {
@@ -2510,6 +2743,15 @@ export default {
   opacity: 1;
   box-shadow: 0 4px 16px rgba(102, 126, 234, 0.4);
   transform: scale(1.05);
+}
+
+.thumb.disabled {
+  cursor: wait;
+  opacity: 0.45;
+}
+
+.thumb.disabled:hover {
+  transform: none;
 }
 
 .thumb img {
@@ -2563,6 +2805,10 @@ export default {
   font-size: 14px;
   font-weight: 500;
   color: #666;
+}
+
+.empty-gallery.error p {
+  color: #c62828;
 }
 
 .empty-gallery span {

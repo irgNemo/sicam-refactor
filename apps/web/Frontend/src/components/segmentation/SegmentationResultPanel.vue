@@ -5,8 +5,15 @@
       :disabled="segmentacionLoading"
       @click="$emit('run-segmentation')"
     >
-      {{ segmentacionLoading ? 'Segmentando...' : 'Ejecutar segmentacion' }}
+      {{ segmentacionButtonText }}
     </button>
+
+    <div
+      v-if="showLongRunningNotice"
+      class="segmentation-status neutral"
+    >
+      Segmentando muestra de sangre... Este proceso puede tardar varios minutos.
+    </div>
 
     <div v-if="segmentacionError" class="segmentation-status error">
       {{ segmentacionError }}
@@ -138,6 +145,18 @@ export default {
       type: Number,
       required: true,
     },
+    activeSampleType: {
+      type: String,
+      required: true,
+    },
+    activeSampleTypeDisplayName: {
+      type: String,
+      required: true,
+    },
+    isBloodSampleType: {
+      type: Boolean,
+      required: true,
+    },
     effectiveSegmentationLoading: {
       type: Boolean,
       required: true,
@@ -197,6 +216,21 @@ export default {
     ultimoHistorialObjetosCount: {
       type: Number,
       required: true,
+    },
+  },
+  computed: {
+    segmentacionButtonText() {
+      if (this.segmentacionLoading) {
+        return this.isBloodSampleType
+          ? "Segmentando sangre..."
+          : "Segmentando...";
+      }
+
+      return `Ejecutar segmentacion ${this.activeSampleTypeDisplayName.toLowerCase()}`;
+    },
+
+    showLongRunningNotice() {
+      return this.segmentacionLoading && this.isBloodSampleType;
     },
   },
   methods: {

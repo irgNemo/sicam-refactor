@@ -6,6 +6,7 @@ export const SAMPLE_TYPES = {
 export const SEGMENTATION_TYPE_CONFIG = {
   [SAMPLE_TYPES.SALIVA]: {
     sampleType: SAMPLE_TYPES.SALIVA,
+    displayName: "Saliva",
     defaultDrawingLabel: "membrana",
     labels: [
       {
@@ -36,6 +37,7 @@ export const SEGMENTATION_TYPE_CONFIG = {
   },
   [SAMPLE_TYPES.BLOOD]: {
     sampleType: SAMPLE_TYPES.BLOOD,
+    displayName: "Sangre",
     defaultDrawingLabel: "membrana",
     labels: [
       {

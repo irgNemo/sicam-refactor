@@ -1,11 +1,30 @@
 import apiClient from "./apiClient";
+import { SAMPLE_TYPES } from "../domain/segmentationTypes";
 
-export function segmentarMuestra(muestraId) {
-  return apiClient.post(`/api/muestras/${muestraId}/segmentar/`);
+const SAMPLE_ENDPOINTS = {
+  [SAMPLE_TYPES.SALIVA]: "/api/muestras",
+  [SAMPLE_TYPES.BLOOD]: "/api/muestras-sangre",
+};
+
+function getSampleEndpoint(sampleType = SAMPLE_TYPES.SALIVA) {
+  return SAMPLE_ENDPOINTS[sampleType] || SAMPLE_ENDPOINTS[SAMPLE_TYPES.SALIVA];
 }
 
-export function obtenerResultadosSegmentacion(muestraId) {
-  return apiClient.get(`/api/muestras/${muestraId}/resultados-segmentacion/`);
+export function listarMuestras(sampleType = SAMPLE_TYPES.SALIVA) {
+  return apiClient.get(`${getSampleEndpoint(sampleType)}/`);
+}
+
+export function segmentarMuestra(muestraId, sampleType = SAMPLE_TYPES.SALIVA) {
+  return apiClient.post(`${getSampleEndpoint(sampleType)}/${muestraId}/segmentar/`);
+}
+
+export function obtenerResultadosSegmentacion(
+  muestraId,
+  sampleType = SAMPLE_TYPES.SALIVA
+) {
+  return apiClient.get(
+    `${getSampleEndpoint(sampleType)}/${muestraId}/resultados-segmentacion/`
+  );
 }
 
 export function obtenerResumenSegmentacionCaso(casoId) {

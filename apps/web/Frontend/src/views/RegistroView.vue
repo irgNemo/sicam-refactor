@@ -230,6 +230,19 @@
               </div>
 
               <div class="form-group" v-if="formImagenes.analisis">
+                <label>Tipo de muestra *</label>
+                <select v-model="formImagenes.tipoMuestra" required>
+                  <option
+                    v-for="tipo in sampleTypeOptions"
+                    :key="tipo.sampleType"
+                    :value="tipo.sampleType"
+                  >
+                    {{ tipo.displayName }}
+                  </option>
+                </select>
+              </div>
+
+              <div class="form-group" v-if="formImagenes.analisis">
                 <label>Seleccionar Imágenes *</label>
                 <input 
                   type="file" 
@@ -270,7 +283,7 @@
                   class="btn-primary"
                   :disabled="imagenesPreview.length === 0"
                 >
-                  ⬆ Subir {{ imagenesPreview.length }} Imagen{{ imagenesPreview.length !== 1 ? 'es' : '' }}
+                  ⬆ Subir {{ imagenesPreview.length }} Imagen{{ imagenesPreview.length !== 1 ? 'es' : '' }} de {{ selectedSampleTypeDisplayName }}
                 </button>
               </div>
             </form>
@@ -292,6 +305,10 @@
 
 <script>
 import apiClient from '../services/apiClient';
+import {
+  SAMPLE_TYPES,
+  getSegmentationTypeConfig,
+} from '../domain/segmentationTypes';
 
 export default {
   name: 'RegistroView',
@@ -323,6 +340,7 @@ export default {
         paciente: '',
         caso: '',
         analisis: '',
+        tipoMuestra: SAMPLE_TYPES.SALIVA,
         archivos: []
       },
 
@@ -339,6 +357,21 @@ export default {
         tipo: 'success'
       }
     };
+  },
+
+  computed: {
+    sampleTypeOptions() {
+      return [SAMPLE_TYPES.SALIVA, SAMPLE_TYPES.BLOOD].map(sampleType => ({
+        sampleType,
+        displayName: getSegmentationTypeConfig(sampleType).displayName,
+      }));
+    },
+
+    selectedSampleTypeDisplayName() {
+      return getSegmentationTypeConfig(
+        this.formImagenes.tipoMuestra
+      ).displayName.toLowerCase();
+    },
   },
 
   mounted() {
@@ -424,12 +457,15 @@ export default {
 
     async subirImagenes() {
       try {
+        const endpoint = this.formImagenes.tipoMuestra === SAMPLE_TYPES.BLOOD
+          ? '/api/muestras-sangre/'
+          : '/api/muestras/';
         const promises = this.formImagenes.archivos.map(archivo => {
           const formData = new FormData();
           formData.append('imagen', archivo);
           formData.append('analisis', this.formImagenes.analisis);
           
-          return apiClient.post('/api/muestras/', formData, {
+          return apiClient.post(endpoint, formData, {
             headers: { 'Content-Type': 'multipart/form-data' }
           });
         });
@@ -515,6 +551,7 @@ export default {
         paciente: '',
         caso: '',
         analisis: '',
+        tipoMuestra: SAMPLE_TYPES.SALIVA,
         archivos: []
       };
       this.imagenesPreview = [];

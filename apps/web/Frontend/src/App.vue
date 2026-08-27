@@ -12,6 +12,7 @@
     <SideBar
       v-if="seccion === 'segmentacion'"
       ref="sideBar"
+      :active-sample-type="activeSampleType"
       @select-patient="onSelectPatient"
       @select-case="onSelectCase"
     />
@@ -21,6 +22,8 @@
       v-if="seccion === 'segmentacion'"
       :patientId="selectedPatientId"
       :caseId="selectedCaseId"
+      :active-sample-type="activeSampleType"
+      @sample-type-changed="activeSampleType = $event"
       @segmentation-completed="onSegmentationCompleted"
     />
 
@@ -53,6 +56,7 @@ import TopBar from "./components/TopBar.vue";
 import SideBar from "./components/SideBar.vue";
 import MainContent from "./components/MainContent.vue";
 import RegistroView from "./views/RegistroView.vue";
+import { SAMPLE_TYPES } from "./domain/segmentationTypes";
 
 export default {
   name: "App",
@@ -72,6 +76,7 @@ export default {
       // Estado global de selección
       selectedPatientId: null,
       selectedCaseId: null,
+      activeSampleType: SAMPLE_TYPES.SALIVA,
     };
   },
 
@@ -100,6 +105,7 @@ export default {
       if (nueva !== "segmentacion") {
         this.selectedPatientId = null;
         this.selectedCaseId = null;
+        this.activeSampleType = SAMPLE_TYPES.SALIVA;
       }
     },
   },

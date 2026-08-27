@@ -74,7 +74,7 @@
           </div>
           <div class="caso-meta">
             <span class="caso-fecha">📅 {{ formatearFecha(caso.fecha_creacion) }}</span>
-            <span class="caso-imagenes">🖼️ {{ caso.analisis[0]?.muestras_saliva?.length || 0 }} imágenes</span>
+            <span class="caso-imagenes">🖼️ {{ caso.analisis[0]?.muestras_saliva?.length || 0 }} saliva</span>
           </div>
         </div>
       </div>
@@ -90,7 +90,7 @@
     </button>
 
     <!-- RESUMEN GLOBAL -->
-    <div v-if="casoSeleccionado" class="summary-panel">
+    <div v-if="casoSeleccionado && showSalivaCaseSummary" class="summary-panel">
       <h3>Resumen del Caso</h3>
 
       <div v-if="resumenLoading" class="summary-status">
@@ -140,15 +140,31 @@
         {{ resumen.resultadoInvalido }} con resultado no utilizable
       </div>
     </div>
+
+    <div v-else-if="casoSeleccionado" class="summary-panel sample-type-note">
+      <h3>Resumen del Caso</h3>
+      <p>
+        El resumen agregado actual corresponde a muestras de saliva. Las métricas
+        de sangre se revisan desde la muestra seleccionada.
+      </p>
+    </div>
   </aside>
 </template>
 
 <script>
 import apiClient from "../services/apiClient";
 import { obtenerResumenSegmentacionCaso } from "../services/segmentationService";
+import { SAMPLE_TYPES } from "../domain/segmentationTypes";
 
 export default {
   name: "SideBar",
+
+  props: {
+    activeSampleType: {
+      type: String,
+      default: SAMPLE_TYPES.SALIVA,
+    },
+  },
 
   data() {
     return {
@@ -199,7 +215,11 @@ export default {
             analisis: analisisDelCaso
           };
         });
-    }
+    },
+
+    showSalivaCaseSummary() {
+      return this.activeSampleType === SAMPLE_TYPES.SALIVA;
+    },
   },
 
   methods: {
@@ -718,6 +738,14 @@ export default {
   font-size: 12px;
   margin-top: 10px;
   padding: 8px;
+  text-align: center;
+}
+
+.sample-type-note p {
+  color: #52606d;
+  font-size: 12px;
+  line-height: 1.4;
+  margin: 0;
   text-align: center;
 }
 

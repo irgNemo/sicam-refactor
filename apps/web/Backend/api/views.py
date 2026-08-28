@@ -33,6 +33,7 @@ from .serializers import (
     AnalisisSerializer,
     MuestraSalivaSerializer,
     MuestraSangreSerializer,
+    ResultadoCaracterizacionSerializer,
     ResultadoSegmentacionSerializer,
     RevisionSegmentacionSerializer,
 )
@@ -57,6 +58,9 @@ from .services.segmentation.revisions import (
 from .services.segmentation.types import (
     SampleType,
     get_allowed_revision_labels,
+)
+from .services.characterization.service import (
+    get_or_create_resultado_caracterizacion,
 )
 
 
@@ -609,6 +613,44 @@ class ResultadoSegmentacionViewSet(viewsets.GenericViewSet):
     def efectivo(self, request, pk=None):
         resultado = self.get_object()
         return Response(resolve_effective_segmentation(resultado))
+
+    @action(detail=True, methods=['get'], url_path='caracterizaciones')
+    def caracterizaciones(self, request, pk=None):
+        resultado = self.get_object()
+        caracterizaciones = resultado.caracterizaciones.select_related(
+            'resultado_segmentacion',
+            'revision_segmentacion',
+        ).order_by('-created_at', '-id_resultado_caracterizacion')
+        serializer = ResultadoCaracterizacionSerializer(
+            caracterizaciones,
+            many=True,
+        )
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='caracterizar')
+    def caracterizar(self, request, pk=None):
+        resultado = self.get_object()
+
+        try:
+            caracterizacion, created = get_or_create_resultado_caracterizacion(
+                resultado
+            )
+        except ValueError as exc:
+            return Response(
+                {'error': str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except Exception:
+            return Response(
+                {'error': 'Error inesperado al caracterizar resultado'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        serializer = ResultadoCaracterizacionSerializer(caracterizacion)
+        response_status = (
+            status.HTTP_201_CREATED if created else status.HTTP_200_OK
+        )
+        return Response(serializer.data, status=response_status)
 
     @action(detail=True, methods=['get', 'post'], url_path='revisiones')
     def revisiones(self, request, pk=None):

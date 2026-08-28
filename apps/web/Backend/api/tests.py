@@ -7,6 +7,7 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
@@ -23,6 +24,7 @@ from .models import (
     MuestraSaliva,
     MuestraSangre,
     Paciente,
+    ResultadoCaracterizacion,
     ResultadoSegmentacion,
     RevisionSegmentacion,
 )
@@ -46,6 +48,21 @@ from .services.segmentation.effective import (
     FUENTE_AUTOMATICO,
     FUENTE_VALIDADA,
     resolve_effective_segmentation,
+)
+from .services.characterization.geometry import (
+    polygon_area,
+    polygon_perimeter,
+)
+from .services.characterization.service import (
+    characterize_effective_segmentation,
+    characterize_resultado_segmentacion,
+    get_or_create_resultado_caracterizacion,
+    is_characterization_current,
+)
+from .services.characterization.types import (
+    CHARACTERIZATION_ALGORITHM_VERSION,
+    STATUS_BLOCKED_SCIENTIFIC_RULE,
+    STATUS_NOT_DEFINED,
 )
 from .management.commands.seed_demo_data import (
     DEMO_IDENTIFICACION,
@@ -2638,3 +2655,559 @@ class RevisionSegmentacionTests(APITestCase):
 
         assert self.resultado.respuesta_json == original_raw
         assert self.resultado.resultado_normalizado == original_normalized
+
+
+class CharacterizationCoreTests(APITestCase):
+    def setUp(self):
+        self.media_root = tempfile.mkdtemp()
+        self.override = override_settings(MEDIA_ROOT=self.media_root)
+        self.override.enable()
+
+        self.paciente = Paciente.objects.create(
+            nombre='Paciente',
+            apellido='Caracterizacion',
+            fecha_nacimiento=date(1991, 8, 12),
+            identificacion='PAC-CHAR-001',
+        )
+        self.caso = Caso.objects.create(
+            paciente=self.paciente,
+            titulo='Caso caracterizacion',
+        )
+        self.analisis = AnalisisPred.objects.create(
+            id_paciente_fk=self.paciente,
+            id_caso_fk=self.caso,
+        )
+        self.muestra = MuestraSaliva.objects.create(
+            analisis=self.analisis,
+            imagen=SimpleUploadedFile(
+                'char-saliva.jpg',
+                b'fake saliva image',
+                content_type='image/jpeg',
+            ),
+        )
+        self.muestra_sangre = MuestraSangre.objects.create(
+            analisis=self.analisis,
+            imagen=SimpleUploadedFile(
+                'char-blood.jpg',
+                b'fake blood image',
+                content_type='image/jpeg',
+            ),
+        )
+
+    def tearDown(self):
+        self.override.disable()
+        shutil.rmtree(self.media_root, ignore_errors=True)
+
+    def _automatic_saliva_result(self, objects=None):
+        objects = objects if objects is not None else [
+            self._normalized_object(1, 'membrana'),
+            self._normalized_object(2, 'membrana'),
+            self._normalized_object(3, 'nucleo'),
+            self._normalized_object(4, 'micronucleo'),
+        ]
+        return ResultadoSegmentacion.objects.create(
+            muestra=self.muestra,
+            tipo_muestra=SampleType.SALIVA,
+            respuesta_json={'objetos': [{'id': 255}]},
+            resultado_normalizado=self._normalized(
+                SampleType.SALIVA,
+                objects,
+            ),
+            estado='COMPLETADO',
+        )
+
+    def _automatic_blood_result(self):
+        objects = [
+            self._normalized_object(1, 'membrana'),
+            self._normalized_object(2, 'micronucleo'),
+            self._normalized_object(3, 'micronucleo'),
+        ]
+        return ResultadoSegmentacion.objects.create(
+            muestra_sangre=self.muestra_sangre,
+            tipo_muestra=SampleType.BLOOD,
+            respuesta_json={'objetos': []},
+            resultado_normalizado=self._normalized(
+                SampleType.BLOOD,
+                objects,
+            ),
+            estado='COMPLETADO',
+        )
+
+    def _normalized_object(self, object_id, label):
+        return {
+            'id': object_id,
+            'label': label,
+            'geometry': {
+                'type': 'polygon',
+                'points': [[0, 0], [10, 0], [10, 10]],
+            },
+            'source': {
+                'raw_id': 255,
+                'raw_type': label,
+            },
+        }
+
+    def _normalized(self, sample_type, objects):
+        counts_by_label = {}
+        for item in objects:
+            counts_by_label[item['label']] = (
+                counts_by_label.get(item['label'], 0) + 1
+            )
+        return {
+            'version': '1.1',
+            'sample_type': sample_type,
+            'objects': deepcopy(objects),
+            'summary': {
+                'counts_by_label': counts_by_label,
+                'total_objects': len(objects),
+            },
+        }
+
+    def _revision_snapshot(self, resultado, labels):
+        return {
+            'version': '1.0',
+            'base_result_id': resultado.id_resultado_segmentacion,
+            'objects': [
+                {
+                    'id': index,
+                    'label': label,
+                    'geometry': {
+                        'type': 'polygon',
+                        'points': [[0, 0], [5, 0], [5, 5]],
+                    },
+                    'provenance': {
+                        'origin': 'manual',
+                        'base_object_id': None,
+                    },
+                }
+                for index, label in enumerate(labels, start=1)
+            ],
+        }
+
+    def _revision_summary(self, labels):
+        counts = {
+            label: labels.count(label)
+            for label in get_allowed_revision_labels(SampleType.SALIVA)
+        }
+        return {
+            'counts_by_label': counts,
+            'total_objects': len(labels),
+        }
+
+    def _create_revision(self, resultado, estado, labels, numero_revision=1):
+        return RevisionSegmentacion.objects.create(
+            resultado_segmentacion=resultado,
+            numero_revision=numero_revision,
+            estado=estado,
+            resultado_editado=self._revision_snapshot(resultado, labels),
+            resumen=self._revision_summary(labels),
+            validado_en=(
+                timezone.now()
+                if estado == RevisionSegmentacion.ESTADO_VALIDADA
+                else None
+            ),
+        )
+
+    def _characterize_url(self, resultado):
+        return reverse(
+            'resultado-segmentacion-caracterizar',
+            kwargs={'pk': resultado.id_resultado_segmentacion},
+        )
+
+    def _characterizations_url(self, resultado):
+        return reverse(
+            'resultado-segmentacion-caracterizaciones',
+            kwargs={'pk': resultado.id_resultado_segmentacion},
+        )
+
+    def test_polygon_geometry_primitives_are_pure(self):
+        square = [[0, 0], [10, 0], [10, 10], [0, 10]]
+
+        assert polygon_area(square) == 100
+        assert polygon_perimeter(square) == 40
+
+    def test_saliva_automatic_characterization_uses_effective_result(self):
+        resultado = self._automatic_saliva_result()
+        original_raw = deepcopy(resultado.respuesta_json)
+        original_normalized = deepcopy(resultado.resultado_normalizado)
+
+        caracterizacion = characterize_resultado_segmentacion(resultado)
+
+        assert caracterizacion.source_type == FUENTE_AUTOMATICO
+        assert caracterizacion.revision_segmentacion is None
+        assert caracterizacion.sample_type == SampleType.SALIVA
+        assert (
+            caracterizacion.algorithm_version
+            == CHARACTERIZATION_ALGORITHM_VERSION
+        )
+        assert caracterizacion.resultado_json['version'] == (
+            CHARACTERIZATION_ALGORITHM_VERSION
+        )
+        assert caracterizacion.resultado_json['counts'] == {
+            'membrana': 2,
+            'nucleo': 1,
+            'micronucleo': 1,
+        }
+        assert caracterizacion.resultado_json['indices'] == {
+            'genotoxicity_index': 0.5,
+            'cytotoxicity_index': None,
+        }
+        assert (
+            caracterizacion.resultado_json['characterization_capabilities'][
+                'binucleate_trinucleate'
+            ]
+            == STATUS_BLOCKED_SCIENTIFIC_RULE
+        )
+
+        resultado.refresh_from_db()
+        assert resultado.respuesta_json == original_raw
+        assert resultado.resultado_normalizado == original_normalized
+
+    def test_saliva_genotoxicity_is_null_when_membrana_count_is_zero(self):
+        resultado = self._automatic_saliva_result(objects=[
+            self._normalized_object(1, 'micronucleo'),
+        ])
+
+        caracterizacion = characterize_resultado_segmentacion(resultado)
+
+        assert (
+            caracterizacion.resultado_json['indices']['genotoxicity_index']
+            is None
+        )
+
+    def test_characterization_ignores_draft_revision(self):
+        resultado = self._automatic_saliva_result()
+        self._create_revision(
+            resultado,
+            RevisionSegmentacion.ESTADO_BORRADOR,
+            ['membrana', 'membrana', 'membrana'],
+        )
+
+        caracterizacion = characterize_resultado_segmentacion(resultado)
+
+        assert caracterizacion.source_type == FUENTE_AUTOMATICO
+        assert caracterizacion.revision_segmentacion is None
+        assert caracterizacion.resultado_json['counts']['membrana'] == 2
+
+    def test_characterization_uses_latest_validated_revision(self):
+        resultado = self._automatic_saliva_result()
+        revision = self._create_revision(
+            resultado,
+            RevisionSegmentacion.ESTADO_VALIDADA,
+            ['membrana', 'micronucleo', 'micronucleo'],
+        )
+        self._create_revision(
+            resultado,
+            RevisionSegmentacion.ESTADO_BORRADOR,
+            ['membrana', 'membrana', 'membrana'],
+            numero_revision=2,
+        )
+
+        caracterizacion = characterize_resultado_segmentacion(resultado)
+
+        assert caracterizacion.source_type == FUENTE_VALIDADA
+        assert caracterizacion.revision_segmentacion == revision
+        assert caracterizacion.resultado_json['source'] == {
+            'type': FUENTE_VALIDADA,
+            'resultado_segmentacion_id': resultado.id_resultado_segmentacion,
+            'revision_segmentacion_id': revision.id_revision_segmentacion,
+            'numero_revision': 1,
+        }
+        assert caracterizacion.resultado_json['counts'] == {
+            'membrana': 1,
+            'nucleo': 0,
+            'micronucleo': 2,
+        }
+        assert caracterizacion.resultado_json['indices'][
+            'genotoxicity_index'
+        ] == 2
+
+    def test_blood_characterization_is_counts_only(self):
+        resultado = self._automatic_blood_result()
+
+        caracterizacion = characterize_resultado_segmentacion(resultado)
+
+        assert caracterizacion.sample_type == SampleType.BLOOD
+        assert caracterizacion.resultado_json['counts'] == {
+            'membrana': 1,
+            'micronucleo': 2,
+        }
+        assert caracterizacion.resultado_json['indices'] == {}
+        assert (
+            caracterizacion.resultado_json['characterization_capabilities'][
+                'genotoxicity_index'
+            ]
+            == STATUS_NOT_DEFINED
+        )
+        assert 'nucleo' not in caracterizacion.resultado_json['counts']
+
+    def test_characterization_current_flag_tracks_effective_source(self):
+        resultado = self._automatic_saliva_result()
+        automatic_characterization = characterize_resultado_segmentacion(
+            resultado
+        )
+
+        assert is_characterization_current(automatic_characterization) is True
+
+        validated_revision = self._create_revision(
+            resultado,
+            RevisionSegmentacion.ESTADO_VALIDADA,
+            ['membrana'],
+        )
+
+        assert is_characterization_current(automatic_characterization) is False
+
+        validated_characterization = characterize_resultado_segmentacion(
+            resultado
+        )
+
+        assert validated_characterization.revision_segmentacion == (
+            validated_revision
+        )
+        assert is_characterization_current(validated_characterization) is True
+
+    def test_service_reuses_existing_characterization_for_same_logical_key(self):
+        resultado = self._automatic_saliva_result()
+
+        first = characterize_resultado_segmentacion(resultado)
+        second = characterize_resultado_segmentacion(
+            resultado.id_resultado_segmentacion
+        )
+
+        assert first.pk == second.pk
+        assert ResultadoCaracterizacion.objects.filter(
+            resultado_segmentacion=resultado
+        ).count() == 1
+
+    def test_service_does_not_recalculate_when_current_snapshot_exists(self):
+        resultado = self._automatic_saliva_result()
+        first = characterize_resultado_segmentacion(resultado)
+
+        with patch(
+            'api.services.characterization.service.characterize_effective_segmentation'
+        ) as mock_characterize:
+            second = characterize_resultado_segmentacion(resultado)
+
+        assert second.pk == first.pk
+        mock_characterize.assert_not_called()
+
+    def test_post_characterize_reuses_existing_snapshot(self):
+        resultado = self._automatic_saliva_result()
+
+        first = self.client.post(self._characterize_url(resultado))
+        second = self.client.post(self._characterize_url(resultado))
+
+        assert first.status_code == status.HTTP_201_CREATED
+        assert second.status_code == status.HTTP_200_OK
+        assert first.data['id'] == second.data['id']
+        assert ResultadoCaracterizacion.objects.filter(
+            resultado_segmentacion=resultado
+        ).count() == 1
+
+    def test_validated_revision_after_automatic_creates_new_snapshot(self):
+        resultado = self._automatic_saliva_result()
+        automatic_characterization = characterize_resultado_segmentacion(
+            resultado
+        )
+        revision = self._create_revision(
+            resultado,
+            RevisionSegmentacion.ESTADO_VALIDADA,
+            ['membrana'],
+        )
+
+        validated_characterization = characterize_resultado_segmentacion(
+            resultado
+        )
+
+        assert validated_characterization.pk != automatic_characterization.pk
+        assert validated_characterization.source_type == FUENTE_VALIDADA
+        assert validated_characterization.revision_segmentacion == revision
+        assert ResultadoCaracterizacion.objects.filter(
+            resultado_segmentacion=resultado
+        ).count() == 2
+
+    def test_validated_characterization_becomes_stale_after_newer_validated_revision(self):
+        resultado = self._automatic_saliva_result()
+        revision_one = self._create_revision(
+            resultado,
+            RevisionSegmentacion.ESTADO_VALIDADA,
+            ['membrana'],
+            numero_revision=1,
+        )
+        first_characterization = characterize_resultado_segmentacion(
+            resultado
+        )
+
+        assert first_characterization.revision_segmentacion == revision_one
+        assert is_characterization_current(first_characterization) is True
+
+        revision_two = self._create_revision(
+            resultado,
+            RevisionSegmentacion.ESTADO_VALIDADA,
+            ['membrana', 'micronucleo'],
+            numero_revision=2,
+        )
+
+        assert is_characterization_current(first_characterization) is False
+
+        second_characterization = characterize_resultado_segmentacion(
+            resultado
+        )
+
+        assert second_characterization.revision_segmentacion == revision_two
+        assert is_characterization_current(second_characterization) is True
+
+    def test_service_creates_new_snapshot_for_newer_validated_revision(self):
+        resultado = self._automatic_saliva_result()
+        revision_one = self._create_revision(
+            resultado,
+            RevisionSegmentacion.ESTADO_VALIDADA,
+            ['membrana'],
+            numero_revision=1,
+        )
+        first = characterize_resultado_segmentacion(resultado)
+
+        revision_two = self._create_revision(
+            resultado,
+            RevisionSegmentacion.ESTADO_VALIDADA,
+            ['membrana', 'micronucleo'],
+            numero_revision=2,
+        )
+        second = characterize_resultado_segmentacion(resultado)
+
+        assert first.revision_segmentacion == revision_one
+        assert second.revision_segmentacion == revision_two
+        assert first.pk != second.pk
+        assert is_characterization_current(first) is False
+        assert is_characterization_current(second) is True
+
+    def test_characterization_becomes_stale_when_algorithm_version_changes(self):
+        resultado = self._automatic_saliva_result()
+        characterization = characterize_resultado_segmentacion(resultado)
+
+        assert is_characterization_current(characterization) is True
+
+        with patch(
+            'api.services.characterization.service.CHARACTERIZATION_ALGORITHM_VERSION',
+            '2.0',
+        ):
+            assert is_characterization_current(characterization) is False
+
+    def test_service_creates_new_snapshot_when_algorithm_version_changes(self):
+        resultado = self._automatic_saliva_result()
+        first = characterize_resultado_segmentacion(resultado)
+
+        with patch(
+            'api.services.characterization.service.CHARACTERIZATION_ALGORITHM_VERSION',
+            '2.0',
+        ):
+            second, created = get_or_create_resultado_caracterizacion(
+                resultado
+            )
+
+        assert created is True
+        assert second.pk != first.pk
+        assert second.algorithm_version == '2.0'
+        assert second.resultado_json['version'] == '2.0'
+
+    def test_model_clean_rejects_cross_result_revision(self):
+        resultado_a = self._automatic_saliva_result()
+        resultado_b = self._automatic_saliva_result()
+        revision_b = self._create_revision(
+            resultado_b,
+            RevisionSegmentacion.ESTADO_VALIDADA,
+            ['membrana'],
+        )
+        characterization = ResultadoCaracterizacion(
+            resultado_segmentacion=resultado_a,
+            revision_segmentacion=revision_b,
+            source_type=FUENTE_VALIDADA,
+            sample_type=SampleType.SALIVA,
+            algorithm_version=CHARACTERIZATION_ALGORITHM_VERSION,
+            resultado_json={},
+        )
+
+        with self.assertRaises(ValidationError):
+            characterization.clean()
+
+    def test_model_clean_rejects_draft_revision_for_validated_source(self):
+        resultado = self._automatic_saliva_result()
+        draft = self._create_revision(
+            resultado,
+            RevisionSegmentacion.ESTADO_BORRADOR,
+            ['membrana'],
+        )
+        characterization = ResultadoCaracterizacion(
+            resultado_segmentacion=resultado,
+            revision_segmentacion=draft,
+            source_type=FUENTE_VALIDADA,
+            sample_type=SampleType.SALIVA,
+            algorithm_version=CHARACTERIZATION_ALGORITHM_VERSION,
+            resultado_json={},
+        )
+
+        with self.assertRaises(ValidationError):
+            characterization.clean()
+
+    def test_characterization_serializer_marks_stale_entries(self):
+        resultado = self._automatic_saliva_result()
+        automatic_characterization = characterize_resultado_segmentacion(
+            resultado
+        )
+        self._create_revision(
+            resultado,
+            RevisionSegmentacion.ESTADO_VALIDADA,
+            ['membrana'],
+        )
+        validated_characterization = characterize_resultado_segmentacion(
+            resultado
+        )
+
+        response = self.client.get(self._characterizations_url(resultado))
+
+        assert response.status_code == status.HTTP_200_OK
+        by_id = {item['id']: item for item in response.data}
+        assert by_id[
+            automatic_characterization.id_resultado_caracterizacion
+        ]['vigente'] is False
+        assert by_id[
+            validated_characterization.id_resultado_caracterizacion
+        ]['vigente'] is True
+
+    def test_characterize_endpoint_creates_snapshot(self):
+        resultado = self._automatic_saliva_result()
+
+        response = self.client.post(self._characterize_url(resultado))
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert ResultadoCaracterizacion.objects.count() == 1
+        assert response.data['source_type'] == FUENTE_AUTOMATICO
+        assert response.data['sample_type'] == SampleType.SALIVA
+        assert response.data['algorithm_version'] == (
+            CHARACTERIZATION_ALGORITHM_VERSION
+        )
+        assert response.data['resultado_json']['counts']['membrana'] == 2
+        assert response.data['vigente'] is True
+
+    def test_characterizations_endpoint_returns_empty_list(self):
+        resultado = self._automatic_saliva_result()
+
+        response = self.client.get(self._characterizations_url(resultado))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data == []
+
+    def test_characterization_rejects_invalid_effective_result(self):
+        effective = {
+            'resultado_segmentacion_id': 1,
+            'fuente': FUENTE_AUTOMATICO,
+            'revision': None,
+            'resultado': [],
+            'resumen': None,
+        }
+
+        with self.assertRaises(ValueError):
+            characterize_effective_segmentation(
+                effective,
+                sample_type=SampleType.SALIVA,
+            )

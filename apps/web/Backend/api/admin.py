@@ -1,6 +1,10 @@
 from django.contrib import admin
 
-from .models import ResultadoSegmentacion, RevisionSegmentacion
+from .models import (
+    ResultadoCaracterizacion,
+    ResultadoSegmentacion,
+    RevisionSegmentacion,
+)
 
 
 @admin.register(ResultadoSegmentacion)
@@ -43,4 +47,37 @@ class RevisionSegmentacionAdmin(admin.ModelAdmin):
         'creado_en',
         'actualizado_en',
         'validado_en',
+    )
+
+
+@admin.register(ResultadoCaracterizacion)
+class ResultadoCaracterizacionAdmin(admin.ModelAdmin):
+    list_display = (
+        'id_resultado_caracterizacion',
+        'resultado_segmentacion',
+        'revision_segmentacion',
+        'source_type',
+        'sample_type',
+        'algorithm_version',
+        'created_at',
+    )
+    list_filter = (
+        'source_type',
+        'sample_type',
+        'algorithm_version',
+        'created_at',
+    )
+    search_fields = (
+        'id_resultado_caracterizacion',
+        'resultado_segmentacion__id_resultado_segmentacion',
+        'revision_segmentacion__id_revision_segmentacion',
+    )
+    readonly_fields = (
+        'resultado_segmentacion',
+        'revision_segmentacion',
+        'source_type',
+        'sample_type',
+        'algorithm_version',
+        'resultado_json',
+        'created_at',
     )

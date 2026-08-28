@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.db import models
 
 # Modelo de Paciente
@@ -206,6 +207,93 @@ class RevisionSegmentacion(models.Model):
             f"Resultado {self.resultado_segmentacion_id} - "
             f"Revision {self.numero_revision} - {self.estado}"
         )
+
+
+class ResultadoCaracterizacion(models.Model):
+    SOURCE_AUTOMATICO = 'AUTOMATICO'
+    SOURCE_VALIDADA = 'VALIDADA'
+    SOURCE_CHOICES = [
+        (SOURCE_AUTOMATICO, 'Automatico'),
+        (SOURCE_VALIDADA, 'Validada'),
+    ]
+
+    id_resultado_caracterizacion = models.AutoField(primary_key=True)
+    resultado_segmentacion = models.ForeignKey(
+        ResultadoSegmentacion,
+        on_delete=models.CASCADE,
+        related_name='caracterizaciones',
+    )
+    revision_segmentacion = models.ForeignKey(
+        RevisionSegmentacion,
+        on_delete=models.PROTECT,
+        related_name='caracterizaciones',
+        blank=True,
+        null=True,
+    )
+    source_type = models.CharField(max_length=20, choices=SOURCE_CHOICES)
+    sample_type = models.CharField(max_length=20)
+    algorithm_version = models.CharField(max_length=20)
+    resultado_json = models.JSONField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at', '-id_resultado_caracterizacion']
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    (
+                        models.Q(source_type='AUTOMATICO') &
+                        models.Q(revision_segmentacion__isnull=True)
+                    ) |
+                    (
+                        models.Q(source_type='VALIDADA') &
+                        models.Q(revision_segmentacion__isnull=False)
+                    )
+                ),
+                name='resultado_caracterizacion_source_consistency',
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"Resultado Caracterizacion "
+            f"{self.id_resultado_caracterizacion} - "
+            f"Resultado {self.resultado_segmentacion_id} - "
+            f"{self.source_type}"
+        )
+
+    def clean(self):
+        super().clean()
+
+        if self.source_type == self.SOURCE_AUTOMATICO:
+            if self.revision_segmentacion_id is not None:
+                raise ValidationError(
+                    'Una caracterizacion AUTOMATICO no debe tener revision'
+                )
+            return
+
+        if self.source_type == self.SOURCE_VALIDADA:
+            if self.revision_segmentacion_id is None:
+                raise ValidationError(
+                    'Una caracterizacion VALIDADA requiere revision'
+                )
+
+            if (
+                self.resultado_segmentacion_id is not None
+                and self.revision_segmentacion.resultado_segmentacion_id
+                != self.resultado_segmentacion_id
+            ):
+                raise ValidationError(
+                    'La revision debe pertenecer al mismo resultado segmentacion'
+                )
+
+            if (
+                self.revision_segmentacion.estado
+                != RevisionSegmentacion.ESTADO_VALIDADA
+            ):
+                raise ValidationError(
+                    'La revision asociada debe estar VALIDADA'
+                )
 
 
 class AnalisisMascara(models.Model):

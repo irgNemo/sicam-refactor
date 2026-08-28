@@ -6,6 +6,7 @@ from .models import (
     MuestraSangre,
     Paciente,
     ResultadoAnalisis,
+    ResultadoCaracterizacion,
     ResultadoSegmentacion,
     RevisionSegmentacion,
 )
@@ -59,6 +60,34 @@ class ResultadoSegmentacionSerializer(serializers.ModelSerializer):
             'actualizado_en',
         )
         read_only_fields = fields
+
+
+class ResultadoCaracterizacionSerializer(serializers.ModelSerializer):
+    id = serializers.IntegerField(
+        source='id_resultado_caracterizacion',
+        read_only=True
+    )
+    vigente = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ResultadoCaracterizacion
+        fields = (
+            'id',
+            'resultado_segmentacion',
+            'revision_segmentacion',
+            'source_type',
+            'sample_type',
+            'algorithm_version',
+            'resultado_json',
+            'created_at',
+            'vigente',
+        )
+        read_only_fields = fields
+
+    def get_vigente(self, instance):
+        from .services.characterization.service import is_characterization_current
+
+        return is_characterization_current(instance)
 
 
 class RevisionSegmentacionSerializer(serializers.ModelSerializer):

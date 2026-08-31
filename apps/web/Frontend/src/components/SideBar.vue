@@ -82,7 +82,7 @@
 
     <!-- BOTÓN VER ANÁLISIS -->
     <button
-      v-if="casoSeleccionado"
+      v-if="casoSeleccionado && showAnalysisButton"
       class="btn-primary"
       @click="verAnalisis"
     >
@@ -164,6 +164,18 @@ export default {
       type: String,
       default: SAMPLE_TYPES.SALIVA,
     },
+    selectedPatientId: {
+      type: Number,
+      default: null,
+    },
+    selectedCaseId: {
+      type: Number,
+      default: null,
+    },
+    showAnalysisButton: {
+      type: Boolean,
+      default: true,
+    },
   },
 
   data() {
@@ -234,6 +246,7 @@ export default {
         this.pacientes = resPacientes.data;
         this.casos = resCasos.data;
         this.analisis = resAnalisis.data;
+        this.syncSelectionFromProps();
       } catch (error) {
         console.error("Error al cargar datos:", error);
       } finally {
@@ -270,6 +283,8 @@ export default {
       this.casoSeleccionado = null;
       this.busquedaPaciente = "";
       this.resetResumen();
+      this.$emit("select-patient", null);
+      this.$emit("select-case", null);
     },
 
     seleccionarCaso(caso) {
@@ -358,7 +373,62 @@ export default {
     getEstadoTexto(estado) {
       const estados = { 0: 'Abierto', 1: 'En Proceso', 2: 'Cerrado' };
       return estados[estado] || 'Desconocido';
+    },
+
+    syncSelectionFromProps() {
+      if (!this.pacientes.length) return;
+
+      if (!this.selectedPatientId) {
+        if (this.pacienteSeleccionado) {
+          this.pacienteSeleccionado = null;
+          this.casoSeleccionado = null;
+          this.resetResumen();
+        }
+        return;
+      }
+
+      const paciente = this.pacientes.find(
+        item => item.id_paciente === this.selectedPatientId
+      );
+
+      if (!paciente) return;
+
+      this.pacienteSeleccionado = paciente;
+      this.busquedaPaciente = "";
+      this.pacientesFiltrados = [];
+
+      if (!this.selectedCaseId) {
+        if (this.casoSeleccionado) {
+          this.casoSeleccionado = null;
+          this.resetResumen();
+        }
+        return;
+      }
+
+      const caso = this.casos.find(
+        item =>
+          item.id_caso === this.selectedCaseId &&
+          item.paciente === paciente.id_paciente
+      );
+
+      if (!caso) return;
+
+      if (this.casoSeleccionado !== caso.id_caso) {
+        this.casoSeleccionado = caso.id_caso;
+        this.resetResumen();
+        this.refrescarResumenCaso(caso.id_caso);
+      }
     }
+  },
+
+  watch: {
+    selectedPatientId() {
+      this.syncSelectionFromProps();
+    },
+
+    selectedCaseId() {
+      this.syncSelectionFromProps();
+    },
   },
 
   mounted() {

@@ -33,6 +33,51 @@
       </div>
     </div>
 
+    <div class="selected-segmentation-block">
+      <div class="history-title">
+        Segmentacion seleccionada
+      </div>
+
+      <div v-if="historialLoading" class="segmentation-status neutral">
+        Cargando resultados...
+      </div>
+
+      <div
+        v-else-if="!completedSegmentationResults.length"
+        class="segmentation-status neutral"
+      >
+        Sin segmentaciones completadas
+      </div>
+
+      <div
+        v-else-if="completedSegmentationResults.length === 1"
+        class="selected-result-card"
+      >
+        <strong>{{ formatearFechaResultado(completedSegmentationResults[0].creado_en) }}</strong>
+        <span>Resultado #{{ completedSegmentationResults[0].id }}</span>
+      </div>
+
+      <label
+        v-else
+        class="result-selector"
+      >
+        <span class="sr-only">Segmentacion seleccionada</span>
+        <select
+          :value="selectedSegmentationResultId || ''"
+          :disabled="historialLoading"
+          @change="$emit('change-segmentation-result', $event.target.value)"
+        >
+          <option
+            v-for="result in completedSegmentationResults"
+            :key="resultKey(result)"
+            :value="result.id"
+          >
+            {{ formatearFechaResultado(result.creado_en) }} · Resultado #{{ result.id }}
+          </option>
+        </select>
+      </label>
+    </div>
+
     <div
       v-if="effectiveSegmentationLoading"
       class="segmentation-status neutral"
@@ -127,7 +172,7 @@
 <script>
 export default {
   name: "SegmentationResultPanel",
-  emits: ["run-segmentation", "continue-edit"],
+  emits: ["run-segmentation", "continue-edit", "change-segmentation-result"],
   props: {
     segmentacionLoading: {
       type: Boolean,
@@ -217,6 +262,14 @@ export default {
       type: Number,
       required: true,
     },
+    completedSegmentationResults: {
+      type: Array,
+      required: true,
+    },
+    selectedSegmentationResultId: {
+      type: Number,
+      default: null,
+    },
   },
   computed: {
     segmentacionButtonText() {
@@ -234,6 +287,10 @@ export default {
     },
   },
   methods: {
+    resultKey(result) {
+      return `${result.tipo_muestra || this.activeSampleType}-${result.id}`;
+    },
+
     formatearFechaResultado(fecha) {
       if (!fecha) return "Fecha no disponible";
 
@@ -396,6 +453,12 @@ export default {
   gap: 8px;
 }
 
+.selected-segmentation-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .history-title {
   align-items: center;
   color: #2c3e50;
@@ -411,6 +474,52 @@ export default {
   color: #666;
   font-size: 11px;
   padding: 2px 8px;
+}
+
+.result-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.result-selector select {
+  background: #ffffff;
+  border: 2px solid #d9e2ec;
+  border-radius: 8px;
+  color: #2c3e50;
+  font-size: 12px;
+  min-width: 0;
+  padding: 8px 10px;
+  width: 100%;
+}
+
+.selected-result-card {
+  background: #f8f9fa;
+  border: 1px solid #d9e2ec;
+  border-radius: 8px;
+  color: #2c3e50;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+}
+
+.selected-result-card strong {
+  font-size: 12px;
+}
+
+.selected-result-card span {
+  color: #666;
+  font-size: 11px;
+}
+
+.sr-only {
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  position: absolute;
+  width: 1px;
+  clip: rect(0, 0, 0, 0);
 }
 
 .status-title {

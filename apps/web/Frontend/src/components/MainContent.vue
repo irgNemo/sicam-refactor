@@ -88,7 +88,8 @@
                 alt="Muestra"
               />
               <div class="thumb-overlay">
-                <span class="thumb-id">#{{ muestra.id_muestra }}</span>
+                <span class="thumb-name">{{ sampleName(muestra) }}</span>
+                <span class="thumb-id">Muestra #{{ muestra.id_muestra }}</span>
               </div>
             </div>
 
@@ -109,10 +110,10 @@
           <div class="card-header">
             <div class="card-title-section">
               <h3>
-                {{ imagenSeleccionada ? activeSampleTypeDisplayName + ' #' + imagenSeleccionada.id_muestra : 'Vista previa' }}
+                {{ imagenSeleccionada ? sampleName(imagenSeleccionada) : 'Vista previa' }}
               </h3>
               <span v-if="imagenSeleccionada" class="card-subtitle">
-                Análisis microscópico
+                {{ activeSampleTypeDisplayName }} · Muestra #{{ imagenSeleccionada.id_muestra }}
               </span>
             </div>
           </div>
@@ -515,8 +516,11 @@
                 :historial-error="historialError"
                 :ultimo-resultado-segmentacion="ultimoResultadoSegmentacion"
                 :ultimo-historial-objetos-count="ultimoHistorialObjetosCount"
+                :completed-segmentation-results="completedSegmentationResults"
+                :selected-segmentation-result-id="activeResultadoSegmentacionId"
                 @run-segmentation="ejecutarSegmentacion"
                 @continue-edit="setViewerMode('EDIT')"
+                @change-segmentation-result="setSelectedSegmentationResult"
               />
 
             </div>
@@ -588,7 +592,12 @@ const VERTEX_NEIGHBOR_RADIUS = 3;
 
 export default {
   name: "MainContent",
-  emits: ["sample-type-changed", "segmentation-completed"],
+  emits: [
+    "sample-type-changed",
+    "segmentation-completed",
+    "sample-selected",
+    "segmentation-result-selected",
+  ],
   components: {
     OverlayLayersCard,
     SegmentationCountSummary,
@@ -610,6 +619,14 @@ export default {
     activeSampleType: {
       type: String,
       default: SAMPLE_TYPES.SALIVA,
+    },
+    selectedSampleId: {
+      type: Number,
+      default: null,
+    },
+    selectedSegmentationResultId: {
+      type: Number,
+      default: null,
     },
   },
 
@@ -745,8 +762,31 @@ export default {
       return Array.isArray(objetos) ? objetos.length : 0;
     },
 
+    completedSegmentationResults() {
+      return this.historialSegmentacion
+        .filter(result => result.estado === "COMPLETADO")
+        .sort((a, b) => {
+          const byDate = new Date(b.creado_en || 0) - new Date(a.creado_en || 0);
+          if (byDate !== 0) return byDate;
+          return Number(b.id || 0) - Number(a.id || 0);
+        });
+    },
+
+    selectedResultadoSegmentacion() {
+      if (!this.selectedSegmentationResultId) return null;
+
+      return this.completedSegmentationResults.find(
+        result => result.id === this.selectedSegmentationResultId
+      ) || null;
+    },
+
     resultadoSegmentacionActivo() {
-      return this.ultimoResultadoSegmentacion || this.segmentacionResultado || null;
+      return (
+        this.selectedResultadoSegmentacion ||
+        this.completedSegmentationResults[0] ||
+        this.segmentacionResultado ||
+        null
+      );
     },
 
     activeResultadoSegmentacionId() {
@@ -1277,12 +1317,23 @@ export default {
 
   watch: {
     imagenes(nuevas) {
-      this.selectImagen(nuevas[0] || null);
+      this.restoreSelectedSample(nuevas);
+    },
+
+    selectedSampleId() {
+      this.restoreSelectedSample(this.imagenes);
+    },
+
+    selectedSegmentationResultId() {
+      if (this.historialSegmentacion.length) {
+        this.syncSelectedSegmentationResult();
+      }
     },
 
     activeResultadoSegmentacionId(newId, oldId) {
       if (newId !== oldId) {
         if (this.hasPendingDraftWork && !this.confirmDiscardDraftChanges()) {
+          this.emitSegmentationResultSelected(oldId || null);
           return;
         }
         this.resetEditorState({ clearRevision: true });
@@ -1314,7 +1365,7 @@ export default {
         }
 
         this.$nextTick(() => {
-          this.selectImagen(this.imagenes[0] || null);
+          this.restoreSelectedSample(this.imagenes);
         });
       }
     },
@@ -1339,6 +1390,72 @@ export default {
         this.imagenSeleccionada.id_muestra === muestraId &&
         this.activeSampleType === sampleType
       );
+    },
+
+    syncSelectedSegmentationResult() {
+      const selected = this.selectedSegmentationResultId
+        ? this.completedSegmentationResults.find(
+          result => result.id === this.selectedSegmentationResultId
+        )
+        : null;
+      const nextResult = selected || this.completedSegmentationResults[0] || null;
+      const nextId = nextResult?.id || null;
+
+      if (nextId !== this.selectedSegmentationResultId) {
+        this.emitSegmentationResultSelected(nextId);
+      }
+    },
+
+    emitSegmentationResultSelected(resultadoId) {
+      this.$emit("segmentation-result-selected", {
+        sampleType: this.activeSampleType,
+        sampleId: this.imagenSeleccionada?.id_muestra || null,
+        resultadoId: resultadoId || null,
+      });
+    },
+
+    setSelectedSegmentationResult(resultId) {
+      const parsedId = Number(resultId);
+      const selected = Number.isFinite(parsedId)
+        ? this.completedSegmentationResults.find(result => result.id === parsedId)
+        : null;
+
+      if (!selected) {
+        this.emitSegmentationResultSelected(null);
+        return;
+      }
+
+      if (
+        this.activeResultadoSegmentacionId !== selected.id &&
+        this.hasPendingDraftWork &&
+        !this.confirmDiscardDraftChanges()
+      ) {
+        return;
+      }
+
+      this.emitSegmentationResultSelected(selected.id);
+    },
+
+    restoreSelectedSample(samples = this.imagenes) {
+      if (this.selectedSampleId) {
+        const selected = samples.find(
+          muestra => muestra.id_muestra === this.selectedSampleId
+        );
+
+        this.selectImagen(selected || null);
+        return;
+      }
+
+      this.selectImagen(samples[0] || null);
+    },
+
+    sampleName(muestra) {
+      if (!muestra) return "Sin muestra";
+      if (muestra.imagen) {
+        const pieces = String(muestra.imagen).split("/");
+        return pieces[pieces.length - 1] || `Muestra ${muestra.id_muestra}`;
+      }
+      return `Muestra ${muestra.id_muestra}`;
     },
 
     setActiveSampleType(sampleType) {
@@ -1409,6 +1526,10 @@ export default {
       }
 
       this.imagenSeleccionada = muestra;
+      this.$emit("sample-selected", {
+        sampleType: this.activeSampleType,
+        sampleId: muestra?.id_muestra || null,
+      });
       this.segmentacionResultado = null;
       this.segmentacionError = "";
       this.historialSegmentacion = [];
@@ -1438,6 +1559,7 @@ export default {
           this.historialSegmentacion = Array.isArray(response.data)
             ? response.data
             : [];
+          this.syncSelectedSegmentationResult();
           this.syncOverlayLabelVisibility();
           if (!this.ensureRevisionBelongsToResult(this.activeResultadoSegmentacionId)) {
             this.resetEditorState({ clearRevision: true });
@@ -1472,15 +1594,23 @@ export default {
         if (!this.isCurrentSample(muestraId, sampleType)) {
           return;
         }
+        const resultadoId = response.data?.resultado_segmentacion?.id || null;
         this.segmentacionResultado = response.data;
         this.syncOverlayLabelVisibility();
         await this.cargarHistorialSegmentacion(muestraId, sampleType);
-        await this.loadEffectiveSegmentation(this.activeResultadoSegmentacionId);
+        if (resultadoId) {
+          this.emitSegmentationResultSelected(resultadoId);
+          await this.loadEffectiveSegmentation(resultadoId);
+          await this.loadRevisionState(resultadoId);
+        } else {
+          await this.loadEffectiveSegmentation(this.activeResultadoSegmentacionId);
+        }
         this.syncOverlayLabelVisibility();
         this.$emit("segmentation-completed", {
           caseId: this.caseId,
           muestraId,
           sampleType,
+          resultadoId,
         });
       } catch (error) {
         if (!this.isCurrentSample(muestraId, sampleType)) return;
@@ -2767,6 +2897,9 @@ export default {
   left: 0;
   right: 0;
   background: linear-gradient(to top, rgba(0,0,0,0.7), transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   padding: 4px;
   opacity: 0;
   transition: opacity 0.3s ease;
@@ -2777,10 +2910,24 @@ export default {
   opacity: 1;
 }
 
+.thumb-name,
 .thumb-id {
   color: white;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thumb-name {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.thumb-id {
   font-size: 10px;
-  font-weight: 600;
+  font-weight: 500;
+  opacity: 0.85;
 }
 
 .empty-gallery {

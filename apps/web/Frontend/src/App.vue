@@ -1,30 +1,45 @@
 <template>
-  <!-- BARRA SUPERIOR -->
   <TopBar
     :seccion="seccion"
-    @change-section="seccion = $event"
+    @change-section="requestSectionChange"
   />
 
-  <!-- CONTENIDO PRINCIPAL -->
   <div class="app">
-
-    <!-- SIDEBAR (solo en segmentación) -->
     <SideBar
-      v-if="seccion === 'segmentacion'"
+      v-if="showSharedSidebar"
       ref="sideBar"
       :active-sample-type="activeSampleType"
+      :selected-patient-id="selectedPatientId"
+      :selected-case-id="selectedCaseId"
+      :show-analysis-button="seccion === 'segmentacion'"
       @select-patient="onSelectPatient"
       @select-case="onSelectCase"
     />
 
-    <!-- CONTENIDO CENTRAL -->
     <MainContent
       v-if="seccion === 'segmentacion'"
+      ref="mainContent"
       :patientId="selectedPatientId"
       :caseId="selectedCaseId"
       :active-sample-type="activeSampleType"
-      @sample-type-changed="activeSampleType = $event"
+      :selected-sample-id="activeSelectedSampleId"
+      :selected-segmentation-result-id="activeSelectedSegmentationResultId"
+      @sample-type-changed="onSampleTypeChanged"
       @segmentation-completed="onSegmentationCompleted"
+      @sample-selected="onSampleSelected"
+      @segmentation-result-selected="onSegmentationResultSelected"
+    />
+
+    <CaracterizacionView
+      v-if="seccion === 'caracterizacion'"
+      :patient-id="selectedPatientId"
+      :case-id="selectedCaseId"
+      :active-sample-type="activeSampleType"
+      :selected-sample-id="activeSelectedSampleId"
+      :selected-segmentation-result-id="activeSelectedSegmentationResultId"
+      @sample-type-changed="onSampleTypeChanged"
+      @sample-selected="onSampleSelected"
+      @segmentation-result-selected="onSegmentationResultSelected"
     />
 
     <div v-if="seccion === 'analisis'" class="placeholder-view">
@@ -36,18 +51,7 @@
       </div>
     </div>
 
-    <div v-if="seccion === 'caracterizacion'" class="placeholder-view">
-      <div class="placeholder-content">
-        <div class="placeholder-icon">📊</div>
-        <h2>Caracterización</h2>
-        <p>Este módulo está en desarrollo</p>
-        <div class="placeholder-badge">Próximamente</div>
-      </div>
-    </div>
-
-    <!-- NUEVA SECCIÓN DE REGISTRO -->
     <RegistroView v-if="seccion === 'registro'" />
-
   </div>
 </template>
 
@@ -56,6 +60,7 @@ import TopBar from "./components/TopBar.vue";
 import SideBar from "./components/SideBar.vue";
 import MainContent from "./components/MainContent.vue";
 import RegistroView from "./views/RegistroView.vue";
+import CaracterizacionView from "./views/CaracterizacionView.vue";
 import { SAMPLE_TYPES } from "./domain/segmentationTypes";
 
 export default {
@@ -66,57 +71,153 @@ export default {
     SideBar,
     MainContent,
     RegistroView,
+    CaracterizacionView,
   },
 
   data() {
     return {
-      // Sección activa
       seccion: "segmentacion",
-
-      // Estado global de selección
       selectedPatientId: null,
       selectedCaseId: null,
       activeSampleType: SAMPLE_TYPES.SALIVA,
+      selectedSampleRef: {
+        sampleType: null,
+        sampleId: null,
+      },
+      selectedSegmentationResultRef: {
+        sampleType: null,
+        sampleId: null,
+        resultadoId: null,
+      },
     };
   },
 
+  computed: {
+    showSharedSidebar() {
+      return ["segmentacion", "caracterizacion"].includes(this.seccion);
+    },
+
+    activeSelectedSampleId() {
+      return this.selectedSampleRef.sampleType === this.activeSampleType
+        ? this.selectedSampleRef.sampleId
+        : null;
+    },
+
+    activeSelectedSegmentationResultId() {
+      return (
+        this.selectedSegmentationResultRef.sampleType === this.activeSampleType &&
+        this.selectedSegmentationResultRef.sampleId === this.activeSelectedSampleId
+      )
+        ? this.selectedSegmentationResultRef.resultadoId
+        : null;
+    },
+  },
+
   methods: {
-    // Recibe paciente desde SideBar
+    requestSectionChange(nextSection) {
+      if (nextSection === this.seccion) return;
+
+      if (
+        this.seccion === "segmentacion" &&
+        this.$refs.mainContent?.hasPendingDraftWork &&
+        !this.$refs.mainContent.confirmDiscardDraftChanges()
+      ) {
+        return;
+      }
+
+      this.seccion = nextSection;
+    },
+
     onSelectPatient(patientId) {
       this.selectedPatientId = patientId;
       this.selectedCaseId = null;
+      this.clearSelectedSample();
     },
 
-    // Recibe caso desde SideBar
     onSelectCase(caseId) {
       this.selectedCaseId = caseId;
+      this.clearSelectedSample();
+    },
+
+    onSampleTypeChanged(sampleType) {
+      if (sampleType === this.activeSampleType) return;
+      this.activeSampleType = sampleType;
+      this.clearSelectedSample();
     },
 
     onSegmentationCompleted(payload) {
       if (payload?.caseId !== this.selectedCaseId) return;
 
+      if (
+        payload?.resultadoId &&
+        payload?.sampleType === this.activeSampleType &&
+        payload?.muestraId === this.activeSelectedSampleId
+      ) {
+        this.onSegmentationResultSelected({
+          sampleType: payload.sampleType,
+          sampleId: payload.muestraId,
+          resultadoId: payload.resultadoId,
+        });
+      }
+
       this.$refs.sideBar?.refrescarResumenCaso?.(payload.caseId);
     },
-  },
 
-  watch: {
-    // Limpieza de estado al cambiar de sección
-    seccion(nueva) {
-      if (nueva !== "segmentacion") {
-        this.selectedPatientId = null;
-        this.selectedCaseId = null;
-        this.activeSampleType = SAMPLE_TYPES.SALIVA;
+    onSampleSelected(payload) {
+      const nextSampleType = payload?.sampleType || null;
+      const nextSampleId = payload?.sampleId || null;
+      const sampleChanged =
+        this.selectedSampleRef.sampleType !== nextSampleType ||
+        this.selectedSampleRef.sampleId !== nextSampleId;
+
+      this.selectedSampleRef = {
+        sampleType: nextSampleType,
+        sampleId: nextSampleId,
+      };
+
+      if (sampleChanged) {
+        this.clearSelectedSegmentationResult();
       }
+    },
+
+    onSegmentationResultSelected(payload) {
+      const sampleType = payload?.sampleType || null;
+      const sampleId = payload?.sampleId || null;
+
+      if (
+        sampleType !== this.activeSampleType ||
+        sampleId !== this.activeSelectedSampleId
+      ) {
+        return;
+      }
+
+      this.selectedSegmentationResultRef = {
+        sampleType,
+        sampleId,
+        resultadoId: payload?.resultadoId || null,
+      };
+    },
+
+    clearSelectedSample() {
+      this.selectedSampleRef = {
+        sampleType: null,
+        sampleId: null,
+      };
+      this.clearSelectedSegmentationResult();
+    },
+
+    clearSelectedSegmentationResult() {
+      this.selectedSegmentationResultRef = {
+        sampleType: null,
+        sampleId: null,
+        resultadoId: null,
+      };
     },
   },
 };
 </script>
 
-
 <style>
-/* =========================================
-   CONFIGURACIÓN BASE
-   ========================================= */
 * {
     box-sizing: border-box;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -136,9 +237,6 @@ body {
     -moz-osx-font-smoothing: grayscale;
 }
 
-/* =========================================
-   LAYOUT GENERAL
-   ========================================= */
 .app {
     display: flex;
     align-items: stretch;
@@ -154,9 +252,6 @@ body {
     }
 }
 
-/* =========================================
-   PLACEHOLDER VIEWS (Módulos en desarrollo)
-   ========================================= */
 .placeholder-view {
     flex: 1;
     display: flex;
@@ -227,9 +322,6 @@ body {
     box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
 }
 
-/* =========================================
-   SCROLLBAR PERSONALIZADA
-   ========================================= */
 ::-webkit-scrollbar {
     width: 8px;
     height: 8px;
@@ -249,9 +341,6 @@ body {
     background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
 }
 
-/* =========================================
-   UTILIDADES GLOBALES
-   ========================================= */
 .text-center {
     text-align: center;
 }
@@ -264,7 +353,6 @@ body {
     width: 100%;
 }
 
-/* Animaciones globales */
 @keyframes pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.5; }
@@ -274,7 +362,6 @@ body {
     animation: pulse 1.5s ease-in-out infinite;
 }
 
-/* Estados de carga */
 .skeleton {
     background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
     background-size: 200% 100%;
@@ -286,13 +373,11 @@ body {
     100% { background-position: -200% 0; }
 }
 
-/* Focus visible para accesibilidad */
 *:focus-visible {
     outline: 3px solid #667eea;
     outline-offset: 2px;
 }
 
-/* Selección de texto */
 ::selection {
     background: #667eea;
     color: white;

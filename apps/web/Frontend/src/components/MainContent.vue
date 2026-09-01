@@ -1467,10 +1467,6 @@ export default {
         return;
       }
 
-      if (this.hasPendingDraftWork && !this.confirmDiscardDraftChanges()) {
-        return;
-      }
-
       this.$emit("sample-type-changed", sampleType);
     },
 

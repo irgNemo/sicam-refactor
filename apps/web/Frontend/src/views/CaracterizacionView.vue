@@ -255,6 +255,7 @@ export default {
     return {
       analisis: [],
       muestrasSangre: [],
+      contextLoaded: false,
       loading: false,
       loadError: "",
       selectedSample: null,
@@ -397,6 +398,7 @@ export default {
 
     async loadContext() {
       const requestId = ++this.contextRequestId;
+      this.contextLoaded = false;
       this.loading = true;
       this.loadError = "";
 
@@ -408,14 +410,23 @@ export default {
 
         if (requestId !== this.contextRequestId) return;
 
-        this.analisis = analisisResponse.data || [];
-        this.muestrasSangre = muestrasSangreResponse.data || [];
+        this.analisis = Array.isArray(analisisResponse.data)
+          ? analisisResponse.data
+          : [];
+        this.muestrasSangre = Array.isArray(muestrasSangreResponse.data)
+          ? muestrasSangreResponse.data
+          : [];
+        this.contextLoaded = true;
         this.$nextTick(() => {
           this.restoreSelectedSample();
         });
       } catch (error) {
         if (requestId === this.contextRequestId) {
-          this.loadError = "No fue posible cargar los datos de caracterizacion.";
+          this.contextLoaded = false;
+          this.loadError = this.getHttpErrorMessage(
+            error,
+            "No fue posible cargar los datos de caracterizacion."
+          );
         }
       } finally {
         if (requestId === this.contextRequestId) {
@@ -475,7 +486,10 @@ export default {
         this.restoreSelectedSegmentationResult();
       } catch (error) {
         if (this.isCurrentSample(sampleId, sampleType, requestId)) {
-          this.resultsError = "No fue posible cargar resultados de segmentacion.";
+          this.resultsError = this.getHttpErrorMessage(
+            error,
+            "No fue posible cargar resultados de segmentacion."
+          );
         }
       } finally {
         if (this.isCurrentSample(sampleId, sampleType, requestId)) {
@@ -515,7 +529,10 @@ export default {
           : [];
       } catch (error) {
         if (this.isCurrentResult(resultadoId, requestId)) {
-          this.characterizationsError = "No fue posible cargar la caracterizacion.";
+          this.characterizationsError = this.getHttpErrorMessage(
+            error,
+            "No fue posible cargar la caracterizacion."
+          );
         }
       } finally {
         if (this.isCurrentResult(resultadoId, requestId)) {
@@ -543,7 +560,10 @@ export default {
         await this.loadCharacterizations(resultadoId);
       } catch (error) {
         if (this.localSelectedSegmentationResultId === resultadoId) {
-          this.characterizeError = "No fue posible caracterizar el resultado.";
+          this.characterizeError = this.getHttpErrorMessage(
+            error,
+            "No fue posible caracterizar el resultado."
+          );
         }
       } finally {
         if (this.localSelectedSegmentationResultId === resultadoId) {
@@ -569,6 +589,8 @@ export default {
     },
 
     restoreSelectedSample() {
+      if (!this.contextLoaded) return;
+
       if (!this.selectedSampleId) {
         this.selectSample(null, { emit: false });
         return;
@@ -579,7 +601,7 @@ export default {
       );
 
       if (!sample) {
-        this.selectSample(null, { emit: false });
+        this.selectSample(null, { emit: true });
         return;
       }
 
@@ -656,6 +678,28 @@ export default {
         requestId === this.characterizationsRequestId &&
         this.localSelectedSegmentationResultId === resultadoId
       );
+    },
+
+    getHttpErrorMessage(error, fallback) {
+      const status = error?.response?.status;
+      const data = error?.response?.data;
+
+      if (typeof data === "string" && data.trim()) {
+        return status ? `${data} (HTTP ${status})` : data;
+      }
+
+      if (data && typeof data === "object") {
+        const message = data.error || data.detail || data.message;
+        if (message) {
+          return status ? `${message} (HTTP ${status})` : message;
+        }
+      }
+
+      if (status) {
+        return `${fallback} (HTTP ${status})`;
+      }
+
+      return fallback;
     },
 
     sampleKey(sample) {

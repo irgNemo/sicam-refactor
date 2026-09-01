@@ -158,6 +158,7 @@ import { SAMPLE_TYPES } from "../domain/segmentationTypes";
 
 export default {
   name: "SideBar",
+  emits: ["select-patient", "select-case", "context-invalid"],
 
   props: {
     activeSampleType: {
@@ -243,9 +244,9 @@ export default {
           apiClient.get("/api/analisis/")
         ]);
 
-        this.pacientes = resPacientes.data;
-        this.casos = resCasos.data;
-        this.analisis = resAnalisis.data;
+        this.pacientes = Array.isArray(resPacientes.data) ? resPacientes.data : [];
+        this.casos = Array.isArray(resCasos.data) ? resCasos.data : [];
+        this.analisis = Array.isArray(resAnalisis.data) ? resAnalisis.data : [];
         this.syncSelectionFromProps();
       } catch (error) {
         console.error("Error al cargar datos:", error);
@@ -269,28 +270,14 @@ export default {
     },
 
     seleccionarPaciente(paciente) {
-      this.pacienteSeleccionado = paciente;
-      this.busquedaPaciente = "";
-      this.pacientesFiltrados = [];
-      this.casoSeleccionado = null;
-      this.resetResumen();
-      
       this.$emit("select-patient", paciente.id_paciente);
     },
 
     cambiarPaciente() {
-      this.pacienteSeleccionado = null;
-      this.casoSeleccionado = null;
-      this.busquedaPaciente = "";
-      this.resetResumen();
       this.$emit("select-patient", null);
-      this.$emit("select-case", null);
     },
 
     seleccionarCaso(caso) {
-      this.casoSeleccionado = caso.id_caso;
-      this.resetResumen();
-      this.refrescarResumenCaso(caso.id_caso);
       this.$emit("select-case", caso.id_caso);
     },
 
@@ -391,7 +378,13 @@ export default {
         item => item.id_paciente === this.selectedPatientId
       );
 
-      if (!paciente) return;
+      if (!paciente) {
+        this.pacienteSeleccionado = null;
+        this.casoSeleccionado = null;
+        this.resetResumen();
+        this.$emit("context-invalid", { level: "patient" });
+        return;
+      }
 
       this.pacienteSeleccionado = paciente;
       this.busquedaPaciente = "";
@@ -411,7 +404,12 @@ export default {
           item.paciente === paciente.id_paciente
       );
 
-      if (!caso) return;
+      if (!caso) {
+        this.casoSeleccionado = null;
+        this.resetResumen();
+        this.$emit("context-invalid", { level: "case" });
+        return;
+      }
 
       if (this.casoSeleccionado !== caso.id_caso) {
         this.casoSeleccionado = caso.id_caso;

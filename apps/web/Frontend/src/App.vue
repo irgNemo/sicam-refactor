@@ -14,6 +14,7 @@
       :show-analysis-button="seccion === 'segmentacion'"
       @select-patient="onSelectPatient"
       @select-case="onSelectCase"
+      @context-invalid="onContextInvalid"
     />
 
     <MainContent
@@ -63,6 +64,51 @@ import RegistroView from "./views/RegistroView.vue";
 import CaracterizacionView from "./views/CaracterizacionView.vue";
 import { SAMPLE_TYPES } from "./domain/segmentationTypes";
 
+const UI_CONTEXT_STORAGE_KEY = "sicam.uiContext.v1";
+const UI_CONTEXT_VERSION = 1;
+const VALID_SECTIONS = ["segmentacion", "caracterizacion", "analisis", "registro"];
+const VALID_SAMPLE_TYPES = Object.values(SAMPLE_TYPES);
+
+function normalizeOptionalId(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function readStoredUiContext() {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const rawValue = window.sessionStorage.getItem(UI_CONTEXT_STORAGE_KEY);
+    if (!rawValue) return null;
+
+    const parsed = JSON.parse(rawValue);
+    if (!parsed || parsed.version !== UI_CONTEXT_VERSION) {
+      window.sessionStorage.removeItem(UI_CONTEXT_STORAGE_KEY);
+      return null;
+    }
+
+    const activeTab = VALID_SECTIONS.includes(parsed.activeTab)
+      ? parsed.activeTab
+      : "segmentacion";
+    const sampleType = VALID_SAMPLE_TYPES.includes(parsed.sampleType)
+      ? parsed.sampleType
+      : SAMPLE_TYPES.SALIVA;
+
+    return {
+      activeTab,
+      patientId: normalizeOptionalId(parsed.patientId),
+      caseId: normalizeOptionalId(parsed.caseId),
+      sampleType,
+      sampleId: normalizeOptionalId(parsed.sampleId),
+      segmentationResultId: normalizeOptionalId(parsed.segmentationResultId),
+    };
+  } catch {
+    window.sessionStorage.removeItem(UI_CONTEXT_STORAGE_KEY);
+    return null;
+  }
+}
+
 export default {
   name: "App",
 
@@ -75,19 +121,25 @@ export default {
   },
 
   data() {
+    const storedContext = readStoredUiContext();
+
     return {
-      seccion: "segmentacion",
-      selectedPatientId: null,
-      selectedCaseId: null,
-      activeSampleType: SAMPLE_TYPES.SALIVA,
+      seccion: storedContext?.activeTab || "segmentacion",
+      selectedPatientId: storedContext?.patientId || null,
+      selectedCaseId: storedContext?.caseId || null,
+      activeSampleType: storedContext?.sampleType || SAMPLE_TYPES.SALIVA,
       selectedSampleRef: {
-        sampleType: null,
-        sampleId: null,
+        sampleType: storedContext?.sampleId ? storedContext.sampleType : null,
+        sampleId: storedContext?.sampleId || null,
       },
       selectedSegmentationResultRef: {
-        sampleType: null,
-        sampleId: null,
-        resultadoId: null,
+        sampleType: storedContext?.segmentationResultId
+          ? storedContext.sampleType
+          : null,
+        sampleId: storedContext?.segmentationResultId
+          ? storedContext.sampleId
+          : null,
+        resultadoId: storedContext?.segmentationResultId || null,
       },
     };
   },
@@ -114,33 +166,48 @@ export default {
   },
 
   methods: {
-    requestSectionChange(nextSection) {
-      if (nextSection === this.seccion) return;
-
+    confirmPendingDraftNavigation() {
       if (
         this.seccion === "segmentacion" &&
         this.$refs.mainContent?.hasPendingDraftWork &&
         !this.$refs.mainContent.confirmDiscardDraftChanges()
       ) {
-        return;
+        return false;
       }
+
+      return true;
+    },
+
+    requestSectionChange(nextSection) {
+      if (nextSection === this.seccion) return;
+      if (!VALID_SECTIONS.includes(nextSection)) return;
+
+      if (!this.confirmPendingDraftNavigation()) return;
 
       this.seccion = nextSection;
     },
 
     onSelectPatient(patientId) {
+      if (patientId === this.selectedPatientId) return;
+      if (!this.confirmPendingDraftNavigation()) return;
+
       this.selectedPatientId = patientId;
       this.selectedCaseId = null;
       this.clearSelectedSample();
     },
 
     onSelectCase(caseId) {
+      if (caseId === this.selectedCaseId) return;
+      if (!this.confirmPendingDraftNavigation()) return;
+
       this.selectedCaseId = caseId;
       this.clearSelectedSample();
     },
 
     onSampleTypeChanged(sampleType) {
       if (sampleType === this.activeSampleType) return;
+      if (!this.confirmPendingDraftNavigation()) return;
+
       this.activeSampleType = sampleType;
       this.clearSelectedSample();
     },
@@ -213,6 +280,70 @@ export default {
         resultadoId: null,
       };
     },
+
+    onContextInvalid(payload) {
+      const level = payload?.level;
+
+      if (level === "patient") {
+        this.selectedPatientId = null;
+        this.selectedCaseId = null;
+        this.clearSelectedSample();
+        return;
+      }
+
+      if (level === "case") {
+        this.selectedCaseId = null;
+        this.clearSelectedSample();
+        return;
+      }
+
+      if (level === "sample") {
+        this.clearSelectedSample();
+        return;
+      }
+
+      if (level === "result") {
+        this.clearSelectedSegmentationResult();
+      }
+    },
+
+    persistUiContext() {
+      if (typeof window === "undefined") return;
+
+      const context = {
+        version: UI_CONTEXT_VERSION,
+        activeTab: this.seccion,
+        patientId: this.selectedPatientId,
+        caseId: this.selectedCaseId,
+        sampleType: this.activeSampleType,
+        sampleId: this.activeSelectedSampleId,
+        segmentationResultId: this.activeSelectedSegmentationResultId,
+      };
+
+      window.sessionStorage.setItem(
+        UI_CONTEXT_STORAGE_KEY,
+        JSON.stringify(context)
+      );
+    },
+  },
+
+  watch: {
+    seccion: "persistUiContext",
+    selectedPatientId: "persistUiContext",
+    selectedCaseId: "persistUiContext",
+    activeSampleType: "persistUiContext",
+    selectedSampleRef: {
+      handler: "persistUiContext",
+      deep: true,
+    },
+    selectedSegmentationResultRef: {
+      handler: "persistUiContext",
+      deep: true,
+    },
+  },
+
+  mounted() {
+    this.persistUiContext();
   },
 };
 </script>

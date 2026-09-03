@@ -764,3 +764,385 @@ distancia, redondez, fracciones, circularidad media o tamano medio.
 El refactor actual esta correctamente posicionado para implementar
 caracterizacion sobre resultado efectivo, pero las metricas morfologicas de la
 captura requieren decisiones cientificas antes de codificarse.
+
+## 20. Adenda Sprint 17E.1 - reauditoria dirigida de `backend/creacion`
+
+### 20.1 Proposito de la adenda
+
+Esta adenda corrige la conclusion documental anterior para el caso especifico
+del branch remoto `origin/backend/creacion` de `micronucleos-web`.
+
+La auditoria original de Sprint 17E reviso el estado local de `main` y, con esa
+evidencia, clasifico la captura de caracterizacion como mockup o codigo no
+presente localmente. La reauditoria dirigida encontro que
+`origin/backend/creacion` si contiene una implementacion ejecutable de
+caracterizacion morfologica y una vista Vue que coincide con la captura.
+
+No se hizo checkout, no se modifico codigo, no se portaron algoritmos y no se
+hizo commit.
+
+### 20.2 Referencia Git auditada
+
+Repositorio:
+
+```text
+C:\Users\israe\OneDrive - Universidad de Guadalajara\Documents\SICAM\micronucleos-web
+```
+
+Branch remoto auditado:
+
+```text
+origin/backend/creacion
+```
+
+Hash remoto verificado:
+
+```text
+9d9d39a4f81957d7825dc011451634cf98c23d53
+```
+
+`git ls-remote --heads origin` reporto:
+
+```text
+refs/heads/backend/creacion 9d9d39a4f81957d7825dc011451634cf98c23d53
+```
+
+### 20.3 Evidencia backend encontrada
+
+`origin/backend/creacion:Backend/api/urls.py` registra el endpoint real:
+
+```text
+GET /api/casos/<int:id_caso>/caracterizacion/
+```
+
+Funcion:
+
+```text
+caracterizacion_caso
+```
+
+Evidencia:
+
+- `Backend/api/urls.py:59`: `path('casos/<int:id_caso>/caracterizacion/', caracterizacion_caso, name='caracterizacion-caso')`.
+- `Backend/api/views.py:672`: `_distancia_euclidea`.
+- `Backend/api/views.py:676`: `_calcular_metricas_objeto`.
+- `Backend/api/views.py:723`: `_caracterizar_muestra`.
+- `Backend/api/views.py:793`: `caracterizacion_caso`.
+
+Tambien existe generacion de overlay PNG:
+
+```text
+GET /api/mascaras/<int:id_analisis>/overlay/?offset=<n>&filtrar_vacios=true
+```
+
+Funciones asociadas:
+
+- `_dibujar_mascaras`
+- `_filtrar_membranas_vacias`
+- `obtener_mascara_png`
+
+La caracterizacion legacy de este branch es exclusiva para SALIVA en la ruta
+auditada: `caracterizacion_caso` omite muestras cuyo `tipo_muestra` sea
+`sangre`.
+
+### 20.4 Evidencia frontend encontrada
+
+`origin/backend/creacion:Frontend/src/views/CaracterizacionView.vue` contiene
+una pantalla real de caracterizacion que coincide con la captura legacy:
+
+- KPI cards: `Membranas analizadas`, `Total micronucleos`, `Frecuencia uN`,
+  `Circularidad media`, `Tamano medio`.
+- visor de imagen con overlay de mascara.
+- leyenda de `Membrana`, `Nucleo`, `Micronucleo`.
+- tabla `Resultados por Membrana`.
+- columnas `Area Nucleo`, `Area MN`, `Int. Nucleo`, `Int. MN`,
+  `Redondez N.`, `Redondez MN`, `Distancia`, `Fra. Area`, `Fra. Int.`.
+- `Exportar CSV`.
+- `Generar PDF`.
+
+Evidencia:
+
+- `Frontend/src/views/CaracterizacionView.vue:748`: llamada a
+  `axios.get('/api/casos/${props.caseId}/caracterizacion/')`.
+- `Frontend/src/views/CaracterizacionView.vue:896-967`: construccion de KPI
+  cards.
+- `Frontend/src/views/CaracterizacionView.vue:969-1034`: barras de
+  distribucion y alerta `uN >= 2`.
+- `Frontend/src/views/CaracterizacionView.vue:1037-1088`: `exportarCSV`.
+- `Frontend/src/views/CaracterizacionView.vue:1096-1134`: `generarPDF`.
+- `Frontend/package.json`: dependencia `html2pdf.js`.
+
+Por tanto, para `origin/backend/creacion`, la captura no debe clasificarse como
+mockup. Debe clasificarse como implementacion legacy real con limitaciones
+cientificas y tecnicas.
+
+### 20.5 Contrato de salida real de caracterizacion legacy
+
+`caracterizacion_caso` devuelve:
+
+```json
+{
+  "totales": {
+    "nucleos": 0,
+    "micronucleos": 0,
+    "membranas": 0
+  },
+  "membranas": [],
+  "imagenes": []
+}
+```
+
+Cada fila de `membranas` puede contener:
+
+```json
+{
+  "id_tabla": "27.1",
+  "id_muestra": 1,
+  "area_nucleo": 0,
+  "area_mn": 0,
+  "int_nucleo": 0,
+  "int_mn": 0,
+  "redondez_n": 0,
+  "redondez_mn": 0,
+  "distancia": 0,
+  "fra_area": 0,
+  "fra_int": 0
+}
+```
+
+Cada elemento de `imagenes` puede contener:
+
+```json
+{
+  "id": 1,
+  "title": "Muestra 1",
+  "src": "/media/...",
+  "mask_src": "/api/mascaras/<id_analisis>/overlay/?offset=<n>&filtrar_vacios=true",
+  "requiere_revision_manual": false
+}
+```
+
+### 20.6 Formulas y reglas encontradas en `backend/creacion`
+
+| Item | Campo / metrica | Archivo / lineas | Formula o regla real | Observacion |
+|---|---|---|---|---|
+| 1 | Area de nucleo | `Backend/api/views.py:693-700`, `762` | Rasteriza poligono sobre mascara PIL y usa `np.sum(mask_arr)` | Unidad efectiva: pixeles cuadrados. |
+| 2 | Area de micronucleo | `Backend/api/views.py:693-700`, `763` | Misma formula de area sobre el poligono del MN | Unidad efectiva: pixeles cuadrados. |
+| 3 | Intensidad nucleo | `Backend/api/views.py:709-712`, `764` | `np.mean(pixels) / 255.0` sobre imagen original en gris | Normalizada 0-1. |
+| 4 | Intensidad MN | `Backend/api/views.py:709-712`, `765` | Misma formula sobre pixeles del poligono MN | Normalizada 0-1. |
+| 5 | Perimetro | `Backend/api/views.py:683-687` | Suma de distancias entre puntos consecutivos con cierre por `np.roll` | Unidad efectiva: pixeles. |
+| 6 | Redondez / circularidad de objeto | `Backend/api/views.py:702-707` | `(4 * np.pi * area) / (perimeter ** 2)`, truncada a maximo `1.0` | Se reporta como `roundness`. |
+| 7 | Centroide | `Backend/api/views.py:681` | Promedio aritmetico de vertices `[mean(x), mean(y)]` | No usa centroide geometrico por momentos. |
+| 8 | Distancia nucleo-MN | `Backend/api/views.py:672-673`, `768` | Distancia euclidiana entre centroides | Unidad efectiva: pixeles. |
+| 9 | Fraccion de area | `Backend/api/views.py:769` | `area_mn / area_nucleo` si `area_nucleo > 0` | Ratio sin unidad. |
+| 10 | Fraccion de intensidad | `Backend/api/views.py:770` | `int_mn / int_nucleo` si `int_nucleo > 0` | Ratio sin unidad. |
+| 11 | Frecuencia uN | `Frontend/src/views/CaracterizacionView.vue:908-910` | `(totales.micronucleos / totales.membranas) * 100` | Porcentaje en UI. |
+| 12 | Circularidad media | `Frontend/src/views/CaracterizacionView.vue:901-903` | Promedio de `row.redondez_n` sobre filas de tabla | Puede ponderar de mas membranas con varios MN. |
+| 13 | Tamano medio | `Frontend/src/views/CaracterizacionView.vue:904-906` | Promedio de `row.area_nucleo` sobre filas de tabla | UI muestra `um3`, pero no hay calibracion fisica. |
+| 14 | Alerta `uN >= 2` | `Frontend/src/views/CaracterizacionView.vue:981-990` | Cuenta membranas cuyo numero de filas con `area_mn > 0` es `>= 2` | Calculada por imagen activa. |
+| 15 | Footer `con alertas` | `Frontend/src/views/CaracterizacionView.vue:884-894`, `576` | Cuenta membranas con al menos un MN | No usa el umbral `>= 2`. |
+
+### 20.7 Asociacion membrana -> nucleo -> micronucleo
+
+La asociacion no usa inclusion geometrica punto-en-poligono. Usa proximidad de
+centroides:
+
+1. Calcula metricas y centroides de membranas, nucleos y micronucleos.
+2. Para cada nucleo, calcula distancia contra todos los centroides de membrana.
+3. Asigna el nucleo a la membrana con menor distancia.
+4. Para cada membrana, elige como nucleo principal el de mayor area.
+5. Para cada micronucleo, calcula distancia contra todos los centroides de
+   membrana.
+6. Asigna el micronucleo a la membrana con menor distancia.
+
+La regla esta en `Backend/api/views.py:739-754`.
+
+Esta regla es portable tecnicamente, pero requiere decision cientifica antes de
+adoptarse en `sicam-refactor`, porque puede asociar objetos cercanos aunque no
+esten contenidos dentro de una membrana.
+
+### 20.8 Semantica de `#27.1` y `#27.2`
+
+`id_tabla` se construye en `Backend/api/views.py:760`.
+
+Interpretacion real:
+
+- `27` identifica la membrana visual global dentro del caso.
+- `.1`, `.2`, etc. identifican el indice local del micronucleo asociado a esa
+  membrana.
+- Si la membrana tiene nucleo pero no tiene MN, `id_tabla` queda como `"27"`
+  sin sufijo.
+
+Por tanto, `#27.1` y `#27.2` significan dos micronucleos asociados a la
+membrana visual 27, no dos membranas distintas.
+
+### 20.9 Calibracion fisica
+
+No se encontro calibracion pixel -> `um`, `um2` o `um3` en
+`origin/backend/creacion`.
+
+Las areas y distancias se calculan en pixeles. La UI muestra `Tamano medio` con
+unidad `um3` en `Frontend/src/views/CaracterizacionView.vue:959`, pero esa
+unidad no esta respaldada por una conversion fisica en el backend auditado.
+
+### 20.10 CSV y PDF
+
+CSV:
+
+- Implementado en frontend.
+- `Frontend/src/views/CaracterizacionView.vue:1037-1088`.
+- Exporta `filteredSortedData` a un `Blob` CSV.
+- No hay endpoint backend de CSV.
+
+PDF:
+
+- Implementado en frontend con `html2pdf.js`.
+- `Frontend/src/views/CaracterizacionView.vue:1096-1134`.
+- `Frontend/package.json` declara `html2pdf.js`.
+- No hay endpoint backend de PDF.
+
+### 20.11 Contraste contra `sicam-refactor`
+
+`sicam-refactor` ya tiene caracterizacion activa, pero no contiene aun la
+morfometria de `origin/backend/creacion`.
+
+Implementacion activa actual:
+
+- `apps/web/Backend/api/services/characterization/service.py`
+- `apps/web/Backend/api/services/characterization/saliva.py`
+- `apps/web/Backend/api/services/characterization/types.py`
+- `apps/web/Frontend/src/views/CaracterizacionView.vue`
+
+Alcance actual en `sicam-refactor`:
+
+- usa `ResultadoSegmentacion` efectivo (`VALIDADA > AUTOMATICO`);
+- persiste `ResultadoCaracterizacion`;
+- reutiliza caracterizacion vigente;
+- soporta SALIVA con conteos y `genotoxicity_index = micronucleo / membrana`;
+- soporta BLOOD solo con conteos y bloqueos documentados;
+- documenta como bloqueada la regla espacial legacy
+  membrana-nucleo-micronucleo.
+
+Faltantes frente a `origin/backend/creacion`:
+
+- area por nucleo;
+- area por micronucleo;
+- intensidad por nucleo;
+- intensidad por micronucleo;
+- redondez/circularidad por objeto;
+- distancia nucleo-MN;
+- fraccion de area;
+- fraccion de intensidad;
+- asociacion membrana -> nucleo -> micronucleo;
+- identificadores visuales `#27.1`;
+- alerta `uN >= 2`;
+- CSV;
+- PDF;
+- overlay PNG backend para caracterizacion.
+
+### 20.12 Cambios a las conclusiones de Sprint 17E
+
+Cambia:
+
+- La afirmacion "no se encontro endpoint de caracterizacion morfologica" queda
+  corregida para `origin/backend/creacion`: si existe
+  `GET /api/casos/<int:id_caso>/caracterizacion/`.
+- La afirmacion "la tabla Resultados por Membrana no fue encontrada" queda
+  corregida para `origin/backend/creacion`: si existe en
+  `Frontend/src/views/CaracterizacionView.vue`.
+- La afirmacion "CSV/PDF son placeholder" queda corregida para
+  `origin/backend/creacion`: CSV y PDF si tienen handlers frontend.
+- La captura no debe clasificarse como mockup para `origin/backend/creacion`;
+  debe clasificarse como implementacion legacy real.
+
+Permanece:
+
+- En el `main` local de `micronucleos-web` auditado originalmente, esas piezas
+  no estaban presentes.
+- `Segmentacion_web` sigue siendo una fuente legacy PySide/XLSX separada.
+- No hay calibracion fisica demostrada.
+- No hay pruebas automatizadas encontradas para estas formulas en
+  `micronucleos-web`.
+- BLOOD no tiene caracterizacion morfologica equivalente.
+- `sicam-refactor` todavia no debe portar estas formulas sin decision
+  cientifica.
+
+### 20.13 Portabilidad y decisiones requeridas
+
+Portable con adaptacion tecnica:
+
+- calculo de area/perimetro en pixeles desde poligonos;
+- intensidad media sobre imagen original en escala de grises;
+- distancia euclidiana entre centroides;
+- CSV frontend;
+- PDF frontend;
+- tabla por membrana.
+
+Requiere decision cientifica:
+
+- adoptar proximidad de centroides como asociacion oficial;
+- definir si `Frecuencia uN` debe ser ratio o porcentaje;
+- validar circularidad/redondez y su truncamiento a `1.0`;
+- corregir o justificar unidades `um`, `um2` o `um3`;
+- definir alerta `uN >= 2`;
+- definir si `Circularidad media` y `Tamano medio` deben promediar filas,
+  membranas unicas u objetos unicos;
+- decidir si se incorpora overlay PNG backend o se reutiliza el overlay SVG
+  actual de `sicam-refactor`.
+
+### 20.14 Respuestas explicitas solicitadas en Sprint 17E.1
+
+1. Branch existe: si, como `origin/backend/creacion`.
+2. Hash: `9d9d39a4f81957d7825dc011451634cf98c23d53`.
+3. `views.py` contiene caracterizacion: si.
+4. `CaracterizacionView.vue` coincide con la captura: si, contiene KPI,
+   visor, tabla, CSV y PDF.
+5. Real vs mockup: real en `origin/backend/creacion`; no era real en el
+   `main` local auditado originalmente.
+6. Area nucleo: pixel count sobre poligono rasterizado.
+7. Area MN: pixel count sobre poligono rasterizado.
+8. Intensidad nucleo: media de gris dentro de mascara / 255.
+9. Intensidad MN: media de gris dentro de mascara / 255.
+10. Fraccion area: `area_mn / area_nucleo`.
+11. Fraccion intensidad: `int_mn / int_nucleo`.
+12. Redondez: `(4 * pi * area) / perimeter^2`, truncada a `1.0`.
+13. Centroide: promedio de vertices.
+14. Distancia: euclidiana entre centroides nucleo-MN.
+15. Frecuencia uN: `(micronucleos / membranas) * 100` en la UI legacy.
+16. Circularidad media: promedio de `redondez_n` por fila de tabla.
+17. Tamano medio: promedio de `area_nucleo` por fila de tabla.
+18. Alertas: por imagen, membranas con `>= 2` MN; footer global cuenta
+   membranas con al menos un MN.
+19. Calibracion: no encontrada.
+20. Asociacion membrana->nucleo->MN: proximidad de centroides.
+21. Semantica `#27.1/#27.2`: membrana 27, micronucleos 1 y 2.
+22. Alerta MN>=2: implementada en `distributionBars`; no usada igual en el
+   footer global.
+23. CSV: implementado en frontend, sin endpoint backend.
+24. PDF: implementado en frontend con `html2pdf.js`, sin endpoint backend.
+25. Conclusiones que cambian: endpoint, UI, formulas, CSV/PDF y captura real
+   para `backend/creacion`.
+26. Conclusiones que permanecen: ausencia en `main` local original, falta de
+   calibracion, falta de tests y necesidad de decision cientifica.
+27. Falta en refactor: morfometria, asociacion espacial, CSV/PDF y reglas de
+   alerta.
+28. Portable: geometria en pixeles, intensidad, CSV/PDF y tabla, con
+   adaptacion al contrato efectivo.
+29. Requiere decision cientifica: unidades, asociacion, promedios, frecuencia,
+   alerta y alcance SALIVA/BLOOD.
+30. `docs/54` actualizado: si, mediante esta adenda.
+31. `git status`: debe mostrar solo este documento modificado despues de la
+   actualizacion documental.
+
+### 20.15 Conclusion corregida
+
+Sprint 17E.1 audit = PASS WITH LIMITATIONS.
+
+La reauditoria dirigida confirma que `origin/backend/creacion` contiene una
+implementacion legacy real de caracterizacion morfologica SALIVA. La captura
+corresponde a esa implementacion o a una variante muy cercana de ella.
+
+La implementacion es valiosa como referencia tecnica, pero no debe portarse
+literalmente sin cerrar decisiones cientificas sobre unidades, calibracion,
+asociacion espacial, definicion de promedios, frecuencia `uN`, alertas y alcance
+SALIVA/BLOOD.

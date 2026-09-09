@@ -15,10 +15,9 @@ from .types import (
     CAPABILITY_CYTOTOXICITY_INDEX,
     CAPABILITY_GENOTOXICITY_INDEX,
     STATUS_AVAILABLE,
-    STATUS_BLOCKED_SCIENTIFIC_RULE,
     STATUS_NOT_DEFINED,
     WARNING_BLOOD_CHARACTERIZATION_NOT_DEFINED,
-    CHARACTERIZATION_ALGORITHM_VERSION,
+    get_characterization_algorithm_version,
 )
 
 
@@ -43,12 +42,15 @@ def get_or_create_resultado_caracterizacion(resultado_or_id):
         )
         effective = resolve_effective_segmentation(resultado)
         revision_id = _get_effective_revision_id(effective)
+        algorithm_version = get_characterization_algorithm_version(
+            resultado.tipo_muestra
+        )
 
         existing = ResultadoCaracterizacion.objects.filter(
             resultado_segmentacion=resultado,
             revision_segmentacion_id=revision_id,
             source_type=effective['fuente'],
-            algorithm_version=CHARACTERIZATION_ALGORITHM_VERSION,
+            algorithm_version=algorithm_version,
         ).order_by('created_at', 'id_resultado_caracterizacion').first()
 
         if existing:
@@ -57,6 +59,7 @@ def get_or_create_resultado_caracterizacion(resultado_or_id):
         resultado_json = characterize_effective_segmentation(
             effective,
             sample_type=resultado.tipo_muestra,
+            image_path=_get_original_image_path(resultado),
         )
 
         caracterizacion = ResultadoCaracterizacion(
@@ -64,7 +67,7 @@ def get_or_create_resultado_caracterizacion(resultado_or_id):
             revision_segmentacion_id=revision_id,
             source_type=effective['fuente'],
             sample_type=resultado.tipo_muestra,
-            algorithm_version=CHARACTERIZATION_ALGORITHM_VERSION,
+            algorithm_version=algorithm_version,
             resultado_json=resultado_json,
         )
         caracterizacion.full_clean()
@@ -72,15 +75,24 @@ def get_or_create_resultado_caracterizacion(resultado_or_id):
         return caracterizacion, True
 
 
-def characterize_effective_segmentation(effective, sample_type=SampleType.SALIVA):
+def characterize_effective_segmentation(
+    effective,
+    sample_type=SampleType.SALIVA,
+    image_path=None,
+):
     if not isinstance(effective, dict):
         raise ValueError('El resultado efectivo debe ser un objeto JSON')
 
     effective_result = copy.deepcopy(effective.get('resultado'))
     source = _build_source(effective)
+    algorithm_version = get_characterization_algorithm_version(sample_type)
 
     if sample_type == SampleType.SALIVA:
-        characterization = characterize_saliva_result(effective_result, source)
+        characterization = characterize_saliva_result(
+            effective_result,
+            source,
+            image_path=image_path,
+        )
     elif sample_type == SampleType.BLOOD:
         characterization = _characterize_blood_counts_only(
             effective_result,
@@ -90,8 +102,8 @@ def characterize_effective_segmentation(effective, sample_type=SampleType.SALIVA
         raise ValueError(f'Tipo de muestra no soportado: {sample_type}')
 
     return {
-        'version': CHARACTERIZATION_ALGORITHM_VERSION,
         **characterization,
+        'version': algorithm_version,
     }
 
 
@@ -101,8 +113,8 @@ def is_characterization_current(characterization):
     )
 
     if (
-        characterization.algorithm_version
-        != CHARACTERIZATION_ALGORITHM_VERSION
+        characterization.algorithm_version !=
+        get_characterization_algorithm_version(characterization.sample_type)
     ):
         return False
 
@@ -148,6 +160,24 @@ def _get_effective_revision_id(effective):
         raise ValueError('La fuente VALIDADA requiere metadata de revision')
 
     return revision.get('id_revision_segmentacion')
+
+
+def _get_original_image_path(resultado):
+    if resultado.tipo_muestra == SampleType.SALIVA:
+        muestra = getattr(resultado, 'muestra', None)
+    elif resultado.tipo_muestra == SampleType.BLOOD:
+        muestra = getattr(resultado, 'muestra_sangre', None)
+    else:
+        return None
+
+    image = getattr(muestra, 'imagen', None)
+    if not image:
+        return None
+
+    try:
+        return image.path
+    except (NotImplementedError, ValueError):
+        return None
 
 
 def _characterize_blood_counts_only(effective_result, source):

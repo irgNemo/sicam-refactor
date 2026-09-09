@@ -1,4 +1,9 @@
+from api.services.segmentation.types import SampleType
+
+
 CHARACTERIZATION_ALGORITHM_VERSION = '1.0'
+SALIVA_CHARACTERIZATION_ALGORITHM_VERSION = '2.0'
+BLOOD_CHARACTERIZATION_ALGORITHM_VERSION = CHARACTERIZATION_ALGORITHM_VERSION
 
 CAPABILITY_COUNTS = 'counts'
 CAPABILITY_GENOTOXICITY_INDEX = 'genotoxicity_index'
@@ -18,3 +23,11 @@ WARNING_BLOOD_CHARACTERIZATION_NOT_DEFINED = (
     'No existe una regla cientifica versionada para caracterizacion de '
     'SANGRE; se reportan solo conteos.'
 )
+
+
+def get_characterization_algorithm_version(sample_type):
+    if sample_type == SampleType.SALIVA:
+        return SALIVA_CHARACTERIZATION_ALGORITHM_VERSION
+    if sample_type == SampleType.BLOOD:
+        return BLOOD_CHARACTERIZATION_ALGORITHM_VERSION
+    return CHARACTERIZATION_ALGORITHM_VERSION

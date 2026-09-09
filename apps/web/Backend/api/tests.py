@@ -3,7 +3,7 @@ import tempfile
 import json
 from copy import deepcopy
 from datetime import date
-from io import StringIO
+from io import BytesIO, StringIO
 from pathlib import Path
 from unittest.mock import patch
 
@@ -17,6 +17,7 @@ from django.urls import reverse
 from django.utils import timezone
 from rest_framework import serializers, status
 from rest_framework.test import APITestCase
+from PIL import Image
 
 from .models import (
     AnalisisPred,
@@ -50,8 +51,17 @@ from .services.segmentation.effective import (
     resolve_effective_segmentation,
 )
 from .services.characterization.geometry import (
+    CIRCULARITY_EPSILON,
+    POINT_INSIDE,
+    POINT_ON_BOUNDARY,
+    POINT_OUTSIDE,
+    classify_point_in_polygon,
+    is_self_intersecting_polygon,
     polygon_area,
+    polygon_centroid,
+    polygon_circularity,
     polygon_perimeter,
+    polygon_signed_area,
 )
 from .services.characterization.service import (
     characterize_effective_segmentation,
@@ -60,8 +70,8 @@ from .services.characterization.service import (
     is_characterization_current,
 )
 from .services.characterization.types import (
-    CHARACTERIZATION_ALGORITHM_VERSION,
-    STATUS_BLOCKED_SCIENTIFIC_RULE,
+    BLOOD_CHARACTERIZATION_ALGORITHM_VERSION,
+    SALIVA_CHARACTERIZATION_ALGORITHM_VERSION,
     STATUS_NOT_DEFINED,
 )
 from .management.commands.seed_demo_data import (
@@ -2679,31 +2689,39 @@ class CharacterizationCoreTests(APITestCase):
         )
         self.muestra = MuestraSaliva.objects.create(
             analisis=self.analisis,
-            imagen=SimpleUploadedFile(
-                'char-saliva.jpg',
-                b'fake saliva image',
-                content_type='image/jpeg',
-            ),
+            imagen=self._image_upload('char-saliva.png', gray=128),
         )
         self.muestra_sangre = MuestraSangre.objects.create(
             analisis=self.analisis,
-            imagen=SimpleUploadedFile(
-                'char-blood.jpg',
-                b'fake blood image',
-                content_type='image/jpeg',
-            ),
+            imagen=self._image_upload('char-blood.png', gray=64),
         )
 
     def tearDown(self):
         self.override.disable()
         shutil.rmtree(self.media_root, ignore_errors=True)
 
+    def _image_upload(self, filename, gray=128):
+        output = BytesIO()
+        Image.new('L', (100, 100), color=gray).save(output, format='PNG')
+        return SimpleUploadedFile(
+            filename,
+            output.getvalue(),
+            content_type='image/png',
+        )
+
+    def _box(self, x1, y1, x2, y2):
+        return [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
+
     def _automatic_saliva_result(self, objects=None):
         objects = objects if objects is not None else [
-            self._normalized_object(1, 'membrana'),
-            self._normalized_object(2, 'membrana'),
-            self._normalized_object(3, 'nucleo'),
-            self._normalized_object(4, 'micronucleo'),
+            self._normalized_object(1, 'membrana', self._box(0, 0, 40, 40)),
+            self._normalized_object(2, 'membrana', self._box(50, 0, 90, 40)),
+            self._normalized_object(3, 'nucleo', self._box(10, 10, 20, 20)),
+            self._normalized_object(
+                4,
+                'micronucleo',
+                self._box(25, 10, 30, 15),
+            ),
         ]
         return ResultadoSegmentacion.objects.create(
             muestra=self.muestra,
@@ -2733,16 +2751,17 @@ class CharacterizationCoreTests(APITestCase):
             estado='COMPLETADO',
         )
 
-    def _normalized_object(self, object_id, label):
+    def _normalized_object(self, object_id, label, points=None, raw_id=255):
+        points = points if points is not None else self._box(0, 0, 10, 10)
         return {
             'id': object_id,
             'label': label,
             'geometry': {
                 'type': 'polygon',
-                'points': [[0, 0], [10, 0], [10, 10]],
+                'points': deepcopy(points),
             },
             'source': {
-                'raw_id': 255,
+                'raw_id': raw_id,
                 'raw_type': label,
             },
         }
@@ -2763,28 +2782,40 @@ class CharacterizationCoreTests(APITestCase):
             },
         }
 
-    def _revision_snapshot(self, resultado, labels):
+    def _revision_snapshot(self, resultado, items):
+        objects = []
+        for index, item in enumerate(items, start=1):
+            if isinstance(item, dict):
+                label = item['label']
+                points = item.get('points', self._box(0, 0, 5, 5))
+                raw_id = item.get('raw_id')
+            else:
+                label = item
+                points = self._box(index * 10, 0, index * 10 + 5, 5)
+                raw_id = None
+            objects.append({
+                'id': index,
+                'label': label,
+                'geometry': {
+                    'type': 'polygon',
+                    'points': deepcopy(points),
+                },
+                'provenance': {
+                    'origin': 'manual',
+                    'base_object_id': raw_id,
+                },
+            })
         return {
             'version': '1.0',
             'base_result_id': resultado.id_resultado_segmentacion,
-            'objects': [
-                {
-                    'id': index,
-                    'label': label,
-                    'geometry': {
-                        'type': 'polygon',
-                        'points': [[0, 0], [5, 0], [5, 5]],
-                    },
-                    'provenance': {
-                        'origin': 'manual',
-                        'base_object_id': None,
-                    },
-                }
-                for index, label in enumerate(labels, start=1)
-            ],
+            'objects': objects,
         }
 
-    def _revision_summary(self, labels):
+    def _revision_summary(self, items):
+        labels = [
+            item['label'] if isinstance(item, dict) else item
+            for item in items
+        ]
         counts = {
             label: labels.count(label)
             for label in get_allowed_revision_labels(SampleType.SALIVA)
@@ -2794,13 +2825,13 @@ class CharacterizationCoreTests(APITestCase):
             'total_objects': len(labels),
         }
 
-    def _create_revision(self, resultado, estado, labels, numero_revision=1):
+    def _create_revision(self, resultado, estado, items, numero_revision=1):
         return RevisionSegmentacion.objects.create(
             resultado_segmentacion=resultado,
             numero_revision=numero_revision,
             estado=estado,
-            resultado_editado=self._revision_snapshot(resultado, labels),
-            resumen=self._revision_summary(labels),
+            resultado_editado=self._revision_snapshot(resultado, items),
+            resumen=self._revision_summary(items),
             validado_en=(
                 timezone.now()
                 if estado == RevisionSegmentacion.ESTADO_VALIDADA
@@ -2824,7 +2855,42 @@ class CharacterizationCoreTests(APITestCase):
         square = [[0, 0], [10, 0], [10, 10], [0, 10]]
 
         assert polygon_area(square) == 100
+        assert polygon_signed_area(square) == 100
+        assert polygon_signed_area(list(reversed(square))) == -100
         assert polygon_perimeter(square) == 40
+        assert polygon_centroid(square) == [5.0, 5.0]
+
+    def test_circularity_normalizes_epsilon_and_rejects_invalid_values(self):
+        valid_area = (1 + CIRCULARITY_EPSILON / 2) / (4 * 3.141592653589793)
+        invalid_area = (1 + CIRCULARITY_EPSILON * 2) / (
+            4 * 3.141592653589793
+        )
+
+        circularity, warning = polygon_circularity(valid_area, 1)
+        invalid_circularity, invalid_warning = polygon_circularity(
+            invalid_area,
+            1,
+        )
+
+        assert circularity == 1.0
+        assert warning is None
+        assert invalid_circularity is None
+        assert invalid_warning == 'INVALID_CIRCULARITY'
+
+    def test_geometry_detects_self_intersections_and_point_positions(self):
+        square = [[0, 0], [10, 0], [10, 10], [0, 10]]
+        bowtie = [[0, 0], [10, 10], [0, 10], [10, 0]]
+        concave = [[0, 0], [10, 0], [10, 4], [4, 4], [4, 10], [0, 10]]
+
+        assert is_self_intersecting_polygon(square) is False
+        assert is_self_intersecting_polygon(bowtie) is True
+        assert classify_point_in_polygon([5, 5], square) == POINT_INSIDE
+        assert classify_point_in_polygon([10, 5], square) == (
+            POINT_ON_BOUNDARY
+        )
+        assert classify_point_in_polygon([20, 5], square) == POINT_OUTSIDE
+        assert classify_point_in_polygon([2, 2], concave) == POINT_INSIDE
+        assert classify_point_in_polygon([6, 6], concave) == POINT_OUTSIDE
 
     def test_saliva_automatic_characterization_uses_effective_result(self):
         resultado = self._automatic_saliva_result()
@@ -2838,26 +2904,23 @@ class CharacterizationCoreTests(APITestCase):
         assert caracterizacion.sample_type == SampleType.SALIVA
         assert (
             caracterizacion.algorithm_version
-            == CHARACTERIZATION_ALGORITHM_VERSION
+            == SALIVA_CHARACTERIZATION_ALGORITHM_VERSION
         )
-        assert caracterizacion.resultado_json['version'] == (
-            CHARACTERIZATION_ALGORITHM_VERSION
-        )
-        assert caracterizacion.resultado_json['counts'] == {
-            'membrana': 2,
-            'nucleo': 1,
-            'micronucleo': 1,
-        }
-        assert caracterizacion.resultado_json['indices'] == {
-            'genotoxicity_index': 0.5,
-            'cytotoxicity_index': None,
-        }
+        result = caracterizacion.resultado_json
+        assert result['version'] == SALIVA_CHARACTERIZATION_ALGORITHM_VERSION
+        assert result['schema_version'] == '2.0'
+        assert result['summary']['total_membranes'] == 2
+        assert result['summary']['total_nuclei'] == 1
+        assert result['summary']['total_micronuclei'] == 1
+        assert result['summary']['genotoxicity_index'] == 0.5
+        assert result['summary']['cytotoxicity_index'] == 0
+        assert result['summary']['genotoxicity_status'] == 'VALID'
+        assert result['summary']['cytotoxicity_status'] == 'VALID'
+        assert result['summary']['mean_nucleus_area_px2'] == 100
         assert (
-            caracterizacion.resultado_json['characterization_capabilities'][
-                'binucleate_trinucleate'
-            ]
-            == STATUS_BLOCKED_SCIENTIFIC_RULE
+            result['summary']['association_quality']['nuclei_associated'] == 1
         )
+        assert len(result['cells']) == 2
 
         resultado.refresh_from_db()
         assert resultado.respuesta_json == original_raw
@@ -2871,8 +2934,12 @@ class CharacterizationCoreTests(APITestCase):
         caracterizacion = characterize_resultado_segmentacion(resultado)
 
         assert (
-            caracterizacion.resultado_json['indices']['genotoxicity_index']
+            caracterizacion.resultado_json['summary']['genotoxicity_index']
             is None
+        )
+        assert (
+            caracterizacion.resultado_json['summary']['genotoxicity_status']
+            == 'NOT_COMPUTABLE'
         )
 
     def test_characterization_ignores_draft_revision(self):
@@ -2887,14 +2954,18 @@ class CharacterizationCoreTests(APITestCase):
 
         assert caracterizacion.source_type == FUENTE_AUTOMATICO
         assert caracterizacion.revision_segmentacion is None
-        assert caracterizacion.resultado_json['counts']['membrana'] == 2
+        assert caracterizacion.resultado_json['summary']['total_membranes'] == 2
 
     def test_characterization_uses_latest_validated_revision(self):
         resultado = self._automatic_saliva_result()
         revision = self._create_revision(
             resultado,
             RevisionSegmentacion.ESTADO_VALIDADA,
-            ['membrana', 'micronucleo', 'micronucleo'],
+            [
+                {'label': 'membrana', 'points': self._box(0, 0, 40, 40)},
+                {'label': 'micronucleo', 'points': self._box(5, 5, 10, 10)},
+                {'label': 'micronucleo', 'points': self._box(20, 5, 25, 10)},
+            ],
         )
         self._create_revision(
             resultado,
@@ -2913,14 +2984,14 @@ class CharacterizationCoreTests(APITestCase):
             'revision_segmentacion_id': revision.id_revision_segmentacion,
             'numero_revision': 1,
         }
-        assert caracterizacion.resultado_json['counts'] == {
-            'membrana': 1,
-            'nucleo': 0,
-            'micronucleo': 2,
-        }
-        assert caracterizacion.resultado_json['indices'][
-            'genotoxicity_index'
-        ] == 2
+        assert caracterizacion.resultado_json['summary']['total_membranes'] == 1
+        assert caracterizacion.resultado_json['summary']['total_nuclei'] == 0
+        assert (
+            caracterizacion.resultado_json['summary']['total_micronuclei'] == 2
+        )
+        assert (
+            caracterizacion.resultado_json['summary']['genotoxicity_index'] == 2
+        )
 
     def test_blood_characterization_is_counts_only(self):
         resultado = self._automatic_blood_result()
@@ -2928,6 +2999,13 @@ class CharacterizationCoreTests(APITestCase):
         caracterizacion = characterize_resultado_segmentacion(resultado)
 
         assert caracterizacion.sample_type == SampleType.BLOOD
+        assert (
+            caracterizacion.algorithm_version
+            == BLOOD_CHARACTERIZATION_ALGORITHM_VERSION
+        )
+        assert caracterizacion.resultado_json['version'] == (
+            BLOOD_CHARACTERIZATION_ALGORITHM_VERSION
+        )
         assert caracterizacion.resultado_json['counts'] == {
             'membrana': 1,
             'micronucleo': 2,
@@ -3088,8 +3166,8 @@ class CharacterizationCoreTests(APITestCase):
         assert is_characterization_current(characterization) is True
 
         with patch(
-            'api.services.characterization.service.CHARACTERIZATION_ALGORITHM_VERSION',
-            '2.0',
+            'api.services.characterization.service.get_characterization_algorithm_version',
+            return_value='2.1',
         ):
             assert is_characterization_current(characterization) is False
 
@@ -3098,8 +3176,8 @@ class CharacterizationCoreTests(APITestCase):
         first = characterize_resultado_segmentacion(resultado)
 
         with patch(
-            'api.services.characterization.service.CHARACTERIZATION_ALGORITHM_VERSION',
-            '2.0',
+            'api.services.characterization.service.get_characterization_algorithm_version',
+            return_value='2.1',
         ):
             second, created = get_or_create_resultado_caracterizacion(
                 resultado
@@ -3107,8 +3185,8 @@ class CharacterizationCoreTests(APITestCase):
 
         assert created is True
         assert second.pk != first.pk
-        assert second.algorithm_version == '2.0'
-        assert second.resultado_json['version'] == '2.0'
+        assert second.algorithm_version == '2.1'
+        assert second.resultado_json['version'] == '2.1'
 
     def test_model_clean_rejects_cross_result_revision(self):
         resultado_a = self._automatic_saliva_result()
@@ -3123,7 +3201,7 @@ class CharacterizationCoreTests(APITestCase):
             revision_segmentacion=revision_b,
             source_type=FUENTE_VALIDADA,
             sample_type=SampleType.SALIVA,
-            algorithm_version=CHARACTERIZATION_ALGORITHM_VERSION,
+            algorithm_version=SALIVA_CHARACTERIZATION_ALGORITHM_VERSION,
             resultado_json={},
         )
 
@@ -3142,7 +3220,7 @@ class CharacterizationCoreTests(APITestCase):
             revision_segmentacion=draft,
             source_type=FUENTE_VALIDADA,
             sample_type=SampleType.SALIVA,
-            algorithm_version=CHARACTERIZATION_ALGORITHM_VERSION,
+            algorithm_version=SALIVA_CHARACTERIZATION_ALGORITHM_VERSION,
             resultado_json={},
         )
 
@@ -3184,9 +3262,11 @@ class CharacterizationCoreTests(APITestCase):
         assert response.data['source_type'] == FUENTE_AUTOMATICO
         assert response.data['sample_type'] == SampleType.SALIVA
         assert response.data['algorithm_version'] == (
-            CHARACTERIZATION_ALGORITHM_VERSION
+            SALIVA_CHARACTERIZATION_ALGORITHM_VERSION
         )
-        assert response.data['resultado_json']['counts']['membrana'] == 2
+        assert (
+            response.data['resultado_json']['summary']['total_membranes'] == 2
+        )
         assert response.data['vigente'] is True
 
     def test_characterizations_endpoint_returns_empty_list(self):
@@ -3211,3 +3291,148 @@ class CharacterizationCoreTests(APITestCase):
                 effective,
                 sample_type=SampleType.SALIVA,
             )
+
+    def test_saliva_v2_associates_nuclei_and_micronuclei_by_membrane(self):
+        resultado = self._automatic_saliva_result(objects=[
+            self._normalized_object(1, 'membrana', self._box(0, 0, 50, 50)),
+            self._normalized_object(2, 'nucleo', self._box(10, 10, 20, 20)),
+            self._normalized_object(3, 'nucleo', self._box(30, 10, 40, 20)),
+            self._normalized_object(
+                4,
+                'micronucleo',
+                self._box(12, 25, 16, 29),
+            ),
+        ])
+
+        caracterizacion = characterize_resultado_segmentacion(resultado)
+        result = caracterizacion.resultado_json
+
+        assert result['summary']['cytotoxicity_index'] == 1
+        assert result['summary']['genotoxicity_index'] == 1
+        assert result['cells'][0]['nuclear_class'] == 'BINUCLEATED'
+        assert result['cells'][0]['nuclei_count'] == 2
+        assert result['cells'][0]['micronuclei'][0]['nucleus_id'] == 2
+
+    def test_saliva_v2_reports_unassociated_and_ambiguous_objects(self):
+        resultado = self._automatic_saliva_result(objects=[
+            self._normalized_object(1, 'membrana', self._box(0, 0, 40, 40)),
+            self._normalized_object(2, 'membrana', self._box(20, 0, 60, 40)),
+            self._normalized_object(3, 'nucleo', self._box(25, 10, 30, 15)),
+            self._normalized_object(4, 'micronucleo', self._box(80, 80, 85, 85)),
+        ])
+
+        caracterizacion = characterize_resultado_segmentacion(resultado)
+        result = caracterizacion.resultado_json
+
+        assert result['summary']['ambiguous_nuclei'] == 1
+        assert result['summary']['unassociated_micronuclei'] == 1
+        assert result['summary']['cytotoxicity_status'] == 'PARTIAL'
+        assert result['summary']['genotoxicity_status'] == 'VALID'
+        assert result['ambiguous']['nuclei'][0]['candidate_membrane_ids'] == [
+            1,
+            2,
+        ]
+        warning_codes = {
+            warning['code'] for warning in result['warnings']
+        }
+        assert 'AMBIGUOUS_MEMBRANE_ASSOCIATION' in warning_codes
+        assert 'UNASSOCIATED_MICRONUCLEUS' in warning_codes
+
+    def test_saliva_v2_marks_boundary_association_with_warning(self):
+        resultado = self._automatic_saliva_result(objects=[
+            self._normalized_object(1, 'membrana', self._box(0, 0, 40, 40)),
+            self._normalized_object(
+                2,
+                'nucleo',
+                [[-5, 15], [5, 15], [5, 25], [-5, 25]],
+            ),
+        ])
+
+        caracterizacion = characterize_resultado_segmentacion(resultado)
+        result = caracterizacion.resultado_json
+
+        assert result['summary']['association_quality']['nuclei_associated'] == 1
+        assert any(
+            warning['code'] == 'POINT_ON_BOUNDARY'
+            for warning in result['warnings']
+        )
+
+    def test_saliva_v2_self_intersecting_polygon_is_not_spatially_valid(self):
+        bowtie = [[0, 0], [20, 20], [0, 20], [20, 0]]
+        resultado = self._automatic_saliva_result(objects=[
+            self._normalized_object(1, 'membrana', self._box(0, 0, 40, 40)),
+            self._normalized_object(2, 'nucleo', bowtie),
+        ])
+
+        caracterizacion = characterize_resultado_segmentacion(resultado)
+        nucleus = caracterizacion.resultado_json['unassociated']['nuclei'][0]
+        warning_codes = {
+            warning['code']
+            for warning in caracterizacion.resultado_json['warnings']
+        }
+
+        assert nucleus['metrics']['area_px2'] is None
+        assert 'SELF_INTERSECTING_POLYGON' in warning_codes
+
+    def test_saliva_v2_reports_coordinate_space_mismatch_for_intensity(self):
+        resultado = self._automatic_saliva_result(objects=[
+            self._normalized_object(1, 'membrana', self._box(0, 0, 40, 40)),
+            self._normalized_object(2, 'nucleo', self._box(110, 110, 120, 120)),
+        ])
+
+        caracterizacion = characterize_resultado_segmentacion(resultado)
+        nucleus = caracterizacion.resultado_json['unassociated']['nuclei'][0]
+        warning_codes = {
+            warning['code']
+            for warning in caracterizacion.resultado_json['warnings']
+        }
+
+        assert nucleus['metrics']['mean_gray_intensity'] is None
+        assert 'COORDINATE_SPACE_MISMATCH' in warning_codes
+
+    def test_saliva_v2_calculates_mean_intensity_from_original_image(self):
+        resultado = self._automatic_saliva_result(objects=[
+            self._normalized_object(1, 'membrana', self._box(0, 0, 40, 40)),
+            self._normalized_object(2, 'nucleo', self._box(10, 10, 20, 20)),
+        ])
+
+        caracterizacion = characterize_resultado_segmentacion(resultado)
+        nucleus = caracterizacion.resultado_json['cells'][0]['nuclei'][0]
+
+        assert nucleus['metrics']['mean_gray_intensity'] == 128 / 255
+
+    def test_saliva_v2_does_not_duplicate_nuclei_in_mean_metrics(self):
+        resultado = self._automatic_saliva_result(objects=[
+            self._normalized_object(1, 'membrana', self._box(0, 0, 60, 60)),
+            self._normalized_object(2, 'nucleo', self._box(10, 10, 20, 20)),
+            self._normalized_object(3, 'micronucleo', self._box(25, 10, 30, 15)),
+            self._normalized_object(4, 'micronucleo', self._box(35, 10, 40, 15)),
+        ])
+
+        caracterizacion = characterize_resultado_segmentacion(resultado)
+        summary = caracterizacion.resultado_json['summary']
+
+        assert summary['mean_nucleus_area_px2'] == 100
+        assert summary['total_micronuclei'] == 2
+        assert summary['genotoxicity_index'] == 2
+
+    def test_characterization_does_not_mutate_effective_payload(self):
+        raw_result = self._normalized(
+            SampleType.SALIVA,
+            [self._normalized_object(1, 'membrana', self._box(0, 0, 40, 40))],
+        )
+        effective = {
+            'resultado_segmentacion_id': 1,
+            'fuente': FUENTE_AUTOMATICO,
+            'revision': None,
+            'resultado': raw_result,
+            'resumen': raw_result['summary'],
+        }
+        original = deepcopy(effective)
+
+        characterize_effective_segmentation(
+            effective,
+            sample_type=SampleType.SALIVA,
+        )
+
+        assert effective == original

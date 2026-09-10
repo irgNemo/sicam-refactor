@@ -16,11 +16,11 @@ scipy
 fastremap
 fill-voids
 roifile
+natsort
 
 # Official Segment Anything implementation required by the vendored Cellpose-SAM code.
-# The PyPI package named "segment-anything" is not used here because it does not prove
-# the original facebookresearch source in this environment audit.
-segment-anything @ https://github.com/facebookresearch/segment-anything/archive/refs/heads/main.zip
+# Pin the official facebookresearch source to the commit validated for SICAM.
+segment-anything @ https://github.com/facebookresearch/segment-anything/archive/dca509fe793f601edb92606367a655c15ac00fdf.zip
 
 # PyTorch must remain CPU-only in the local sicam environment.
 # Install or update torch/torchvision only with an explicit compatibility check.

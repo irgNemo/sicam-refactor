@@ -1005,3 +1005,6 @@ Revisar este documento cuando cambie cualquiera de:
 - No commitear `media/`.
 - No commitear modelos, pesos ni artefactos pesados.
 - No modificar `cellpose/` sin autorizacion explicita.
+
+Para instalar por primera vez el entorno completo en Ubuntu WSL, consultar
+[`developer_environment_setup_wsl.md`](developer_environment_setup_wsl.md).

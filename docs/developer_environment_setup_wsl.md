@@ -335,12 +335,21 @@ curl --fail --location --output Miniconda3-py310_26.7.1-1-Linux-x86_64.sh \
   https://repo.anaconda.com/miniconda/Miniconda3-py310_26.7.1-1-Linux-x86_64.sh
 echo "fb1af4c45e6e73fe193c2398b4346b1e45522f729cdfccfdb18f6c765954dbd9  Miniconda3-py310_26.7.1-1-Linux-x86_64.sh" \
   | sha256sum --check
-bash Miniconda3-py310_26.7.1-1-Linux-x86_64.sh
+bash Miniconda3-py310_26.7.1-1-Linux-x86_64.sh -b -p ~/miniconda3
 ~/miniconda3/bin/conda init bash
 source ~/.bashrc
 conda config --set auto_activate_base false
 conda --version
 conda info
+```
+
+Conda 26.7.1 exige aceptar explicitamente los terminos de sus dos canales
+predeterminados antes del primer `conda create`. Esta aceptacion es una
+decision del usuario y no agrega ni sustituye canales:
+
+```bash
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
 ```
 
 Resultado esperado: `conda` disponible desde Bash y ningun `(base)` activado
@@ -840,14 +849,14 @@ validacion runtime se ejecutaran despues de instalar los ambientes.
 |---|---|---|
 | `RESOLVED` | BLOOD importa `natsort` en startup | Declarado sin pin en `requirements.txt`; 8.4.0 queda como evidencia historica |
 | `RESOLVED` | Modelo SALIVA `membranas_500_125` | Presente, ignorado por Git y documentado con fuente, tamano y SHA-256 |
-| `PROVISIONING REQUIRED` | Falta `~/.cellpose/models/cpsam` | Provisionar desde URL documentada y validar SHA-256 y tamano |
+| `RESOLVED` | Modelo BLOOD `~/.cellpose/models/cpsam` | Presente; tamano y SHA-256 coinciden con los valores documentados |
 | `VERSION AMBIGUITY` | SALIVA no pinnea ninguna dependencia | Capturar versiones resueltas tras una instalacion validada y planear lockfile |
 | `VERSION AMBIGUITY` | BLOOD deja casi todo sin pin | Capturar versiones resueltas tras una instalacion validada y planear lockfile |
 | `RESOLVED` | Segment Anything usaba `main` movil | Fijado al commit validado `dca509fe793f601edb92606367a655c15ac00fdf` |
 | `DOCUMENTATION GAP` | El comentario SALIVA sugiere Cellpose PyPI, pero usa vendorizado | Corregirlo junto con la futura tarea de dependencias |
 | `DOCUMENTATION GAP` | `README.md` describe integraciones ya implementadas como pendientes | Actualizar por separado; no afecta el setup tecnico |
 | `DOCUMENTATION GAP` | `README_DEVELOPMENT.md` anuncia `/api/health/`, ruta no registrada | No usar ese endpoint hasta corregir la documentacion o implementar la ruta |
-| `OTHER` | Ubuntu 26.04 WSL no tiene smoke registrado | Validar imports y servicios antes de usar datos reales |
+| `RESOLVED` | Ubuntu 26.04 WSL no tenia smoke registrado | Imports, tests, build y cuatro servicios validados el 2026-09-10 |
 
 Diagnostico rapido:
 
@@ -875,16 +884,60 @@ code .
 La ruta observada del comando `code` corresponde a la integracion de VS Code
 Windows. No instalar una segunda copia Linux salvo necesidad concreta.
 
-## 22. Resultado del setup
+## 22. Resultado de instalacion validado
+
+Instalacion ejecutada en Ubuntu 26.04 WSL2 el 2026-09-10.
+
+| Componente | Version / estado resuelto | Validacion |
+|---|---|---|
+| Miniconda | Conda 26.7.1 | checksum del instalador, `conda info`, base no autoactiva |
+| `sicam` | Python 3.10.20 | `pip check` PASS |
+| Django | 5.0.1 | migrate/check PASS; pytest 172 passed, 2 skipped; Django tests 147 PASS |
+| SALIVA | FastAPI 0.141.1, Uvicorn 0.52.4 | modelo cargado; `/docs` y `/openapi.json` HTTP 200 |
+| `sicam-blood` | Python 3.10.21 | `pip check` PASS |
+| BLOOD | Torch 2.12.1+cpu, torchvision 0.27.1+cpu | ambos ordenes Torch/scikit-image PASS; startup HTTP 200 |
+| Node | 24.17.0 mediante nvm 0.40.7 | version y smoke 5173 PASS |
+| npm | 11.13.0 | `npm ci` PASS |
+| Frontend | Vite 7.3.0 | build PASS; HTTP 200 |
+| SQLite | migraciones hasta `api.0006` | migraciones aplicadas; datos demo sinteticos creados |
+| `cpsam` | 1233587898 bytes | SHA-256 verificado |
+| `membranas_500_125` | 26551763 bytes | SHA-256 verificado; startup SALIVA PASS |
+
+Versiones cientificas abiertas resueltas durante esta instalacion:
 
 ```text
-ENVIRONMENT SETUP = READY TO INSTALL
+fastapi=0.141.1
+uvicorn=0.52.4
+numpy=2.2.6
+opencv-python-headless=5.0.0.93
+scikit-image=0.25.2
+scikit-learn=1.7.2
+scipy=1.15.3
+tqdm=4.70.0
+natsort=8.4.0
+matplotlib=3.10.9        # sicam / SALIVA
+numba=0.67.0             # sicam / SALIVA
+fastremap=1.20.0         # sicam-blood
+fill-voids=2.1.2         # sicam-blood
+roifile=2025.12.12       # sicam-blood
+segment-anything=1.0     # commit fijado en requirements
 ```
 
-La dependencia `natsort` de BLOOD esta declarada, Segment Anything esta fijado
-al commit historicamente validado y el modelo SALIVA esta presente, ignorado
-por Git y documentado con procedencia, tamano y SHA-256.
+La conectividad efectiva de Django se obtiene de
+`settings.SEGMENTATION_SERVICES`: claves `SALIVA` y `SANGRE`, cada una con
+`url` y `timeout`. Con los cuatro servicios simultaneos, Django alcanzo ambos
+microservicios con HTTP 200 y CORS autorizo `http://127.0.0.1:5173`.
 
-`cpsam` aun no esta provisionado, los stacks cientificos permanecen
-parcialmente sin pin y los ambientes todavia no estan instalados. Son riesgos o
-pasos de instalacion documentados, no blockers previos para comenzar el setup.
+Advertencias no bloqueantes:
+
+- los requirements cientificos parcialmente sin pin pueden resolver versiones
+  diferentes en una instalacion futura;
+- `npm ci` reporto 18 vulnerabilidades: 2 low, 4 moderate y 12 high; no se
+  ejecuto `npm audit fix`;
+- Conda anuncio 26.7.2, pero se conservo 26.7.1;
+- `build-essential` no fue necesario porque todos los artefactos requeridos se
+  instalaron mediante wheels o builds Python sin compilador del sistema.
+
+```text
+SICAM WSL ENVIRONMENT = READY WITH WARNINGS
+```

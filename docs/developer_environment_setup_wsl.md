@@ -609,7 +609,7 @@ mkdir -p ~/.cellpose/models
 curl --fail --location \
   --output ~/.cellpose/models/cpsam \
   https://huggingface.co/mouseland/cellpose-sam/resolve/main/cpsam
-echo "e1440429eb384f95afe32bcba6510f90d518aedc917ede549bed6804004abe2  $HOME/.cellpose/models/cpsam" \
+echo "e1440429eb384f95afe32bcba6510f90d518eaedc917ede549bed6804004abe2  $HOME/.cellpose/models/cpsam" \
   | sha256sum --check
 stat --format='%n %s bytes' ~/.cellpose/models/cpsam
 ```

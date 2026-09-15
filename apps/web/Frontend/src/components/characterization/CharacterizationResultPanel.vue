@@ -101,8 +101,30 @@
         </div>
       </div>
 
+      <template v-if="currentCharacterization && isSalivaV2">
+        <SalivaMorphometricResult
+          ref="morphometricResult"
+          :result-json="resultJson"
+          :selected-cell-id="selectedCellId"
+          @select-cell="selectCell"
+        >
+          <template #effective-overlay>
+            <CharacterizationEffectiveOverlay
+              :image-src="imageSrc"
+              :effective-segmentation="effectiveSegmentation"
+              :loading="effectiveSegmentationLoading"
+              :error="effectiveSegmentationError"
+              :sample-type="sampleType"
+              :cells="cells"
+              :selected-cell-id="selectedCellId"
+              @select-cell="selectCellFromOverlay"
+            />
+          </template>
+        </SalivaMorphometricResult>
+      </template>
+
       <div
-        v-if="currentCharacterization"
+        v-if="currentCharacterization && !isSalivaV2"
         class="section-block"
       >
         <h4>Conteos</h4>
@@ -119,7 +141,7 @@
       </div>
 
       <div
-        v-if="currentCharacterization"
+        v-if="currentCharacterization && !isSalivaV2"
         class="section-block"
       >
         <h4>Indices</h4>
@@ -151,7 +173,7 @@
       </div>
 
       <div
-        v-if="warnings.length"
+        v-if="currentCharacterization && !isSalivaV2 && warnings.length"
         class="section-block"
       >
         <h4>Advertencias</h4>
@@ -173,9 +195,16 @@ import {
   getSegmentationTypeConfig,
   SAMPLE_TYPES,
 } from "../../domain/segmentationTypes";
+import { isSalivaMorphometricV2 } from "../../domain/characterizationPresentation";
+import CharacterizationEffectiveOverlay from "./CharacterizationEffectiveOverlay.vue";
+import SalivaMorphometricResult from "./SalivaMorphometricResult.vue";
 
 export default {
   name: "CharacterizationResultPanel",
+  components: {
+    CharacterizationEffectiveOverlay,
+    SalivaMorphometricResult,
+  },
   emits: ["characterize"],
   props: {
     sampleType: {
@@ -214,9 +243,68 @@ export default {
       type: String,
       default: "",
     },
+    imageSrc: {
+      type: String,
+      default: "",
+    },
+    effectiveSegmentation: {
+      type: Object,
+      default: null,
+    },
+    effectiveSegmentationLoading: {
+      type: Boolean,
+      default: false,
+    },
+    effectiveSegmentationError: {
+      type: String,
+      default: "",
+    },
+  },
+
+  data() {
+    return { selectedCellId: null };
+  },
+
+  watch: {
+    cells: {
+      flush: "sync",
+      handler(cells) {
+        if (!cells.some(cell => cell.membrane_id === this.selectedCellId)) {
+          this.selectedCellId = null;
+        }
+      },
+    },
+    // IDs can be reused by another result/snapshot: never carry selection over.
+    currentCharacterization: { flush: "sync", handler() { this.selectedCellId = null; } },
+    resultJson: { flush: "sync", handler() { this.selectedCellId = null; } },
+    selectedSegmentationResult: { flush: "sync", handler() { this.selectedCellId = null; } },
+    sampleType: { flush: "sync", handler() { this.selectedCellId = null; } },
+    imageSrc: { flush: "sync", handler() { this.selectedCellId = null; } },
+  },
+
+  methods: {
+    selectCell(cellId) {
+      if (!this.cells.some(cell => cell.membrane_id === cellId && cellId != null)) return;
+      this.selectedCellId = this.selectedCellId === cellId ? null : cellId;
+    },
+
+    async selectCellFromOverlay(cellId) {
+      this.selectCell(cellId);
+      const snapshot = this.currentCharacterization;
+      await this.$nextTick();
+      if (this.selectedCellId === cellId && this.currentCharacterization === snapshot) {
+        this.$refs.morphometricResult?.scrollCellIntoView(cellId);
+      }
+    },
   },
 
   computed: {
+    cells() {
+      return this.isSalivaV2 && Array.isArray(this.resultJson.cells)
+        ? this.resultJson.cells
+        : [];
+    },
+
     resultJson() {
       return this.currentCharacterization?.resultado_json || {};
     },
@@ -235,6 +323,10 @@ export default {
         : [];
     },
 
+    isSalivaV2() {
+      return isSalivaMorphometricV2(this.resultJson);
+    },
+
     isSaliva() {
       return this.sampleType === SAMPLE_TYPES.SALIVA;
     },
@@ -247,7 +339,9 @@ export default {
       return this.labelConfig.map(item => ({
         label: item.label,
         displayName: item.displayName,
-        value: this.counts[item.label] || 0,
+        value: Object.prototype.hasOwnProperty.call(this.counts, item.label)
+          ? (this.counts[item.label] ?? "—")
+          : 0,
       }));
     },
 
@@ -327,8 +421,11 @@ export default {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  max-width: 100%;
   min-width: 0;
+  overflow-x: hidden;
   padding: 18px;
+  width: 100%;
 }
 
 .panel-header {
@@ -429,7 +526,7 @@ export default {
 .metrics-grid {
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .metric-card {
@@ -496,7 +593,13 @@ export default {
   padding-left: 18px;
 }
 
-@media (max-width: 1023px) {
+@media (max-width: 1199px) {
+  .metrics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 639px) {
   .metrics-grid {
     grid-template-columns: 1fr;
   }

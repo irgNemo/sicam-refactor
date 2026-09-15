@@ -39,68 +39,68 @@
       </div>
 
       <section class="characterization-layout">
-        <aside class="samples-panel">
-          <div class="panel-title">
-            <h3>Muestras de {{ activeSampleTypeDisplayName }}</h3>
-            <span>{{ samples.length }}</span>
-          </div>
+        <section class="sample-selection-zone">
+          <aside class="samples-panel">
+            <div class="panel-title">
+              <h3>Muestras de {{ activeSampleTypeDisplayName }}</h3>
+              <span>{{ samples.length }}</span>
+            </div>
 
-          <div
-            v-if="loading"
-            class="status-card neutral"
-          >
-            Cargando muestras...
-          </div>
-
-          <div
-            v-else-if="loadError"
-            class="status-card error"
-          >
-            {{ loadError }}
-          </div>
-
-          <div
-            v-else-if="!samples.length"
-            class="status-card neutral"
-          >
-            No hay muestras disponibles para este caso y tipo.
-          </div>
-
-          <div
-            v-else
-            ref="sampleList"
-            class="sample-list"
-          >
-            <button
-              v-for="sample in samples"
-              :key="sampleKey(sample)"
-              :ref="el => setSampleItemRef(sample.id_muestra, el)"
-              type="button"
-              class="sample-item"
-              :class="{ active: selectedSample?.id_muestra === sample.id_muestra }"
-              @click="selectSample(sample, { source: 'user' })"
+            <div
+              v-if="loading"
+              class="status-card neutral"
             >
-              <img
-                v-if="sample.imagen"
-                :src="sample.imagen"
-                alt=""
-              />
-              <div
-                v-else
-                class="sample-placeholder"
-              >
-                Sin imagen
-              </div>
-              <span class="sample-item-text">
-                <strong>{{ sampleName(sample) }}</strong>
-                <small>Muestra #{{ sample.id_muestra }}</small>
-              </span>
-            </button>
-          </div>
-        </aside>
+              Cargando muestras...
+            </div>
 
-        <section class="work-panel">
-          <div class="sample-preview-card">
+            <div
+              v-else-if="loadError"
+              class="status-card error"
+            >
+              {{ loadError }}
+            </div>
+
+            <div
+              v-else-if="!samples.length"
+              class="status-card neutral"
+            >
+              No hay muestras disponibles para este caso y tipo.
+            </div>
+
+            <div
+              v-else
+              ref="sampleList"
+              class="sample-list"
+            >
+              <button
+                v-for="sample in samples"
+                :key="sampleKey(sample)"
+                :ref="el => setSampleItemRef(sample.id_muestra, el)"
+                type="button"
+                class="sample-item"
+                :class="{ active: selectedSample?.id_muestra === sample.id_muestra }"
+                @click="selectSample(sample, { source: 'user' })"
+              >
+                <img
+                  v-if="sample.imagen"
+                  :src="sample.imagen"
+                  alt=""
+                />
+                <div
+                  v-else
+                  class="sample-placeholder"
+                >
+                  Sin imagen
+                </div>
+                <span class="sample-item-text">
+                  <strong>{{ sampleName(sample) }}</strong>
+                  <small>Muestra #{{ sample.id_muestra }}</small>
+                </span>
+              </button>
+            </div>
+          </aside>
+
+          <section class="sample-preview-card">
             <div class="panel-title">
               <h3>Muestra seleccionada</h3>
               <span v-if="selectedSample">#{{ selectedSample.id_muestra }}</span>
@@ -181,21 +181,25 @@
                 No hay una segmentacion completada disponible para caracterizar.
               </div>
             </template>
-          </div>
-
-          <CharacterizationResultPanel
-            :sample-type="activeSampleType"
-            :selected-segmentation-result="selectedSegmentationResult"
-            :characterizations="characterizations"
-            :current-characterization="currentCharacterization"
-            :characterizations-loading="characterizationsLoading"
-            :characterizations-error="characterizationsError"
-            :characterize-loading="characterizeLoading"
-            :characterize-error="characterizeError"
-            :characterize-message="characterizeMessage"
-            @characterize="runCharacterization"
-          />
+          </section>
         </section>
+
+        <CharacterizationResultPanel
+          :sample-type="activeSampleType"
+          :selected-segmentation-result="selectedSegmentationResult"
+          :characterizations="characterizations"
+          :current-characterization="currentCharacterization"
+          :characterizations-loading="characterizationsLoading"
+          :characterizations-error="characterizationsError"
+          :characterize-loading="characterizeLoading"
+          :characterize-error="characterizeError"
+          :characterize-message="characterizeMessage"
+          :image-src="selectedSample?.imagen || ''"
+          :effective-segmentation="effectiveSegmentation"
+          :effective-segmentation-loading="effectiveSegmentationLoading"
+          :effective-segmentation-error="effectiveSegmentationError"
+          @characterize="runCharacterization"
+        />
       </section>
     </template>
   </main>
@@ -211,6 +215,7 @@ import {
   listarMuestras,
   obtenerResultadosSegmentacion,
 } from "../services/segmentationService";
+import { getEffectiveSegmentation } from "../services/segmentationRevisionService";
 import {
   getSegmentationTypeConfig,
   SEGMENTATION_TYPE_CONFIG,
@@ -269,9 +274,13 @@ export default {
       characterizeLoading: false,
       characterizeError: "",
       characterizeMessage: "",
+      effectiveSegmentation: null,
+      effectiveSegmentationLoading: false,
+      effectiveSegmentationError: "",
       contextRequestId: 0,
       resultsRequestId: 0,
       characterizationsRequestId: 0,
+      effectiveSegmentationRequestId: 0,
       sampleItemRefs: {},
     };
   },
@@ -511,6 +520,7 @@ export default {
 
       if (this.localSelectedSegmentationResultId) {
         this.loadCharacterizations(this.localSelectedSegmentationResultId);
+        this.loadEffectiveSegmentation(this.localSelectedSegmentationResultId);
       }
     },
 
@@ -537,6 +547,32 @@ export default {
       } finally {
         if (this.isCurrentResult(resultadoId, requestId)) {
           this.characterizationsLoading = false;
+        }
+      }
+    },
+
+    async loadEffectiveSegmentation(resultadoId) {
+      const requestId = ++this.effectiveSegmentationRequestId;
+      this.effectiveSegmentation = null;
+      this.effectiveSegmentationLoading = true;
+      this.effectiveSegmentationError = "";
+
+      try {
+        const response = await getEffectiveSegmentation(resultadoId);
+
+        if (!this.isCurrentEffectiveResult(resultadoId, requestId)) return;
+
+        this.effectiveSegmentation = response.data || null;
+      } catch (error) {
+        if (this.isCurrentEffectiveResult(resultadoId, requestId)) {
+          this.effectiveSegmentationError = this.getHttpErrorMessage(
+            error,
+            "No fue posible cargar la segmentacion efectiva."
+          );
+        }
+      } finally {
+        if (this.isCurrentEffectiveResult(resultadoId, requestId)) {
+          this.effectiveSegmentationLoading = false;
         }
       }
     },
@@ -580,12 +616,16 @@ export default {
     },
 
     resetCharacterizationState() {
+      this.effectiveSegmentationRequestId += 1;
       this.characterizations = [];
       this.characterizationsLoading = false;
       this.characterizationsError = "";
       this.characterizeLoading = false;
       this.characterizeError = "";
       this.characterizeMessage = "";
+      this.effectiveSegmentation = null;
+      this.effectiveSegmentationLoading = false;
+      this.effectiveSegmentationError = "";
     },
 
     restoreSelectedSample() {
@@ -627,6 +667,7 @@ export default {
 
       if (nextId) {
         this.loadCharacterizations(nextId);
+        this.loadEffectiveSegmentation(nextId);
       }
     },
 
@@ -676,6 +717,13 @@ export default {
     isCurrentResult(resultadoId, requestId) {
       return Boolean(
         requestId === this.characterizationsRequestId &&
+        this.localSelectedSegmentationResultId === resultadoId
+      );
+    },
+
+    isCurrentEffectiveResult(resultadoId, requestId) {
+      return Boolean(
+        requestId === this.effectiveSegmentationRequestId &&
         this.localSelectedSegmentationResultId === resultadoId
       );
     },
@@ -741,7 +789,8 @@ export default {
   gap: 16px;
   min-height: 0;
   min-width: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 16px;
 }
 
@@ -832,13 +881,22 @@ export default {
 }
 
 .characterization-layout {
-  display: grid;
+  display: flex;
   flex: 1;
+  flex-direction: column;
   gap: 16px;
-  grid-template-columns: minmax(180px, 220px) minmax(0, 1fr);
-  max-height: calc(100vh - 176px);
   min-height: 0;
   min-width: 0;
+  width: 100%;
+}
+
+.sample-selection-zone {
+  align-items: start;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  min-width: 0;
+  width: 100%;
 }
 
 .samples-panel,
@@ -851,12 +909,13 @@ export default {
 }
 
 .samples-panel {
+  align-self: start;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  max-height: calc(100vh - 176px);
   min-height: 0;
   overflow: hidden;
+  width: 100%;
 }
 
 .panel-title {
@@ -879,41 +938,45 @@ export default {
 }
 
 .sample-list {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
+  --sample-row-height: 132px;
+  display: grid;
   gap: 10px;
+  grid-auto-rows: var(--sample-row-height);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  max-height: calc((var(--sample-row-height) * 3) + 20px);
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
+  padding-right: 4px;
 }
 
 .sample-item {
-  align-items: center;
+  align-items: stretch;
   background: #ffffff;
   border: 2px solid #e4e7ec;
   border-radius: 9px;
   color: #344054;
   cursor: pointer;
-  display: grid;
-  gap: 10px;
-  grid-template-columns: 52px minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  height: 100%;
   min-width: 0;
-  padding: 8px;
+  padding: 6px;
   text-align: left;
 }
 
 .sample-item.active {
   background: #e3f2fd;
   border-color: #1e88e5;
+  box-shadow: 0 0 0 2px rgba(30, 136, 229, 0.12);
 }
 
 .sample-item img,
 .sample-placeholder {
-  aspect-ratio: 1;
   border-radius: 7px;
-  height: 52px;
-  width: 52px;
+  height: 78px;
+  width: 100%;
 }
 
 .sample-item img {
@@ -946,26 +1009,20 @@ export default {
 
 .sample-item-text strong {
   color: #344054;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .sample-item-text small {
   color: #667085;
-  font-size: 11px;
-}
-
-.work-panel {
-  display: grid;
-  gap: 16px;
-  grid-template-columns: minmax(0, 0.95fr) minmax(320px, 1.05fr);
-  min-height: 0;
-  min-width: 0;
+  font-size: 10px;
 }
 
 .sample-preview-card {
+  align-self: stretch;
   display: flex;
   flex-direction: column;
   gap: 14px;
+  width: 360px;
 }
 
 .preview-row {
@@ -1061,16 +1118,34 @@ export default {
 }
 
 @media (max-width: 1439px) and (min-width: 1024px) {
-  .characterization-layout {
-    grid-template-columns: minmax(170px, 190px) minmax(0, 1fr);
+  .sample-list {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
-  .work-panel {
-    grid-template-columns: minmax(0, 0.9fr) minmax(300px, 1fr);
+  .sample-selection-zone {
+    grid-template-columns: minmax(0, 1fr) 350px;
+  }
+
+  .sample-preview-card {
+    width: 350px;
+  }
+}
+
+@media (max-width: 1199px) and (min-width: 1024px) {
+  .sample-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .sample-selection-zone {
+    grid-template-columns: minmax(0, 1fr) 340px;
+  }
+
+  .sample-preview-card {
+    width: 340px;
   }
 
   .preview-row {
-    grid-template-columns: 110px minmax(0, 1fr);
+    grid-template-columns: 120px minmax(0, 1fr);
   }
 }
 
@@ -1081,15 +1156,39 @@ export default {
   }
 
   .page-header,
-  .characterization-layout,
-  .work-panel,
+  .sample-selection-zone {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .sample-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .sample-preview-card {
+    width: 100%;
+  }
+}
+
+@media (max-width: 767px) {
+  .sample-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .preview-row {
+    grid-template-columns: 140px minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 479px) {
+  .page-header,
   .preview-row {
     display: flex;
     flex-direction: column;
   }
 
-  .samples-panel {
-    max-height: min(360px, calc(100vh - 220px));
+  .sample-list {
+    grid-template-columns: 1fr;
   }
 }
 </style>

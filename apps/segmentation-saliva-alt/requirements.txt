@@ -1,0 +1,13 @@
+# CPU wheels; independent Python 3.10.20 environment only.
+-c constraints.txt
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.12.1+cpu
+torchvision==0.27.1+cpu
+cellpose==4.0.8
+fastapi==0.141.1
+uvicorn==0.52.4
+python-multipart==0.0.32
+numpy==2.2.6
+scipy==1.15.3
+scikit-image==0.25.2
+opencv-python-headless==5.0.0.93

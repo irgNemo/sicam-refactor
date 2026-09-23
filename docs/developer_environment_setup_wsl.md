@@ -941,3 +941,31 @@ Advertencias no bloqueantes:
 ```text
 SICAM WSL ENVIRONMENT = READY WITH WARNINGS
 ```
+
+## 23. SALIVA ALT — entorno independiente (Sprint 18A)
+
+Servicio opcional y todavía no integrado a Django/frontend:
+`ALT_CPSAM_MORPHOLOGICAL_V1`, puerto **8003**, modelo **cpsam**, Cellpose
+**4.0.8**, Conda **sicam-saliva-alt**, Python **3.10.20**.
+
+```bash
+conda create -n sicam-saliva-alt python=3.10.20 pip -y
+conda activate sicam-saliva-alt
+cd ~/repos/sicam-refactor/apps/segmentation-saliva-alt
+python -m pip install -r requirements.txt
+python -m pip check
+OMP_NUM_THREADS=4 MKL_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 \
+  python -m uvicorn app.main:app --host 127.0.0.1 --port 8003
+```
+
+Reutiliza en lectura `~/.cellpose/models/cpsam` (o
+`CELLPOSE_LOCAL_MODELS_PATH/cpsam`): **1233587898 bytes**, SHA-256
+`e1440429eb384f95afe32bcba6510f90d518eaedc917ede549bed6804004abe2`.
+El startup verifica versión/tamaño/hash y falla si no coinciden; no descarga
+pesos ni permite fallback. No instalar estos requirements en `sicam` o
+`sicam-blood`, ni sustituir los servicios actuales de 8001/8002.
+
+Validar `/docs`, `/openapi.json` y `POST /segmentar` con multipart `file`.
+Tests aislados: `python -m pip install -r requirements-test.txt` y
+`python -m pytest -q`. Detalles y evidencia en
+[Sprint 18A](58_sprint_18a_alt_saliva_segmentation_service.md).

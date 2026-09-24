@@ -17,7 +17,7 @@ def saludo(request):
 from rest_framework import mixins, viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from .models import (
     AnalisisPred,
     Caso,
@@ -35,6 +35,7 @@ from .serializers import (
     MuestraSangreSerializer,
     ResultadoCaracterizacionSerializer,
     ResultadoSegmentacionSerializer,
+    SalivaSegmentationRequestSerializer,
     RevisionSegmentacionSerializer,
 )
 from .services.segmentation.exceptions import (
@@ -150,11 +151,13 @@ def _create_segmentation_result(
     normalized_result=None,
     estado='COMPLETADO',
     error=None,
+    segmentation_strategy=None,
 ):
     return ResultadoSegmentacion.objects.create(
         muestra=muestra,
         muestra_sangre=muestra_sangre,
         tipo_muestra=sample_type,
+        segmentation_strategy=segmentation_strategy,
         respuesta_json=raw_result or {},
         resultado_normalizado=normalized_result,
         estado=estado,
@@ -169,6 +172,7 @@ def _build_segmentation_response(result, resultado, normalized_result):
             'id': resultado.id_resultado_segmentacion,
             'estado': resultado.estado,
             'tipo_muestra': resultado.tipo_muestra,
+            'segmentation_strategy': resultado.segmentation_strategy,
             'creado_en': resultado.creado_en.isoformat(),
         },
         'resultado_normalizado': normalized_result,
@@ -371,10 +375,16 @@ class MuestraSalivaViewSet(viewsets.ModelViewSet):
         serializer = ResultadoSegmentacionSerializer(resultados, many=True)
         return Response(serializer.data)
 
-    @action(detail=True, methods=['post'])
+    @action(
+        detail=True, methods=['post'],
+        parser_classes=(JSONParser, MultiPartParser, FormParser),
+    )
     def segmentar(self, request, pk=None):
         """Solicitar segmentacion de una muestra de saliva existente."""
         muestra = self.get_object()
+        selection = SalivaSegmentationRequestSerializer(data=request.data)
+        selection.is_valid(raise_exception=True)
+        strategy = selection.validated_data['segmentation_strategy']
 
         try:
             image_bytes = _read_muestra_image(muestra)
@@ -388,7 +398,8 @@ class MuestraSalivaViewSet(viewsets.ModelViewSet):
             result = segment_image(
                 SampleType.SALIVA,
                 image_bytes,
-                filename=muestra.imagen.name
+                filename=muestra.imagen.name,
+                segmentation_strategy=strategy,
             )
         except SegmentationTimeoutError as exc:
             return Response(
@@ -438,6 +449,7 @@ class MuestraSalivaViewSet(viewsets.ModelViewSet):
                 sample_type=SampleType.SALIVA,
                 raw_result=result,
                 normalized_result=normalized_result,
+                segmentation_strategy=strategy,
             )
         except Exception:
             return Response(
@@ -474,10 +486,18 @@ class MuestraSangreViewSet(viewsets.ModelViewSet):
         serializer = ResultadoSegmentacionSerializer(resultados, many=True)
         return Response(serializer.data)
 
-    @action(detail=True, methods=['post'])
+    @action(
+        detail=True, methods=['post'],
+        parser_classes=(JSONParser, MultiPartParser, FormParser),
+    )
     def segmentar(self, request, pk=None):
         """Solicitar segmentacion de una muestra de sangre existente."""
         muestra = self.get_object()
+        if 'segmentation_strategy' in (request.data or {}):
+            return Response(
+                {'error': 'segmentation_strategy is only supported for SALIVA samples'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         try:
             image_bytes = _read_muestra_image(muestra)

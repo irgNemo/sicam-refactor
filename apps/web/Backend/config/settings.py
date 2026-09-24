@@ -193,11 +193,17 @@ STATIC_URL = 'static/'
 
 SEGMENTATION_SERVICES = {
     'SALIVA': {
-        'url': env('SALIVA_SEGMENTATION_SERVICE_URL', default='http://localhost:8001'),
+        'url': env('SALIVA_SEGMENTATION_SERVICE_URL', default='http://127.0.0.1:8001'),
         'timeout': env.int('SALIVA_SERVICE_TIMEOUT', default=30),
     },
     'SANGRE': {
         'url': env('BLOOD_SEGMENTATION_SERVICE_URL', default='http://localhost:8002'),
         'timeout': env.int('BLOOD_SERVICE_TIMEOUT', default=240),
     },
+}
+
+# SALIVA-only alternative. CURRENT and BLOOD keep their existing configuration.
+SALIVA_ALT_SEGMENTATION_SERVICE = {
+    'url': env('SALIVA_ALT_SEGMENTATION_SERVICE_URL', default='http://127.0.0.1:8003'),
+    'timeout': env.int('SALIVA_ALT_SERVICE_TIMEOUT', default=240),
 }

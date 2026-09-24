@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from .segmentation_strategies import SalivaSegmentationStrategy
 from .models import (
     AnalisisPred,
     Caso,
@@ -42,6 +43,13 @@ class ResultadoAnalisisSerializer(serializers.ModelSerializer):
         model = ResultadoAnalisis
         fields = '__all__'
 
+class SalivaSegmentationRequestSerializer(serializers.Serializer):
+    segmentation_strategy = serializers.ChoiceField(
+        choices=SalivaSegmentationStrategy.choices,
+        default=SalivaSegmentationStrategy.CURRENT_CUSTOM_V1,
+    )
+
+
 class ResultadoSegmentacionSerializer(serializers.ModelSerializer):
     id = serializers.IntegerField(
         source='id_resultado_segmentacion',
@@ -53,6 +61,7 @@ class ResultadoSegmentacionSerializer(serializers.ModelSerializer):
         fields = (
             'id',
             'tipo_muestra',
+            'segmentation_strategy',
             'estado',
             'respuesta_json',
             'resultado_normalizado',

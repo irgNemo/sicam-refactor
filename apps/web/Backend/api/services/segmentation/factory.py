@@ -13,14 +13,18 @@ from .saliva_client import SalivaSegmentationClient
 from .blood_client import BloodSegmentationClient
 from .exceptions import SegmentationServiceError
 from .types import SampleType, normalize_sample_type
+from .strategies import resolve_saliva_segmentation_service
 
 
-def get_segmentation_client(sample_type: str) -> SegmentationClient:
+def get_segmentation_client(
+    sample_type: str, *, segmentation_strategy=None,
+) -> SegmentationClient:
     """
     Factory para obtener el cliente de segmentación correcto.
     
     Args:
         sample_type: Tipo de muestra 'SALIVA' o 'SANGRE'
+        segmentation_strategy: Estrategia SALIVA opcional; omitida usa CURRENT.
         
     Returns:
         SegmentationClient: Cliente configurado para el tipo de muestra
@@ -33,6 +37,12 @@ def get_segmentation_client(sample_type: str) -> SegmentationClient:
         >>> result = client.segment(image_bytes)
     """
     sample_type = normalize_sample_type(sample_type)
+
+    if sample_type == SampleType.SALIVA:
+        config = resolve_saliva_segmentation_service(segmentation_strategy)
+        return SalivaSegmentationClient(config['url'], config['timeout'])
+    if segmentation_strategy is not None:
+        raise ValueError('segmentation_strategy is only supported for SALIVA samples')
     
     # Obtener configuración desde settings
     services_config = getattr(settings, 'SEGMENTATION_SERVICES', {})
@@ -48,9 +58,7 @@ def get_segmentation_client(sample_type: str) -> SegmentationClient:
     timeout = config.get('timeout', 30)
     
     # Crear cliente específico
-    if sample_type == SampleType.SALIVA:
-        return SalivaSegmentationClient(base_url, timeout)
-    elif sample_type == SampleType.BLOOD:
+    if sample_type == SampleType.BLOOD:
         return BloodSegmentationClient(base_url, timeout)
     else:
         raise SegmentationServiceError(
@@ -58,7 +66,10 @@ def get_segmentation_client(sample_type: str) -> SegmentationClient:
         )
 
 
-def segment_image(sample_type: str, image_file: bytes, filename: str = 'image.jpg') -> Dict:
+def segment_image(
+    sample_type: str, image_file: bytes, filename: str = 'image.jpg',
+    *, segmentation_strategy=None,
+) -> Dict:
     """
     Segmentar una imagen usando el servicio correcto.
     
@@ -66,6 +77,7 @@ def segment_image(sample_type: str, image_file: bytes, filename: str = 'image.jp
     
     Args:
         sample_type: Tipo de muestra 'SALIVA' o 'SANGRE'
+        segmentation_strategy: Estrategia SALIVA opcional; omitida usa CURRENT.
         image_file: Contenido de imagen como bytes
         filename: Nombre del archivo (default: 'image.jpg')
         
@@ -84,5 +96,5 @@ def segment_image(sample_type: str, image_file: bytes, filename: str = 'image.jp
         >>> result = segment_image('SALIVA', image_bytes)
         >>> print(result['objetos'])  # Array de objetos segmentados
     """
-    client = get_segmentation_client(sample_type)
+    client = get_segmentation_client(sample_type, segmentation_strategy=segmentation_strategy)
     return client.segment(image_file, filename)

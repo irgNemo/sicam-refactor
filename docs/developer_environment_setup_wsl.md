@@ -969,3 +969,24 @@ Validar `/docs`, `/openapi.json` y `POST /segmentar` con multipart `file`.
 Tests aislados: `python -m pip install -r requirements-test.txt` y
 `python -m pytest -q`. Detalles y evidencia en
 [Sprint 18A](58_sprint_18a_alt_saliva_segmentation_service.md).
+
+## 24. Routing Django para estrategias SALIVA (Sprint 18B)
+
+Django admite `segmentation_strategy` opcional sólo al segmentar SALIVA.
+Si se omite, conserva `CURRENT_CUSTOM_V1` y su timeout de 30 s.
+`ALT_CPSAM_MORPHOLOGICAL_V1` usa configuración independiente:
+
+```dotenv
+SALIVA_ALT_SEGMENTATION_SERVICE_URL=http://127.0.0.1:8003
+SALIVA_ALT_SERVICE_TIMEOUT=240
+```
+
+Son los defaults; no es necesario modificar el `.env` local para usarlos.
+CURRENT conserva `SALIVA_SEGMENTATION_SERVICE_URL` y `SALIVA_SERVICE_TIMEOUT`;
+el fallback de URL local ahora es `http://127.0.0.1:8001`, respetando cualquier
+valor ya configurado. BLOOD conserva su configuración y no admite estrategias
+SALIVA. Aplicar `python manage.py migrate` desde el backend con `sicam` para
+incorporar la provenance y backfill SALIVA de la migración 0007.
+
+El frontend sigue usando CURRENT sin cambios. Detalles y validaciones en
+[Sprint 18B — SALIVA](59_sprint_18b_backend_saliva_segmentation_strategies.md).

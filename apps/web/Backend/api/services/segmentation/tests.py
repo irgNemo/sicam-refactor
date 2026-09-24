@@ -262,7 +262,7 @@ class TestFactory:
         assert settings.SEGMENTATION_SERVICES['SALIVA']['timeout'] == 30
         assert settings.SEGMENTATION_SERVICES['SANGRE']['timeout'] == 240
 
-    @patch('api.services.segmentation.factory.settings')
+    @patch('api.services.segmentation.strategies.settings')
     def test_get_segmentation_client_saliva(self, mock_settings):
         """Test obtener cliente de saliva."""
         mock_settings.SEGMENTATION_SERVICES = {
@@ -294,7 +294,7 @@ class TestFactory:
         assert client.base_url == 'http://localhost:8002'
         assert client.timeout == 45
 
-    @patch('api.services.segmentation.factory.settings')
+    @patch('api.services.segmentation.strategies.settings')
     def test_get_segmentation_client_case_insensitive(self, mock_settings):
         """Test que obtener cliente sea case-insensitive."""
         mock_settings.SEGMENTATION_SERVICES = {
@@ -312,7 +312,7 @@ class TestFactory:
         client2 = get_segmentation_client('SaLiVa')
         assert isinstance(client2, SalivaSegmentationClient)
 
-    @patch('api.services.segmentation.factory.settings')
+    @patch('api.services.segmentation.strategies.settings')
     def test_get_segmentation_client_not_found(self, mock_settings):
         """Test error cuando tipo no está configurado."""
         mock_settings.SEGMENTATION_SERVICES = {}
@@ -337,7 +337,7 @@ class TestFactory:
             get_segmentation_client('ORINA')
 
     @patch.object(SalivaSegmentationClient, 'segment')
-    @patch('api.services.segmentation.factory.settings')
+    @patch('api.services.segmentation.strategies.settings')
     def test_segment_image_helper(self, mock_settings, mock_segment):
         """Test función helper segment_image."""
         mock_settings.SEGMENTATION_SERVICES = {

@@ -1,5 +1,6 @@
 from django.core.exceptions import ValidationError
 from django.db import models
+from .segmentation_strategies import SalivaSegmentationStrategy
 
 # Modelo de Paciente
 class Paciente(models.Model):
@@ -127,6 +128,12 @@ class ResultadoSegmentacion(models.Model):
         null=True,
     )
     tipo_muestra = models.CharField(max_length=20, default='SALIVA')
+    segmentation_strategy = models.CharField(
+        max_length=40,
+        choices=SalivaSegmentationStrategy.choices,
+        null=True,
+        blank=True,
+    )
     respuesta_json = models.JSONField()
     resultado_normalizado = models.JSONField(blank=True, null=True)
     estado = models.CharField(max_length=20, default='COMPLETADO')

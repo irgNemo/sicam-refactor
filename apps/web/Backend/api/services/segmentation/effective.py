@@ -25,6 +25,7 @@ def resolve_effective_segmentation(resultado_segmentacion):
                 resultado_segmentacion.id_resultado_segmentacion
             ),
             'fuente': FUENTE_VALIDADA,
+            'segmentation_strategy': resultado_segmentacion.segmentation_strategy,
             'revision': {
                 'id_revision_segmentacion': (
                     latest_validated.id_revision_segmentacion
@@ -47,6 +48,7 @@ def resolve_effective_segmentation(resultado_segmentacion):
             resultado_segmentacion.id_resultado_segmentacion
         ),
         'fuente': FUENTE_AUTOMATICO,
+        'segmentation_strategy': resultado_segmentacion.segmentation_strategy,
         'revision': None,
         'resultado': automatic_result,
         'resumen': automatic_summary,

@@ -1,52 +1,50 @@
-ola, mucha cosa:
+# SALIVA CURRENT — Modelo SICAM
 
-para iniciar el programa desde visual, haz lo siguiente
+Estrategia `CURRENT_CUSTOM_V1`, puerto **8001**, ambiente **sicam**,
+Python **3.10.20**, CPU. Django y el selector SALIVA ya están integrados.
 
-primero asegurate que este el entonrno de anaconda creado:
-- Anaconda3\envs\cellseg\ (cellseg asi se llama mi entorno, elige el tuyo)
+## Instalación específica
 
-despues presiona, cntrl + shift + p para el comando ">" selecciona:
-- Python: select Interpreter
-- Anaconda3/envs/cellseg/python.exe
-- NO: Python 3.13 (Global)
+Crear `sicam` según la [guía WSL](../../docs/developer_environment_setup_wsl.md).
+Desde ese ambiente, la secuencia CPU validada del componente es:
 
--python -m uvicorn app.main:app --reload
+```bash
+cd ~/repos/sicam-refactor/apps/segmentation-saliva
+conda activate sicam
+python -m pip install torch==2.12.1+cpu --index-url https://download.pytorch.org/whl/cpu
+python -m pip install -r requirements.txt
+python -m pip check
+```
 
-utiliza
-- where python
-para saber si estamos en ese entorno
+El runtime usa **`segmentacion_core/cellpose` vendorizado**, no Cellpose PyPI.
+No seguir el comentario heredado que sugiere instalar Cellpose externo.
+Django comparte `sicam`; sus requirements se instalan desde la guía canónica.
+Las dependencias científicas de CURRENT no están completamente fijadas.
 
-y despues de esto:
-- conda activate cellseg
-- python -m uvicorn app.main:app --reload
+Modelo obligatorio externo, ignorado por Git:
 
--------------------- I M P O R T A N T E -----------------------------
+```text
+apps/segmentation-saliva/segmentacion_core/membranas_500_125
+```
 
-ESTE ES MUY IMPORTANTE PARA QUE NO SE OBSTRUYAN LOS PUERTOS (con Django)
+Provisionar y comprobar tamaño/hash según la guía WSL. El loader
+`app/services/segmentador.py` resuelve esa ruta desde el directorio del servicio.
+No se sustituye por cpsam.
 
-- python -m uvicorn app.main:app --reload --port 8001
+## Arranque
 
-----------------------------------------------------------------------
+```bash
+cd ~/repos/sicam-refactor/apps/segmentation-saliva
+conda activate sicam
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8001
+```
 
-- python -m uvicorn --version
+Importar la aplicación carga el modelo; esperar startup completo antes de
+verificar `http://127.0.0.1:8001/docs` y `/openapi.json`.
+Endpoint de inferencia: `POST /segmentar`, multipart `file`. No hay health
+separado. Para checks sin inferencia usar sólo los GET anteriores una vez listo.
+El servicio ejecuta el pipeline; no es necesario arrancar scripts del core
+por separado. Apagar con Ctrl+C.
 
-pero si hay errores y no se selecciona ese interprete:
-SOLUCIÓN DEFINITIVA
-1️⃣ Abre Anaconda Prompt
-2️⃣ Ejecuta:
-- conda init powershell
-3️⃣ Cierra VS Code completamente
-4️⃣ Abre VS Code nuevamente
-5️⃣ En la terminal escribe:
-- conda activate cellseg
-
-y listo
-
-algo muy importante es que en este entorno o donde estes trabajando descargues todo
-- uvicorn
-- cellpose
-- etc.
-
-dependencias extras:
-- pip install python-multipart
-- pip install matplotlib
+Arranque conjunto, datos de prueba y errores:
+[manual cotidiano](../../docs/30_developer_startup_and_test_data.md).

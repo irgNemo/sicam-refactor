@@ -1,128 +1,56 @@
 # SICAM Refactor
 
-Repositorio de saneamiento y refactorizacion de SICAM (Sistema de Captura y Analisis de Micronucleos).
-
-Este workspace nuevo se construyo a partir de tres repositorios fuente previos:
-
-- `micronucleos-web`: aplicacion web Django + Vue.
-- `Segmentacion_web`: microservicio FastAPI para segmentacion de saliva.
-- `segmentacion_sangre`: microservicio FastAPI para segmentacion de sangre.
-
-## Estructura Actual
-
-El workspace funciona como monorepo de refactorizacion. Las tres aplicaciones fuente se conservaron como aplicaciones separadas bajo `apps/`:
-
-- `apps/web/`
-- `apps/segmentation-saliva/`
-- `apps/segmentation-blood/`
+SICAM (Sistema de Captura y Análisis de Micronúcleos) reúne una aplicación
+Django REST + Vue/Vite y tres servicios de segmentación en un monorepo.
 
 ```text
-sicam-refactor/
-├── apps/
-│   ├── web/                       # Aplicacion web integrada: Backend Django + Frontend Vue
-│   ├── segmentation-saliva/       # Microservicio de segmentacion de muestras salivales
-│   └── segmentation-blood/        # Microservicio de segmentacion de muestras de sangre
-├── docs/                          # Inventarios, brechas, prioridades y contexto maestro
-├── scripts/                       # Scripts de utilidad
-├── docker/                        # Archivos Docker pendientes de consolidacion
-├── .gitignore
-├── PHASE_0_SUMMARY.md
-├── PHASE_2_SUMMARY.md
-└── README.md
+apps/web/Frontend             Vue/Vite :5173
+           -> apps/web/Backend          Django :8000
+                 +-> apps/segmentation-saliva      CURRENT :8001
+                 +-> apps/segmentation-blood       BLOOD   :8002
+                 +-> apps/segmentation-saliva-alt  ALT     :8003
 ```
 
-## Estado Real Actual
+El flujo integrado permite registrar pacientes/casos/muestras, segmentar,
+persistir resultados, consultar históricos, editar y validar revisiones y
+caracterizar el resultado efectivo en Django. SALIVA dispone de selector:
+**Modelo SICAM** (`CURRENT_CUSTOM_V1`, default) o **Cellpose-SAM alternativo**
+(`ALT_CPSAM_MORPHOLOGICAL_V1`). BLOOD sigue independiente, sin selección de
+estrategias. SALIVA v2 expone morfometría; BLOOD conserva conteos v1.
+No se presenta ALT como una mejora científicamente validada.
 
-El repositorio ya paso por una iteracion de saneamiento tecnico inicial:
+## Instalar y operar
 
-- Se limpiaron archivos generados/locales como `__pycache__/`, `*.pyc`, `.pytest_cache/`, `db.sqlite3`, `debug.log` y temporales detectados.
-- `.gitignore` fue ajustado para Python, Django, Node/Vite, entornos locales, logs, bases SQLite y artefactos temporales.
-- El backend Django usa configuracion basada en variables de entorno mediante `django-environ`.
-- Existe `apps/web/Backend/.env.example`.
-- El frontend Vue ya centraliza Axios en `apps/web/Frontend/src/services/apiClient.js`.
-- El frontend usa `import.meta.env.VITE_API_BASE_URL`.
-- Existe `apps/web/Frontend/.env.example`.
-- El backend ya tiene clientes HTTP para microservicios de segmentacion en `apps/web/Backend/api/services/segmentation/`.
+1. [Instalación inicial en WSL](docs/developer_environment_setup_wsl.md):
+   tres ambientes Conda, Node, dependencias, modelos externos, `.env` y migraciones.
+2. [Arranque cotidiano y datos de prueba](docs/30_developer_startup_and_test_data.md):
+   cinco terminales para el stack completo, subconjuntos por flujo y checks HTTP.
 
-## Validacion Tecnica Pendiente
+| Componente | Documentación específica |
+|---|---|
+| Django | [Backend](apps/web/Backend/README_DEVELOPMENT.md) |
+| Vue/Vite | [Frontend](apps/web/Frontend/README.md) |
+| SALIVA CURRENT | [Servicio CURRENT](apps/segmentation-saliva/README.md) |
+| BLOOD | [Servicio BLOOD](apps/segmentation-blood/README.md) |
+| SALIVA ALT | [Servicio ALT](apps/segmentation-saliva-alt/README.md) |
 
-Aunque el saneamiento documental y de configuracion ya esta aplicado, todavia falta una validacion tecnica minima del estado actual:
+**BLOOD arranca con `main:app` desde su directorio**, porque su `main.py` está
+en la raíz. CURRENT y ALT usan `app.main:app`.
 
-- instalar dependencias y ejecutar checks del backend Django;
-- instalar dependencias y ejecutar build/checks del frontend Vue;
-- validar que ambos microservicios FastAPI levantan y responden a sus endpoints de segmentacion;
-- documentar comandos de ejecucion y despliegue para cada servicio;
-- definir pruebas smoke para el flujo integrado cuando exista el endpoint Django de segmentacion.
+## Estado y evidencia
 
-Los endpoints existentes de Django se mantienen:
+Instalación Windows → WSL validada; estrategias SALIVA integradas en backend
+y frontend. La revisión visual pendiente registrada en Sprint 18C sigue siendo
+un pendiente de aceptación, no una integración ausente. Reportes/exportación
+web no se declaran completados por esta actualización documental.
 
-```text
-/api/pacientes/
-/api/casos/
-/api/analisis/
-/api/muestras/
-/api/pacientes/{id}/casos/
-/api/casos/{id}/analisis/
-/api/analisis/{id}/cambiar_estado/
-```
+Los reportes de sprints, inventarios iniciales y documentos `PHASE_*` conservan
+la evidencia de sus fechas; no son instrucciones actuales de instalación.
+Consultar [18A](docs/58_sprint_18a_alt_saliva_segmentation_service.md),
+[18B](docs/59_sprint_18b_backend_saliva_segmentation_strategies.md),
+[18C](docs/60_sprint_18c_frontend_saliva_strategy_selector.md) y la
+[auditoría documental 18C.1](docs/61_documentation_installation_startup_refresh.md).
 
-## Aplicaciones
-
-### `apps/web/`
-
-Aplicacion web principal:
-
-- `Backend/`: API Django REST para pacientes, casos, analisis y muestras.
-- `Frontend/`: interfaz Vue 3 + Vite.
-
-El backend contiene una capa de clientes de segmentacion, pero todavia no expone un endpoint Django que ejecute la segmentacion de una muestra.
-
-### `apps/segmentation-saliva/`
-
-Microservicio FastAPI heredado de `Segmentacion_web`.
-
-Endpoint principal esperado:
-
-```http
-POST /segmentar
-```
-
-### `apps/segmentation-blood/`
-
-Microservicio FastAPI heredado de `segmentacion_sangre`.
-
-Endpoint principal esperado:
-
-```http
-POST /api/v1/segmentar
-```
-
-## Pendientes Principales
-
-Todavia falta integrar funcionalmente los tres sistemas:
-
-- Completar validacion tecnica minima de backend, frontend y microservicios.
-- Crear `POST /api/muestras/{id}/segmentar/` en Django.
-- Persistir el JSON de segmentacion retornado por los microservicios.
-- Generalizar `MuestraSaliva` hacia un modelo tipo `ImagenMuestra` que soporte saliva y sangre.
-- Integrar el flujo completo frontend -> Django -> microservicio -> persistencia.
-- Agregar validacion de segmentaciones por especialista.
-- Implementar caracterizacion cuantitativa.
-- Implementar reportes/exportacion.
-- Documentar pruebas y despliegue.
-
-## Documentacion
-
-La carpeta `docs/` contiene el inventario y contexto vigente del refactor:
-
-- `docs/02_backend_django_inventory.md`
-- `docs/03_frontend_vue_inventory.md`
-- `docs/08_integration_gaps.md`
-- `docs/09_refactor_priorities.md`
-- `docs/10_codex_master_context.md`
-
-## Estado
-
-Refactorizacion en progreso.
-
-Ultima actualizacion documental: 2026-06-25.
+Modelos, `.env`, bases, `media/`, imágenes reales y artefactos generados no se
+versionan. Los modelos deben provisionarse por los mecanismos documentados;
+no forman parte de un clone del repositorio.

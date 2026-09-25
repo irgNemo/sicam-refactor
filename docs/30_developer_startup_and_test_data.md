@@ -1,1010 +1,309 @@
-# Developer Startup and Minimum Test Data
+# SICAM — Arranque cotidiano y datos de prueba
 
-## Proposito
+Manual operativo canónico WSL, actualizado para el estado posterior a 18C.
+Para crear ambientes, instalar dependencias, configurar `.env` o provisionar
+modelos desde cero, seguir primero la
+[guía de instalación WSL](developer_environment_setup_wsl.md).
+Los comandos siguientes son Bash y suponen el repo en `~/repos/sicam-refactor`.
 
-Esta guia es el manual operativo canonico para levantar localmente el monorepo
-`sicam-refactor`, preparar datos minimos y validar el flujo actual:
-
-```text
-Frontend Vue -> Django REST -> microservicios FastAPI -> persistencia en Django
-```
-
-Componentes ejecutables actuales:
-
-- Frontend Vue/Vite en `apps/web/Frontend`.
-- Backend Django en `apps/web/Backend`.
-- Microservicio FastAPI SALIVA en `apps/segmentation-saliva`.
-- Microservicio FastAPI BLOOD/SANGRE en `apps/segmentation-blood`.
-
-La caracterizacion no es un microservicio separado. Vive dentro del backend
-Django y usa resultados de segmentacion persistidos; no reejecuta Cellpose.
-
-No se incluyen datos clinicos reales, modelos pesados, `db.sqlite3`, `media/`,
-secretos ni credenciales.
-
-## Convencion de rutas
-
-En esta guia:
+## Arquitectura y prerrequisitos
 
 ```text
-<REPO>
+Vue/Vite :5173 -> Django REST :8000 -> SQLite
+                       +-> SALIVA CURRENT :8001
+                       +-> BLOOD          :8002
+                       +-> SALIVA ALT     :8003
 ```
 
-representa la raiz local de `sicam-refactor`.
-
-Ejemplo:
-
-```powershell
-cd "<REPO>\apps\web\Backend"
-```
-
-No hardcodear rutas personales en documentacion, scripts o configuracion
-versionada.
-
-## Requisitos previos
-
-- Windows con `cmd.exe` o PowerShell.
-- Conda/Miniconda.
-- Entorno `sicam` para Django y SALIVA.
-- Entorno `sicam-blood` para BLOOD/SANGRE.
-- Node compatible con `apps/web/Frontend/package.json`:
-
-```text
-^20.19.0 || >=22.12.0
-```
-
-Versiones observadas durante la ultima actualizacion del manual:
-
-| Herramienta | Version observada |
-|---|---|
-| `sicam` Python | `Python 3.10.20` |
-| `sicam-blood` Python | `Python 3.10.21` |
-| Node | `v24.17.0` |
-| npm | `11.13.0` |
-
-Los comandos rapidos usan `conda run -n <env> ...` porque funcionan tanto en
-`cmd.exe` como en PowerShell cuando `conda` esta en `PATH`.
-
-Si `conda` no se reconoce en PowerShell, usar el ejecutable explicito:
-
-```powershell
-& "$env:USERPROFILE\miniconda3\Scripts\conda.exe" run -n sicam python --version
-```
-
-Si se usa `cmd.exe`, usar:
-
-```cmd
-"%USERPROFILE%\miniconda3\Scripts\conda.exe" run -n sicam python --version
-```
-
-Evitar ejecutar varios `conda run` en paralelo desde la misma sesion
-automatizada; Conda puede colisionar con archivos temporales. Para operar SICAM,
-usar una terminal por servicio.
-
-## Estado real del dominio
-
-El flujo de datos actual es:
-
-```text
-Paciente -> Caso -> AnalisisPred -> MuestraSaliva/MuestraSangre
--> ResultadoSegmentacion -> RevisionSegmentacion
--> ResultadoCaracterizacion
-```
-
-Modelos principales:
-
-| Modelo | Relacion | Uso |
+| Ambiente | Uso | Versión validada |
 |---|---|---|
-| `Paciente` | raiz | Datos basicos de paciente. |
-| `Caso` | `paciente -> Paciente` | Agrupa analisis de un paciente. |
-| `AnalisisPred` | `id_paciente_fk -> Paciente`, `id_caso_fk -> Caso` | Contenedor de muestras. |
-| `MuestraSaliva` | `analisis -> AnalisisPred` | Imagen de saliva. |
-| `MuestraSangre` | `analisis -> AnalisisPred` | Imagen de sangre. |
-| `ResultadoSegmentacion` | `muestra` o `muestra_sangre` | Guarda respuesta cruda y normalizada. |
-| `RevisionSegmentacion` | `resultado_segmentacion -> ResultadoSegmentacion` | BORRADOR/VALIDADA experto. |
-| `ResultadoCaracterizacion` | `resultado_segmentacion -> ResultadoSegmentacion` | Caracterizacion del resultado efectivo. |
+| `sicam` | Django + SALIVA CURRENT | Python 3.10.20 |
+| `sicam-blood` | BLOOD | Python 3.10.21 |
+| `sicam-saliva-alt` | SALIVA ALT | Python 3.10.20 / Cellpose 4.0.8 |
+| nvm | Frontend | Node 24.17.0 / npm 11.13.0 |
 
-Campos minimos para datos demo:
+Modelos ya provisionados: CURRENT usa
+`apps/segmentation-saliva/segmentacion_core/membranas_500_125`; BLOOD y ALT
+pueden compartir `~/.cellpose/models/cpsam`. Ver rutas alternativas, checksums
+y diferencias entre vendorizado y PyPI en la guía de instalación.
 
-| Modelo | Campos obligatorios |
+Después de incorporar cambios del repositorio que incluyan migraciones:
+
+```bash
+cd ~/repos/sicam-refactor/apps/web/Backend
+conda activate sicam
+python manage.py migrate
+python manage.py showmigrations
+python manage.py check
+```
+
+Aplicar las migraciones versionadas, incluida `0007_saliva_segmentation_strategy`.
+No generar migraciones para arrancar. Si la instalación usa PostgreSQL,
+asegurar primero que esa base esté disponible; SQLite no requiere otro proceso.
+
+## Stack completo: cinco terminales
+
+Una terminal por proceso. Django puede arrancar sin los microservicios, pero
+hay que esperar que esté listo el correspondiente antes de pulsar Segmentar.
+
+### Terminal 1 — Django
+
+```bash
+cd ~/repos/sicam-refactor/apps/web/Backend
+conda activate sicam
+python manage.py runserver 127.0.0.1:8000
+```
+
+### Terminal 2 — Frontend
+
+```bash
+cd ~/repos/sicam-refactor/apps/web/Frontend
+nvm use 24.17.0
+npm run dev -- --host 127.0.0.1 --port 5173
+```
+
+Si Vite anuncia otro puerto por estar 5173 ocupado, resolver la colisión antes
+de probar; CORS está configurado para los orígenes documentados.
+
+### Terminal 3 — SALIVA CURRENT
+
+```bash
+cd ~/repos/sicam-refactor/apps/segmentation-saliva
+conda activate sicam
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8001
+```
+
+Estrategia `CURRENT_CUSTOM_V1`, label **Modelo SICAM**. Carga el modelo
+personalizado al importar la aplicación. No instalar Cellpose PyPI en `sicam`.
+
+### Terminal 4 — BLOOD
+
+```bash
+cd ~/repos/sicam-refactor/apps/segmentation-blood
+conda activate sicam-blood
+python -m uvicorn main:app --host 127.0.0.1 --port 8002
+```
+
+**BLOOD = `main:app`**: el archivo ASGI es `main.py` en la raíz del
+microservicio. No está en el subdirectorio `app`. Su lifespan precarga
+Cellpose/cpsam; `/docs` puede tardar en estar disponible.
+
+### Terminal 5 — SALIVA ALT
+
+```bash
+cd ~/repos/sicam-refactor/apps/segmentation-saliva-alt
+conda activate sicam-saliva-alt
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8003
+```
+
+Estrategia `ALT_CPSAM_MORPHOLOGICAL_V1`, label **Cellpose-SAM alternativo**.
+Usa CPU y verifica versión, tamaño y hash de cpsam durante startup. No descarga
+pesos ni cambia silenciosamente de estrategia. Para reproducir el límite de
+recursos usado en smokes, opcionalmente exportar antes del comando:
+
+```bash
+export OMP_NUM_THREADS=4 MKL_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4
+```
+
+Estas variables limitan threads; no cambian thresholds científicos.
+
+En los tres microservicios esperar `Application startup complete` y después
+verificar HTTP. Crear el proceso no significa que el modelo ya esté listo.
+
+## Arrancar sólo lo necesario
+
+| Flujo | Procesos requeridos |
 |---|---|
-| `Paciente` | `nombre`, `apellido`, `fecha_nacimiento`, `identificacion` |
-| `Caso` | `paciente`, `titulo` |
-| `AnalisisPred` | `id_paciente_fk`, `id_caso_fk` |
-| `MuestraSaliva` | `analisis`, `imagen` |
-| `MuestraSangre` | `analisis`, `imagen` |
+| Navegación, UI y consulta de históricos | Django + Frontend |
+| Nueva segmentación SALIVA CURRENT | Django + Frontend + CURRENT |
+| Nueva segmentación SALIVA ALT | Django + Frontend + ALT |
+| Probar ambas opciones del selector | Django + Frontend + CURRENT + ALT |
+| Nueva segmentación BLOOD | Django + Frontend + BLOOD |
+| Full stack | Los cinco procesos |
+| Caracterización de resultados existentes | Django + Frontend; imágenes y resultados disponibles |
 
-## Inicio rapido del sistema completo
+Characterization vive en Django y no reejecuta Cellpose. No tiene un sexto
+servicio ni un puerto adicional. ALT sólo está habilitado para SALIVA; no se
+utiliza para BLOOD.
 
-Orden operativo recomendado:
+## Checks rápidos de disponibilidad
 
-1. Microservicio SALIVA.
-2. Microservicio BLOOD/SANGRE.
-3. Backend Django.
-4. Frontend Vue/Vite.
+Ejecutar sólo los checks de los procesos que se hayan levantado:
 
-Django puede arrancar antes que los microservicios, pero este orden deja todo
-disponible antes de usar la interfaz. En una instalacion con PostgreSQL externo,
-PostgreSQL debe estar disponible antes de iniciar Django.
-
-### Tabla rapida
-
-| Orden | Servicio | Entorno | Puerto | Verificacion |
-|---|---|---|---|---|
-| 1 | SALIVA FastAPI | `sicam` | `8001` | `http://127.0.0.1:8001/docs` |
-| 2 | BLOOD FastAPI | `sicam-blood` | `8002` | `http://127.0.0.1:8002/docs` |
-| 3 | Django REST | `sicam` | `8000` | `http://127.0.0.1:8000/api/` |
-| 4 | Vue/Vite | Node/npm | `5173` | `http://localhost:5173` |
-
-### Terminal 1 - Segmentacion SALIVA
-
-```powershell
-cd "<REPO>\apps\segmentation-saliva"
-conda run -n sicam python -m uvicorn app.main:app --host 127.0.0.1 --port 8001
+```bash
+curl --fail http://127.0.0.1:8000/api/
+curl --fail http://127.0.0.1:8000/api/pacientes/
+curl --fail http://127.0.0.1:5173/ >/dev/null
+curl --fail http://127.0.0.1:8001/docs >/dev/null
+curl --fail http://127.0.0.1:8001/openapi.json >/dev/null
+curl --fail http://127.0.0.1:8002/docs >/dev/null
+curl --fail http://127.0.0.1:8002/openapi.json >/dev/null
+curl --fail http://127.0.0.1:8003/docs >/dev/null
+curl --fail http://127.0.0.1:8003/openapi.json >/dev/null
 ```
 
-Opcion de desarrollo con recarga:
+Django registra `/api/` mediante DRF y `/api/pacientes/`. No registra
+`/api/health/`; tampoco hay `/health` dedicado en estos microservicios.
+Un 404 en la raíz Django `/` no significa que el backend esté caído.
+Estos GET no ejecutan segmentación; el startup sí carga modelos.
 
-```powershell
-conda run -n sicam python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8001
+## Configuración cotidiana
+
+No copiar `.env.example` sobre un `.env` configurado. Revisar las variables
+reales en la [guía de instalación](developer_environment_setup_wsl.md#6-configuración-base-y-frontend).
+Valores locales de routing:
+
+| Método / tipo | URL del servicio | Timeout Django |
+|---|---|---:|
+| CURRENT | `http://127.0.0.1:8001` | 30 s |
+| ALT | `http://127.0.0.1:8003` | 240 s |
+| BLOOD | `http://localhost:8002` (o 127.0.0.1 configurado explícitamente) | 240 s |
+
+Frontend: `VITE_API_BASE_URL=http://127.0.0.1:8000`. Reiniciar Django o Vite si
+se cambia su `.env`. No apuntar el frontend directamente a los microservicios.
+
+## Datos mínimos reproducibles
+
+Desde Backend con `sicam`:
+
+```bash
+cd ~/repos/sicam-refactor/apps/web/Backend
+conda activate sicam
+python manage.py seed_demo_data
 ```
 
-Verificar:
+El comando existe en `api/management/commands/seed_demo_data.py`. Crea o reutiliza
+un paciente ficticio (`SICAM-DEMO-001`), caso, `AnalisisPred` y `MuestraSaliva`.
+Sin argumentos usa un **PNG transparente de 1×1**, embebido en el comando:
+sirve para poblar la galería, **no para inferencia o detección positiva**.
+No crea muestras BLOOD ni resultados de segmentación.
 
-```text
-http://127.0.0.1:8001/docs
+No hay un directorio de fixtures versionadas ni un paso `loaddata` requerido.
+No se necesita un archivo externo `test_image.jpg` para crear estos datos demo.
+
+Para imágenes SALIVA de prueba autorizadas y locales, reemplazar las rutas:
+
+```bash
+python manage.py seed_demo_data --image /ruta/autorizada/saliva.png
+python manage.py seed_demo_data --image-dir /ruta/autorizada/saliva
 ```
 
-### Terminal 2 - Segmentacion BLOOD/SANGRE
-
-```powershell
-cd "<REPO>\apps\segmentation-blood"
-conda run -n sicam-blood python -m uvicorn main:app --host 127.0.0.1 --port 8002
-```
-
-Verificar:
-
-```text
-http://127.0.0.1:8002/docs
-```
-
-El primer arranque requiere que el modelo externo `cpsam` ya exista en:
-
-```text
-%USERPROFILE%\.cellpose\models\cpsam
-```
-
-### Terminal 3 - Backend Django
-
-```powershell
-cd "<REPO>\apps\web\Backend"
-conda run -n sicam python manage.py runserver 127.0.0.1:8000
-```
-
-Verificar:
-
-```text
-http://127.0.0.1:8000/api/
-http://127.0.0.1:8000/api/pacientes/
-http://127.0.0.1:8000/api/analisis/
-```
-
-La raiz `http://127.0.0.1:8000/` puede responder 404 sin indicar que el
-backend este caido; validar contra endpoints `/api/`.
-
-### Terminal 4 - Frontend Vue/Vite
-
-```powershell
-cd "<REPO>\apps\web\Frontend"
-npm run dev
-```
-
-Verificar:
-
-```text
-http://localhost:5173
-```
-
-Antes del primer `npm run dev`, crear el archivo local `.env` como se indica en
-la seccion de Frontend. Reiniciar Vite despues de crear o modificar `.env`.
-
-## Variables de entorno
-
-### Backend
-
-Archivo de ejemplo:
-
-```text
-apps/web/Backend/.env.example
-```
-
-Crear `.env` local:
-
-```powershell
-cd "<REPO>\apps\web\Backend"
-Copy-Item .env.example .env
-```
-
-Variables relevantes para desarrollo:
-
-```text
-SECRET_KEY=django-insecure-change-this-in-production
-DEBUG=True
-ALLOWED_HOSTS=localhost,127.0.0.1,0.0.0.0
-CORS_ALLOWED_ORIGINS=http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173,http://127.0.0.1:3000
-SALIVA_SEGMENTATION_SERVICE_URL=http://localhost:8001
-SALIVA_SERVICE_TIMEOUT=30
-BLOOD_SEGMENTATION_SERVICE_URL=http://localhost:8002
-BLOOD_SERVICE_TIMEOUT=240
-LANGUAGE_CODE=es-mx
-TIME_ZONE=America/Mexico_City
-```
-
-No commitear `.env`.
-
-### Frontend
-
-Archivo de ejemplo:
-
-```text
-apps/web/Frontend/.env.example
-```
-
-Crear `.env` local:
-
-```powershell
-cd "<REPO>\apps\web\Frontend"
-Copy-Item .env.example .env
-```
-
-Variable requerida:
-
-```text
-VITE_API_BASE_URL=http://127.0.0.1:8000
-```
-
-Vite no carga `.env.example` automaticamente. `VITE_API_BASE_URL` debe apuntar
-al backend Django. Si se crea o modifica `.env` mientras Vite ya esta corriendo,
-detener y reiniciar `npm run dev`.
-
-## Preparacion del backend Django
-
-Directorio:
-
-```powershell
-cd "<REPO>\apps\web\Backend"
-```
-
-Instalar dependencias si hace falta:
-
-```powershell
-conda run -n sicam python -m pip install -r requirements.txt
-```
-
-Aplicar migraciones:
-
-```powershell
-conda run -n sicam python manage.py migrate
-```
-
-Migraciones actuales de `api`:
-
-```text
-0001_initial.py
-0002_resultadosegmentacion.py
-0003_resultadosegmentacion_resultado_normalizado.py
-0004_revisionsegmentacion_and_more.py
-0005_alter_resultadosegmentacion_muestra_muestrasangre_and_more.py
-0006_resultadocaracterizacion_and_more.py
-```
-
-Despues de `git pull`, ejecutar normalmente:
-
-```powershell
-conda run -n sicam python manage.py migrate
-conda run -n sicam python manage.py check
-```
-
-Si se agregan migraciones en un sprint futuro, deben aplicarse antes de usar la
-UI.
-
-Crear superusuario opcional:
-
-```powershell
-conda run -n sicam python manage.py createsuperuser
-```
-
-Base de datos local por defecto: SQLite (`db.sqlite3`). En despliegue objetivo
-puede usarse PostgreSQL configurando variables `DB_*`; PostgreSQL no es un
-servicio obligatorio para el desarrollo local actual.
-
-## Preparacion del entorno BLOOD
-
-Crear el entorno aislado si no existe:
-
-```powershell
-conda create -n sicam-blood python=3.10 pip -y
-```
-
-Verificar version:
-
-```powershell
-conda run -n sicam-blood python --version
-```
-
-Instalar dependencias desde el directorio del microservicio:
-
-```powershell
-cd "<REPO>\apps\segmentation-blood"
-conda run -n sicam-blood python -m pip install -r requirements.txt
-```
-
-`sicam-blood` debe mantenerse como runtime separado para BLOOD/SANGRE. El
-runtime `sicam` se conserva para Django y SALIVA.
-
-## Datos minimos reproducibles
-
-Metodo recomendado:
-
-```powershell
-cd "<REPO>\apps\web\Backend"
-conda run -n sicam python manage.py seed_demo_data
-```
-
-El comando crea o reutiliza:
-
-- `Paciente` ficticio con `identificacion=SICAM-DEMO-001`;
-- `Caso` ficticio;
-- `AnalisisPred`;
-- `MuestraSaliva`;
-- imagen sintetica minima dentro de `MEDIA_ROOT`.
-
-El comando es seguro para ejecuciones repetidas:
-
-- no elimina datos;
-- no sobrescribe datos existentes;
-- no descarga archivos;
-- no agrega imagenes al repositorio;
-- no usa datos clinicos reales.
-
-Usar una imagen local propia de prueba:
-
-```powershell
-conda run -n sicam python manage.py seed_demo_data --image "C:\ruta\local\imagen_demo.png"
-```
-
-Poblar galeria con varias imagenes locales de saliva:
-
-```powershell
-conda run -n sicam python manage.py seed_demo_data --image-dir "C:\DatosSICAM\saliva"
-```
-
-Combinar `--image` y `--image-dir`:
-
-```powershell
-conda run -n sicam python manage.py seed_demo_data --image "C:\DatosSICAM\saliva\extra.png" --image-dir "C:\DatosSICAM\saliva"
-```
-
-`--image-dir` procesa archivos directos del directorio, sin busqueda recursiva,
-en orden alfabetico. Extensiones soportadas:
-
-```text
-.jpg
-.jpeg
-.png
-.tif
-.tiff
-```
-
-El comando mantiene idempotencia por nombre base de archivo dentro del
-`AnalisisPred` demo. Si se ejecuta otra vez con la misma carpeta, no crea
-duplicados. Si se agrega una imagen nueva, solo crea la nueva `MuestraSaliva`.
-
-Archivos con extensiones no soportadas se ignoran y se contabilizan en el
-resumen. Una carpeta vacia no produce error.
-
-Las imagenes se copian a `apps/web/Backend/media/` mediante `ImageField`.
-`media/` es local, esta ignorada por Git y no debe versionarse.
-
-## Carga manual desde frontend
-
-Flujo funcional en la UI:
-
-1. Abrir `Registro`.
-2. Crear un paciente.
-3. Crear un caso y dejar marcada la opcion de crear analisis automaticamente.
-4. Ir a `Agregar Imagenes`.
-5. Seleccionar tipo de muestra, paciente, caso y analisis.
-6. Subir una o mas imagenes.
-7. Volver a `Segmentacion`.
-8. Buscar el paciente en el sidebar.
-9. Seleccionar el caso.
-10. Confirmar que la galeria muestra imagenes.
-
-Endpoints Django REST usados por el frontend:
+Admite combinar ambos argumentos. `--image-dir` no es recursivo y acepta
+`.jpg`, `.jpeg`, `.png`, `.tif`, `.tiff`. Evita duplicados por nombre base dentro
+del análisis demo; repetir no elimina ni sobrescribe registros existentes.
+Las imágenes se copian mediante storage a `MEDIA_ROOT`, que por defecto es
+`apps/web/Backend/media/`, ignorado por Git.
+
+La micrografía real autorizada en los smokes 18A–18C **no es una fixture
+versionada** ni debe asumirse disponible en una WSL nueva. Sus artefactos de
+`/tmp` son temporales. No copiar imágenes clínicas/reales al repositorio ni
+confundir el PNG sintético con una validación científica.
+
+## Carga manual y flujo de resultados
+
+1. En **Registro**, crear paciente y caso con análisis.
+2. En **Agregar Imágenes**, seleccionar tipo, paciente/caso/análisis y cargar
+   imágenes de prueba autorizadas. BLOOD se carga por este flujo o por su API,
+   no por `seed_demo_data`.
+3. En **Segmentación**, seleccionar paciente, caso y muestra.
+4. SALIVA muestra **Modelo SICAM** por defecto. Elegir **Cellpose-SAM
+   alternativo** sólo para una nueva segmentación SALIVA.
+5. Ejecutar y esperar. El selector queda disabled durante procesamiento; no
+   hay timeout frontend propio ni fallback automático si ALT falla.
+6. Revisar el resultado, historial y método persistido por backend. Cambiar la
+   elección no modifica la provenance de resultados anteriores.
+7. Editar/guardar BORRADOR y validar si corresponde. VALIDADA tiene precedencia
+   sobre AUTOMATICO; BORRADOR nunca es el resultado efectivo.
+8. En **Caracterización**, seleccionar un resultado COMPLETADO y caracterizar
+   su efectivo. SALIVA v2 muestra morfometría; históricos SALIVA v1 y BLOOD v1
+   conservan sus contratos. BLOOD no adquiere morfometría por usar este stack.
+
+Endpoints relevantes:
 
 ```text
 POST /api/pacientes/
 POST /api/casos/
 POST /api/analisis/
-POST /api/muestras/
-POST /api/muestras-sangre/
-```
-
-## Almacenamiento de archivos subidos
-
-Configuracion actual:
-
-```text
-MEDIA_URL=/media/
-MEDIA_ROOT=apps/web/Backend/media
-```
-
-En desarrollo, `config/urls.py` sirve `MEDIA_URL` cuando `DEBUG=True`.
-
-No versionar:
-
-```text
-apps/web/Backend/media/
-db.sqlite3
-```
-
-## Microservicio de saliva
-
-Proposito: segmentar imagenes de saliva.
-
-Directorio:
-
-```powershell
-cd "<REPO>\apps\segmentation-saliva"
-```
-
-Entorno:
-
-```text
-sicam
-```
-
-Instalacion:
-
-```powershell
-conda run -n sicam python -m pip install -r requirements.txt
-```
-
-Entrypoint:
-
-```text
-app.main:app
-```
-
-Comando de ejecucion:
-
-```powershell
-conda run -n sicam python -m uvicorn app.main:app --host 127.0.0.1 --port 8001
-```
-
-Puerto:
-
-```text
-8001
-```
-
-Verificacion:
-
-```text
-http://127.0.0.1:8001/docs
-http://127.0.0.1:8001/openapi.json
-```
-
-Endpoint consumido por Django:
-
-```text
-POST /segmentar
-```
-
-Django envia multipart con campo:
-
-```text
-file
-```
-
-### Modelo externo SALIVA
-
-El microservicio de saliva espera:
-
-```text
-apps/segmentation-saliva/segmentacion_core/membranas_500_125
-```
-
-Este artefacto es externo y esta ignorado por Git. No debe agregarse al
-repositorio sin decision explicita. Si falta, el servicio puede fallar al
-arrancar o al ejecutar segmentacion real.
-
-## Microservicio BLOOD/SANGRE
-
-Proposito: segmentar imagenes de sangre.
-
-Directorio:
-
-```powershell
-cd "<REPO>\apps\segmentation-blood"
-```
-
-Entorno:
-
-```text
-sicam-blood
-```
-
-`sicam-blood` existe separado de `sicam` por un conflicto binario/OpenMP
-detectado durante la recuperacion del runtime BLOOD. No ejecutar BLOOD en el
-entorno `sicam`.
-
-Instalacion:
-
-```powershell
-conda run -n sicam-blood python -m pip install -r requirements.txt
-```
-
-`requirements.txt` instala tambien el Cellpose vendorizado via `-e .`.
-`pyproject.toml` expone:
-
-```text
-apps/segmentation-blood/segmentacion_core/cellpose
-```
-
-como paquete importable `cellpose`.
-
-No instalar `cellpose` externo desde PyPI para BLOOD salvo una decision tecnica
-explicita.
-
-Entrypoint:
-
-```text
-main:app
-```
-
-Comando de ejecucion:
-
-```powershell
-conda run -n sicam-blood python -m uvicorn main:app --host 127.0.0.1 --port 8002
-```
-
-Puerto:
-
-```text
-8002
-```
-
-Verificacion:
-
-```text
-http://127.0.0.1:8002/docs
-http://127.0.0.1:8002/openapi.json
-```
-
-Endpoint real del microservicio:
-
-```text
-POST /api/v1/segmentar
-```
-
-Django envia multipart con campo:
-
-```text
-file
-```
-
-### Dependencias BLOOD especiales
-
-BLOOD usa:
-
-- Cellpose vendorizado en `segmentacion_core/cellpose`.
-- `segment-anything` desde la implementacion oficial
-  `facebookresearch/segment-anything`.
-- PyTorch/torchvision CPU-only.
-- Modelo externo `cpsam`.
-
-En `docs/47_hotfix_16b_blood_cellpose_runtime.md` se registro que el dry-run de
-`segment-anything` resolvio el repositorio oficial a:
-
-```text
-dca509fe793f601edb92606367a655c15ac00fdf
-```
-
-### Modelo externo BLOOD `cpsam`
-
-Ubicacion estandar validada:
-
-```text
-%USERPROFILE%\.cellpose\models\cpsam
-```
-
-URL oficial validada:
-
-```text
-https://huggingface.co/mouseland/cellpose-sam/resolve/main/cpsam
-```
-
-SHA-256 validado:
-
-```text
-E1440429EB384F95AFE32BCBA6510F90D518EAEDC917EDE549BED6804004ABE2
-```
-
-Tamano observado:
-
-```text
-1233587898 bytes
-```
-
-Es aproximadamente 1.23 GB. No versionar `cpsam` ni modelos pesados.
-
-Referencia de startup observada en `docs/47`: el modelo cargo en unos segundos
-y el servicio alcanzo `/docs`; estos tiempos son referencias locales, no una
-garantia.
-
-## Frontend Vue/Vite
-
-Proposito: interfaz de registro, segmentacion, edicion experta, historial y
-caracterizacion.
-
-Directorio:
-
-```powershell
-cd "<REPO>\apps\web\Frontend"
-```
-
-Instalacion:
-
-```powershell
-npm install
-```
-
-Configuracion local:
-
-```powershell
-Copy-Item .env.example .env
-```
-
-Verificar en `.env`:
-
-```text
-VITE_API_BASE_URL=http://127.0.0.1:8000
-```
-
-Ejecucion:
-
-```powershell
-npm run dev
-```
-
-Puerto esperado:
-
-```text
-http://localhost:5173
-```
-
-Validacion de build:
-
-```powershell
-npm run build
-```
-
-## Caracterizacion
-
-La caracterizacion pertenece al backend Django.
-
-No requiere:
-
-- un quinto servicio;
-- `uvicorn` adicional;
-- nuevo puerto;
-- nuevo entorno Conda;
-- ejecucion de Cellpose.
-
-Endpoints relacionados:
-
-```text
+POST /api/muestras/                            # multipart imagen + analisis
+POST /api/muestras-sangre/                     # multipart imagen + analisis
+POST /api/muestras/{id}/segmentar/             # JSON segmentation_strategy
+POST /api/muestras-sangre/{id}/segmentar/       # sin segmentation_strategy
+GET  /api/muestras/{id}/resultados-segmentacion/
+GET  /api/muestras-sangre/{id}/resultados-segmentacion/
+GET  /api/resultados-segmentacion/{id}/efectivo/
 POST /api/resultados-segmentacion/{id}/caracterizar/
-GET /api/resultados-segmentacion/{id}/caracterizaciones/
+GET  /api/resultados-segmentacion/{id}/caracterizaciones/
 ```
 
-La caracterizacion usa el resultado efectivo:
+CURRENT/ALT usan respectivamente `CURRENT_CUSTOM_V1` y
+`ALT_CPSAM_MORPHOLOGICAL_V1` en el JSON SALIVA. Si se omite el campo al llamar
+la API SALIVA, Django usa CURRENT. BLOOD rechaza el campo, incluso null.
 
-- revision `VALIDADA`, si existe;
-- resultado automatico, si no existe revision validada.
+ALT observó 170–180 s en CPU con una micrografía 4928×4928; BLOOD también puede
+requerir minutos. Son referencias, no SLA. No juzgar calidad científica a
+partir de disponibilidad HTTP, conteos de una muestra o tiempos.
 
-## Verificacion en API y frontend
+Para inspección del overlay, comprobar que `resultado_normalizado.objects`
+contiene polígonos, que la imagen cargó, que las capas están visibles y que el
+resultado efectivo seleccionado es el esperado. No se requiere alterar geometría.
 
-Despues de ejecutar `seed_demo_data`, validar:
+## Validaciones rápidas y regresión
 
-```text
-GET http://127.0.0.1:8000/api/pacientes/
-GET http://127.0.0.1:8000/api/casos/
-GET http://127.0.0.1:8000/api/analisis/
-GET http://127.0.0.1:8000/api/muestras/
-GET http://127.0.0.1:8000/api/muestras-sangre/
+Backend, desde su directorio con `sicam`:
+
+```bash
+python manage.py check
+python manage.py showmigrations
+python -m pip check
+python -m pytest -q
+python manage.py test
 ```
 
-En frontend:
+Frontend, desde su directorio con `nvm use 24.17.0`:
 
-1. Abrir `Segmentacion`.
-2. Buscar `Demo SICAM` o `SICAM-DEMO-001`.
-3. Seleccionar el caso demo.
-4. Confirmar que la galeria muestra imagenes.
-
-## Ejecucion de segmentacion
-
-Desde frontend:
-
-1. Seleccionar tipo `Saliva` o `Sangre`.
-2. Seleccionar la muestra en la galeria.
-3. Presionar `Ejecutar segmentacion`.
-4. Django llama:
-
-```text
-POST /api/muestras/{id}/segmentar/
-POST /api/muestras-sangre/{id}/segmentar/
-```
-
-5. Django orquesta el microservicio correspondiente:
-
-```text
-POST http://localhost:8001/segmentar
-POST http://localhost:8002/api/v1/segmentar
-```
-
-6. Si la respuesta es valida, Django crea un `ResultadoSegmentacion`.
-
-La inferencia BLOOD en CPU tardo aproximadamente 120 segundos por imagen durante
-smoke tests reales. Django usa `BLOOD_SERVICE_TIMEOUT=240` para dar margen.
-
-## Consulta de resultados historicos
-
-Endpoints:
-
-```text
-GET /api/muestras/{id}/resultados-segmentacion/
-GET /api/muestras-sangre/{id}/resultados-segmentacion/
-```
-
-El frontend los consume al seleccionar muestra y despues de una segmentacion
-exitosa.
-
-## Diagnostico visual del overlay
-
-Cuando exista `resultado_normalizado`, el frontend muestra:
-
-- total de objetos;
-- conteo por etiqueta;
-- lista compacta de objetos;
-- overlay SVG;
-- controles por etiqueta;
-- diagnostico textual de escala.
-
-Para validar alineacion:
-
-1. Seleccionar una muestra con resultado normalizado.
-2. Activar `Diagnostico visual`.
-3. Revisar:
-   - borde base del SVG;
-   - caja visible real de la imagen;
-   - bounding box de poligonos visibles.
-
-## Caracterizacion desde la UI
-
-Flujo actual:
-
-1. Abrir `Caracterizacion`.
-2. Mantener o seleccionar paciente/caso desde el `SideBar`.
-3. Elegir `Saliva` o `Sangre`.
-4. Seleccionar una muestra.
-5. Seleccionar un resultado de segmentacion `COMPLETADO`.
-6. Presionar `Caracterizar`.
-7. Revisar la caracterizacion vigente.
-
-La UI no muestra diagnostico clinico ni exporta reportes en este sprint.
-
-## Detener servicios
-
-En cada terminal donde haya un servidor activo:
-
-```text
-Ctrl+C
-```
-
-Servicios habituales:
-
-- SALIVA `uvicorn`;
-- BLOOD `uvicorn`;
-- Django `runserver`;
-- Vite `npm run dev`.
-
-## Solucion de problemas frecuentes
-
-### `conda` no se reconoce
-
-Usar la ruta explicita del ejecutable:
-
-```powershell
-& "$env:USERPROFILE\miniconda3\Scripts\conda.exe" run -n sicam python --version
-```
-
-Si se usa `cmd.exe`:
-
-```cmd
-"%USERPROFILE%\miniconda3\Scripts\conda.exe" run -n sicam python --version
-```
-
-### La galeria muestra cero imagenes
-
-Verificar:
-
-```powershell
-cd "<REPO>\apps\web\Backend"
-conda run -n sicam python manage.py seed_demo_data
-```
-
-Y confirmar:
-
-```text
-GET /api/analisis/
-```
-
-Debe existir al menos un `AnalisisPred` con muestras.
-
-### La imagen no carga en frontend
-
-Verificar:
-
-- Django corre con `DEBUG=True`;
-- `MEDIA_URL=/media/`;
-- el archivo existe en `apps/web/Backend/media/`;
-- el navegador puede abrir la URL de `imagen` que devuelve la API.
-
-### `Ejecutar segmentacion` falla con servicio SALIVA no disponible
-
-Verificar:
-
-- `SALIVA_SEGMENTATION_SERVICE_URL=http://localhost:8001`;
-- FastAPI de saliva esta corriendo;
-- `http://127.0.0.1:8001/docs` abre;
-- existe `apps/segmentation-saliva/segmentacion_core/membranas_500_125`.
-
-### `ModuleNotFoundError: cellpose` en BLOOD
-
-Instalar dependencias desde `apps/segmentation-blood`:
-
-```powershell
-conda run -n sicam-blood python -m pip install -r requirements.txt
-```
-
-`pyproject.toml` debe exponer el Cellpose vendorizado como paquete `cellpose`.
-No instalar `cellpose` externo desde PyPI como arreglo rapido.
-
-### `cpsam` faltante
-
-Verificar:
-
-```text
-%USERPROFILE%\.cellpose\models\cpsam
-```
-
-Si falta, provisionar el modelo por mecanismo controlado usando la URL oficial
-validada y verificar SHA-256 antes de operar.
-
-### Conflicto OpenMP en BLOOD
-
-No ejecutar BLOOD en el entorno `sicam`. Usar `sicam-blood`.
-
-No recomendar `KMP_DUPLICATE_LIB_OK=TRUE` como solucion operativa. Aunque el
-legacy lo contiene, el runtime recuperado se aislo en `sicam-blood` para evitar
-depender de ese parche.
-
-### BLOOD tarda varios minutos
-
-La inferencia BLOOD en CPU puede tardar alrededor de 120 segundos por imagen.
-Django tiene `BLOOD_SERVICE_TIMEOUT=240`. Si se rebasa ese tiempo, revisar carga
-del equipo, tamano de imagen y disponibilidad de `cpsam`.
-
-### El overlay no aparece
-
-Verificar:
-
-- existe `ResultadoSegmentacion`;
-- el resultado incluye `resultado_normalizado`;
-- `resultado_normalizado.objects` contiene objetos con `geometry.type="polygon"`;
-- cada geometria tiene al menos tres puntos validos.
-
-### Caracterizacion no aparece
-
-Verificar:
-
-- existe un `ResultadoSegmentacion` con `estado="COMPLETADO"`;
-- el endpoint `POST /api/resultados-segmentacion/{id}/caracterizar/` responde;
-- el endpoint `GET /api/resultados-segmentacion/{id}/caracterizaciones/`
-  devuelve una caracterizacion con `vigente=true`.
-
-No levantar ningun servicio adicional para caracterizacion.
-
-## Validaciones recomendadas
-
-Backend:
-
-```powershell
-cd "<REPO>\apps\web\Backend"
-conda run -n sicam python manage.py check
-conda run -n sicam python manage.py makemigrations --check
-conda run -n sicam python -m pytest
-conda run -n sicam python manage.py test
-```
-
-Frontend:
-
-```powershell
-cd "<REPO>\apps\web\Frontend"
+```bash
+node --test tests/*.test.mjs
 npm run build
 ```
 
-SALIVA liviano:
+No existe script `npm test`. No actualizar dependencias para arrancar.
+Para BLOOD y ALT, en sus respectivos ambientes: `python -m pip check` y
+`python -m uvicorn --version`. Verificación estructural desde la raíz:
 
-```powershell
-cd "<REPO>\apps\segmentation-saliva"
-conda run -n sicam python -m compileall -q app segmentacion_core
-conda run -n sicam python -m uvicorn --version
+```bash
+ls apps/segmentation-saliva/app/main.py \
+   apps/segmentation-blood/main.py \
+   apps/segmentation-saliva-alt/app/main.py
 ```
 
-BLOOD liviano, sin cargar Cellpose:
+No importar `app.main` de CURRENT para validaciones livianas: carga el modelo.
+No invocar loaders, endpoints POST ni descargar pesos como parte de un check
+estructural. Los tests ALT opcionales están descritos en su README.
 
-```powershell
-cd "<REPO>\apps\segmentation-blood"
-conda run -n sicam-blood python -m compileall -q app segmentacion_core
-conda run -n sicam-blood python -c "import main; print('blood main import ok')"
-conda run -n sicam-blood python -m uvicorn --version
+## Diagnóstico y apagado
+
+| Problema | Comprobación |
+|---|---|
+| `conda` no está disponible | `source ~/miniconda3/etc/profile.d/conda.sh`, activar el ambiente; no usar Python del sistema |
+| `nvm` no está disponible | `source ~/.nvm/nvm.sh`; usar Node de WSL |
+| BLOOD no encuentra el módulo ASGI | Ejecutar `main:app` desde la raíz de `apps/segmentation-blood` |
+| BLOOD no importa `cellpose` / `natsort` | Revisar ambiente e instalación local `-e .`; requirements ya declara natsort |
+| `cpsam` falta / hash ALT no coincide | Verificar cache y provisionar según instalación; no cambiar thresholds |
+| Conflicto nativo/OpenMP BLOOD | Usar `sicam-blood`; no mezclar con `sicam` ni recomendar variables para ocultar el problema |
+| Error 503 al segmentar | Revisar servicio de la estrategia elegida, puerto, startup completo y URL Django |
+| Error 504 / demora larga | Revisar carga CPU, tamaño de imagen y timeout de ese servicio; no cambiar automáticamente de método |
+| Galería vacía | Revisar paciente/caso/análisis y seed/carga de imágenes |
+| Imagen no carga | Revisar archivo en MEDIA_ROOT y `DEBUG=True`; Django sirve `/media/` sólo en desarrollo |
+| No hay caracterización vigente | Seleccionar COMPLETADO y verificar efectivo e imagen disponible |
+| Cambios de `.env` no se aplican | Reiniciar el proceso correspondiente |
+
+Detener **cada proceso iniciado** con `Ctrl+C` y esperar su salida. Comprobar:
+
+```bash
+ss -ltn '( sport = :5173 or sport = :8000 or sport = :8001 or sport = :8002 or sport = :8003 )'
 ```
 
-No usar estas validaciones livianas como sustituto de smoke tests reales cuando
-se cambien dependencias runtime o algoritmos.
-
-## Politica de archivos locales y pesados
-
-No versionar:
-
-- `.env`;
-- `db.sqlite3`;
-- `media/`;
-- `node_modules/`;
-- `dist/`;
-- caches;
-- imagenes clinicas reales;
-- `membranas_500_125`;
-- `cpsam`;
-- modelos, pesos o artefactos pesados.
-
-## Regla de mantenimiento del manual
-
-Revisar este documento cuando cambie cualquiera de:
-
-- servicio ejecutable;
-- puerto;
-- entorno;
-- entrypoint;
-- dependencia runtime;
-- modelo externo;
-- variable de entorno;
-- migracion requerida;
-- orden de inicializacion;
-- comando de ejecucion.
-
-## Notas de seguridad
-
-- No usar datos clinicos reales para demos.
-- No commitear `.env`.
-- No commitear `db.sqlite3`.
-- No commitear `media/`.
-- No commitear modelos, pesos ni artefactos pesados.
-- No modificar `cellpose/` sin autorizacion explicita.
-
-Para instalar por primera vez el entorno completo en Ubuntu WSL, consultar
-[`developer_environment_setup_wsl.md`](developer_environment_setup_wsl.md).
+No dejar inferencias o servidores huérfanos. Mantener fuera de Git `.env`,
+SQLite, `media/`, modelos, cachés, `node_modules/`, `dist/` e imágenes reales.
+Actualizar este manual si cambian ambientes, puertos, entrypoints o comandos;
+las instalaciones completas corresponden a la guía WSL.

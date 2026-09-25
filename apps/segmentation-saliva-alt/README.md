@@ -1,8 +1,13 @@
-# SALIVA ALT — Sprint 18A
+# SALIVA ALT — Cellpose-SAM alternativo
 
 Servicio independiente: `ALT_CPSAM_MORPHOLOGICAL_V1`, algoritmo `1.0`,
 Cellpose **4.0.8**, modelo **cpsam**, CPU, puerto **8003**.
-No está conectado a Django ni al frontend. SALIVA actual continúa en 8001.
+Django enruta esta estrategia desde 18B y el selector SALIVA la ofrece desde
+18C. SALIVA CURRENT continúa en 8001 como default. ALT no está validado para
+BLOOD ni se ofrece en ese flujo.
+
+Instalación general: [guía WSL](../../docs/developer_environment_setup_wsl.md).
+Operación conjunta: [manual cotidiano](../../docs/30_developer_startup_and_test_data.md).
 
 ## Instalación y ejecución
 
@@ -14,15 +19,21 @@ conda activate sicam-saliva-alt
 cd ~/repos/sicam-refactor/apps/segmentation-saliva-alt
 python -m pip install -r requirements.txt
 python -m pip check
-OMP_NUM_THREADS=4 MKL_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 \
-  python -m uvicorn app.main:app --host 127.0.0.1 --port 8003
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8003
 ```
 
 Usar exclusivamente `sicam-saliva-alt`; no instalar estas dependencias en
 `sicam` ni `sicam-blood`. Se fijan versiones CPU, sin extras GUI.
-`constraints.txt` fija también dependencias transitivas; los paquetes de
+`requirements.txt` incluye `-c constraints.txt`: el comando anterior aplica
+los constraints del repositorio, incluidas dependencias transitivas. Los paquetes de
 pruebas sólo se instalan al usar `requirements-test.txt`.
-Las variables de threads limitan recursos, no parámetros científicos.
+Opcionalmente, antes de arrancar, reproducir el límite de threads de los smokes:
+
+```bash
+export OMP_NUM_THREADS=4 MKL_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4
+```
+
+Limita recursos, no parámetros científicos.
 
 Provisionar antes `~/.cellpose/models/cpsam`, o el directorio definido por
 `CELLPOSE_LOCAL_MODELS_PATH`. El servicio exige **1233587898 bytes** y SHA-256
@@ -34,9 +45,14 @@ No descarga pesos automáticamente ni utiliza fallback.
 ```bash
 curl --fail http://127.0.0.1:8003/docs
 curl --fail http://127.0.0.1:8003/openapi.json
-curl --fail -F 'file=@/tmp/sicam18a-synthetic.png;type=image/png' \
-  http://127.0.0.1:8003/segmentar
 ```
+
+Esperar startup completo: el lifespan verifica y precarga el modelo antes de
+servir esos GET. No hay health dedicado. Para inferencia usar `POST /segmentar`
+con una imagen SALIVA autorizada; `/tmp/sicam18a-synthetic.png` era un artefacto
+temporal del sprint, no una fixture disponible al clonar. Una imagen de
+4928×4928 tardó aproximadamente 170–180 s en CPU; es una referencia, no SLA.
+Apagar con Ctrl+C.
 
 `file` es el campo multipart existente en SICAM. Respuesta:
 
@@ -57,6 +73,9 @@ usar un worker para no duplicar el modelo en memoria.
 python -m pip install -r requirements-test.txt
 python -m pytest -q
 ```
+
+`requirements-test.txt` incluye el requirements de runtime y, por tanto, sus
+constraints, además de pytest/httpx. Es opcional para ejecutar el servicio.
 
 Los tests usan imágenes sintéticas y un modelo simulado, sin cargar cpsam.
 La morfología conserva la eliminación de anucleadas, labels compartidos,

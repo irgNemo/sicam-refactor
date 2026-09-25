@@ -1,5 +1,11 @@
 # 10 - SICAM Codex Master Context
 
+> **Referencia de la arquitectura inicial, reemplazada para operación (2026-09-25).**
+> El cuerpo conserva el contexto del saneamiento inicial, previo a la integración.
+> Para el estado operativo actual (Django integrado, CURRENT/BLOOD/ALT y cinco
+> procesos), consultar el [README](../README.md), la [instalación WSL](developer_environment_setup_wsl.md)
+> y el [arranque cotidiano](30_developer_startup_and_test_data.md).
+
 ## What SICAM Is
 
 SICAM is a web-based system for automated and semi-automated analysis of micronuclei in microscopy images from saliva and blood samples.

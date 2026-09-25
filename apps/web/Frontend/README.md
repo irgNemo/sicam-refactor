@@ -1,50 +1,40 @@
-# .
+# SICAM Frontend — Vue 3 / Vite
 
-This template should help get you started developing with Vue 3 in Vite.
+Runtime validado: nvm, **Node 24.17.0**, **npm 11.13.0**, puerto **5173**.
+Instalación completa: [guía WSL](../../../docs/developer_environment_setup_wsl.md).
 
-## Recommended IDE Setup
+## Instalar y arrancar
 
-[VS Code](https://code.visualstudio.com/) + [Vue (Official)](https://marketplace.visualstudio.com/items?itemName=Vue.volar) (and disable Vetur).
+Con nvm instalado:
 
-## Recommended Browser Setup
-
-- Chromium-based browsers (Chrome, Edge, Brave, etc.):
-  - [Vue.js devtools](https://chromewebstore.google.com/detail/vuejs-devtools/nhdogjmejiglipccpnnnanhbledajbpd)
-  - [Turn on Custom Object Formatter in Chrome DevTools](http://bit.ly/object-formatters)
-- Firefox:
-  - [Vue.js devtools](https://addons.mozilla.org/en-US/firefox/addon/vue-js-devtools/)
-  - [Turn on Custom Object Formatter in Firefox DevTools](https://fxdx.dev/firefox-devtools-custom-object-formatters/)
-
-## Customize configuration
-
-See [Vite Configuration Reference](https://vite.dev/config/).
-
-## Project Setup
-
-```sh
-npm install
+```bash
+cd ~/repos/sicam-refactor/apps/web/Frontend
+nvm use 24.17.0
+npm ci
+[ -f .env ] || cp .env.example .env
+npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
-### Compile and Hot-Reload for Development
+Revisar `.env`: `VITE_API_BASE_URL=http://127.0.0.1:8000`. Vite no carga el
+archivo `.env.example` automáticamente; reiniciar si cambia `.env`.
+Django debe estar disponible. Para decidir qué microservicios levantar, ver
+[operación cotidiana](../../../docs/30_developer_startup_and_test_data.md).
 
-```sh
-npm run dev
-```
+El selector aparece sólo en SALIVA: Modelo SICAM (default) / Cellpose-SAM
+alternativo. BLOOD no envía `segmentation_strategy`. El frontend llama sólo a
+Django; método del resultado y estado editorial se presentan por separado.
 
-### Compile and Minify for Production
+## Validar
 
-```sh
+```bash
+node --test tests/*.test.mjs
 npm run build
 ```
 
-### Lint with [ESLint](https://eslint.org/)
+No existe script `npm test`. La suite usa Node, Vue y Vite ya declarados; no
+requiere instalar un framework. El smoke visual se realiza en navegador.
 
-```sh
-npm run lint
-```
-
-### Instalamos AXIOS
-
-```sh
-npm install axios
-```
+`npm run lint` usa `eslint . --fix --cache` y puede modificar archivos. Para
+sólo comprobar: `node_modules/.bin/eslint .`. No ejecutar `npm audit fix` ni
+instalar Axios aparte: ya está en el lockfile. No versionar `.env`,
+`node_modules/` ni `dist/`.

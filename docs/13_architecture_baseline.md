@@ -1,5 +1,11 @@
 # SICAM - Baseline arquitectonica
 
+> **Baseline del saneamiento inicial; referencia histórica, no guía actual de arranque.**
+> Las limitaciones de integración descritas abajo corresponden a esa etapa.
+> La operación vigente incluye Django integrado y tres servicios CURRENT/BLOOD/ALT;
+> consultar [instalación WSL](developer_environment_setup_wsl.md) y
+> [arranque cotidiano](30_developer_startup_and_test_data.md). Nota del 2026-09-25.
+
 ## 1. Proposito del documento
 
 Este documento establece la baseline arquitectonica del repositorio `sicam-refactor` despues del saneamiento inicial, la validacion tecnica minima, la remediacion de configuracion y la conversion de `apps/` a carpetas normales dentro del monorepo.

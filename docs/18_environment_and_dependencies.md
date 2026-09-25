@@ -1,5 +1,12 @@
 # SICAM - Entorno y dependencias
 
+> **Referencia histórica de Sprint 1; instrucciones operativas reemplazadas.**
+> Se conserva la auditoría original sin actualizar sus resultados. Para instalar
+> hoy, usar la [guía WSL](developer_environment_setup_wsl.md); para operar, el
+> [manual cotidiano](30_developer_startup_and_test_data.md). Los tres ambientes
+> actuales son sicam, sicam-blood y sicam-saliva-alt; los gaps antiguos de
+> natsort/Segment Anything ya están resueltos. Nota del 2026-09-25.
+
 ## Proposito
 
 Este documento consolida el estado actual del entorno de desarrollo y las dependencias del monorepo `sicam-refactor` despues de las validaciones de Sprint 1A, 1B, 1C y 1D.

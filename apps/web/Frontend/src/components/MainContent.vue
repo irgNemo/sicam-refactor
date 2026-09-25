@@ -494,6 +494,7 @@
 
               <SegmentationResultPanel
                 v-if="imagenSeleccionada"
+                :key="sampleKey(imagenSeleccionada)"
                 :segmentacion-loading="segmentacionLoading"
                 :segmentacion-error="segmentacionError"
                 :segmentacion-metadata="segmentacionMetadata"
@@ -1576,7 +1577,7 @@ export default {
       }
     },
 
-    async ejecutarSegmentacion() {
+    async ejecutarSegmentacion(strategy) {
       if (!this.imagenSeleccionada || this.segmentacionLoading) return;
 
       this.segmentacionLoading = true;
@@ -1586,7 +1587,7 @@ export default {
       const muestraId = this.imagenSeleccionada.id_muestra;
 
       try {
-        const response = await segmentarMuestra(muestraId, sampleType);
+        const response = await segmentarMuestra(muestraId, sampleType, strategy);
         if (!this.isCurrentSample(muestraId, sampleType)) {
           return;
         }

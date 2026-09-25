@@ -1,6 +1,13 @@
 <template>
   <div class="segmentation-panel">
+    <SalivaSegmentationControl
+      v-if="isSalivaSampleType"
+      :loading="segmentacionLoading"
+      :button-text="segmentacionButtonText"
+      @run-segmentation="$emit('run-segmentation', $event)"
+    />
     <button
+      v-else
       class="btn-segment full-width"
       :disabled="segmentacionLoading"
       @click="$emit('run-segmentation')"
@@ -30,6 +37,10 @@
         <strong>{{ segmentacionMetadata.tipo_muestra }}</strong>
         <span>Objetos</span>
         <strong>{{ segmentacionObjetosCount }}</strong>
+        <template v-if="isSalivaSampleType">
+          <span>Método</span>
+          <strong>{{ strategyLabel(segmentacionMetadata) }}</strong>
+        </template>
       </div>
     </div>
 
@@ -55,6 +66,7 @@
       >
         <strong>{{ formatearFechaResultado(completedSegmentationResults[0].creado_en) }}</strong>
         <span>Resultado #{{ completedSegmentationResults[0].id }}</span>
+        <span v-if="isSalivaSampleType">Método: {{ strategyLabel(completedSegmentationResults[0]) }}</span>
       </div>
 
       <label
@@ -72,7 +84,7 @@
             :key="resultKey(result)"
             :value="result.id"
           >
-            {{ formatearFechaResultado(result.creado_en) }} · Resultado #{{ result.id }}
+            {{ formatearFechaResultado(result.creado_en) }} · Resultado #{{ result.id }}{{ isSalivaSampleType ? ` · ${strategyLabel(result)}` : '' }}
           </option>
         </select>
       </label>
@@ -98,6 +110,9 @@
     >
       <strong>Resultado mostrado</strong>
       <span>{{ effectiveSegmentationDisplay }}</span>
+      <span v-if="isSalivaSampleType">
+        Método de segmentación: {{ strategyLabel(effectiveSegmentation) }}
+      </span>
     </div>
 
     <div
@@ -164,14 +179,20 @@
         <span>
           {{ ultimoHistorialObjetosCount }} objetos · {{ ultimoResultadoSegmentacion.estado }}
         </span>
+        <span v-if="isSalivaSampleType">Método: {{ strategyLabel(ultimoResultadoSegmentacion) }}</span>
       </div>
     </div>
   </div>
 </template>
 
 <script>
+import SalivaSegmentationControl from "./SalivaSegmentationControl.vue";
+import { SAMPLE_TYPES } from "../../domain/segmentationTypes";
+import { segmentationStrategyLabel } from "../../domain/segmentationStrategies";
+
 export default {
   name: "SegmentationResultPanel",
+  components: { SalivaSegmentationControl },
   emits: ["run-segmentation", "continue-edit", "change-segmentation-result"],
   props: {
     segmentacionLoading: {
@@ -272,6 +293,10 @@ export default {
     },
   },
   computed: {
+    isSalivaSampleType() {
+      return this.activeSampleType === SAMPLE_TYPES.SALIVA;
+    },
+
     segmentacionButtonText() {
       if (this.segmentacionLoading) {
         return this.isBloodSampleType
@@ -287,6 +312,10 @@ export default {
     },
   },
   methods: {
+    strategyLabel(result) {
+      return segmentationStrategyLabel(this.activeSampleType, result?.segmentation_strategy);
+    },
+
     resultKey(result) {
       return `${result.tipo_muestra || this.activeSampleType}-${result.id}`;
     },

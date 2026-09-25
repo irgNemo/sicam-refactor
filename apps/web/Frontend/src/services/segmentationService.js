@@ -1,5 +1,6 @@
 import apiClient from "./apiClient";
 import { SAMPLE_TYPES } from "../domain/segmentationTypes";
+import { SALIVA_STRATEGIES } from "../domain/segmentationStrategies";
 
 const SAMPLE_ENDPOINTS = {
   [SAMPLE_TYPES.SALIVA]: "/api/muestras",
@@ -14,8 +15,16 @@ export function listarMuestras(sampleType = SAMPLE_TYPES.SALIVA) {
   return apiClient.get(`${getSampleEndpoint(sampleType)}/`);
 }
 
-export function segmentarMuestra(muestraId, sampleType = SAMPLE_TYPES.SALIVA) {
-  return apiClient.post(`${getSampleEndpoint(sampleType)}/${muestraId}/segmentar/`);
+export function segmentarMuestra(
+  muestraId,
+  sampleType = SAMPLE_TYPES.SALIVA,
+  strategy = SALIVA_STRATEGIES.CURRENT
+) {
+  const url = `${getSampleEndpoint(sampleType)}/${muestraId}/segmentar/`;
+  if (sampleType === SAMPLE_TYPES.SALIVA) {
+    return apiClient.post(url, { segmentation_strategy: strategy });
+  }
+  return apiClient.post(url);
 }
 
 export function obtenerResultadosSegmentacion(

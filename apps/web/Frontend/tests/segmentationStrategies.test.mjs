@@ -329,7 +329,7 @@ test('Characterization renders SALIVA v1/v2 and BLOOD v1 independently of the pa
 });
 
 // A frozen pre-18D service result must still render after the additive upgrade.
-test('historical 2.0 and additive 2.1 use identical common-field rendering', async () => {
+test('historical 2.0 retains common fields while 2.1 adds presentation', async () => {
   const historical = JSON.parse(await readFile(new URL('../../Backend/api/test_data/characterization_saliva_2_0.json', import.meta.url), 'utf8'));
   const upgraded = structuredClone(historical);
   upgraded.version = upgraded.schema_version = '2.1';
@@ -342,6 +342,13 @@ test('historical 2.0 and additive 2.1 use identical common-field rendering', asy
   }));
   const oldHtml = await render(historical);
   const newHtml = await render(upgraded);
-  assert.equal(newHtml.replaceAll('2.1', '2.0'), oldHtml);
-  assert.doesNotMatch(newHtml, /eccentricity|std_gray_intensity|contrast/);
+  for (const value of ['100.00 px²', '40.00 px', '(5.00, 5.00) px', '0.7854']) {
+    assert.ok(oldHtml.includes(value));
+    assert.ok(newHtml.includes(value));
+  }
+  assert.doesNotMatch(oldHtml, /Excentricidad|Textura GLCM|Desv. estándar/);
+  assert.match(newHtml, /Excentricidad/);
+  assert.match(newHtml, /Textura GLCM/);
+  assert.match(newHtml, /42.0000/);
+  assert.doesNotMatch(newHtml, /eccentricity|std_gray_intensity/);
 });

@@ -34,6 +34,29 @@
       </div>
     </section>
 
+    <section v-if="isExtended" class="result-section metric-help">
+      <p>Excentricidad: 0 corresponde a una forma aproximadamente circular; valores cercanos a 1 indican mayor elongación.</p>
+      <p>Intensidad en escala de grises normalizada de 0 a 1.</p>
+      <button
+        type="button"
+        class="disclosure-button"
+        :aria-expanded="methodologyOpen"
+        :aria-controls="`${disclosureId}-methodology`"
+        @click="methodologyOpen = !methodologyOpen"
+      >
+        Metodología de textura
+      </button>
+      <div :id="`${disclosureId}-methodology`" v-show="methodologyOpen">
+        <dl v-if="methodologyRows.length" class="methodology-values">
+          <div v-for="row in methodologyRows" :key="row.key">
+            <dt>{{ row.label }}</dt>
+            <dd>{{ row.value }}</dd>
+          </div>
+        </dl>
+        <p v-else>Metodología no disponible en este resultado.</p>
+      </div>
+    </section>
+
     <section class="result-section">
       <div class="section-heading">
         <div>
@@ -158,7 +181,7 @@
       <div class="section-heading">
         <div>
           <h4>Celulas caracterizadas</h4>
-          <p>Una fila por cada elemento persistido en <code>cells</code>.</p>
+          <p>Regiones celulares delimitadas por la membrana; no se mide su espesor.</p>
         </div>
         <span class="section-count">{{ cells.length }}</span>
       </div>
@@ -171,18 +194,17 @@
         <table class="data-table cells-table">
           <thead>
             <tr>
-              <th>Celula</th>
-              <th>Clase nuclear</th>
-              <th>Nucleos</th>
-              <th>Micronucleos</th>
-              <th>Asociacion</th>
-              <th>Detalle</th>
+              <th scope="col">Celula</th>
+              <th scope="col">Clase nuclear</th>
+              <th scope="col">Nucleos</th>
+              <th scope="col">Micronucleos</th>
+              <th scope="col">Asociacion</th>
+              <th scope="col">Detalle</th>
             </tr>
           </thead>
           <tbody>
+            <template v-for="(cell, cellIndex) in cells" :key="cellKey(cell, cellIndex)">
             <tr
-              v-for="(cell, cellIndex) in cells"
-              :key="cellKey(cell, cellIndex)"
               :data-membrane-id="cell.membrane_id"
               :class="{ 'cell-selected': cell.membrane_id != null && selectedCellId === cell.membrane_id }"
               @click="$emit('select-cell', cell.membrane_id)"
@@ -204,21 +226,24 @@
               <td>{{ displayValue(cell.micronuclei_count) }}</td>
               <td>{{ associationDisplay(cell.association_status) }}</td>
               <td class="detail-cell" @click.stop>
-                <details>
-                  <summary>Consultar</summary>
-                  <div class="cell-detail">
+                <button
+                  type="button"
+                  class="disclosure-button"
+                  :aria-expanded="Boolean(expandedCells[cellKey(cell, cellIndex)])"
+                  :aria-controls="`${disclosureId}-${cellKey(cell, cellIndex)}`"
+                  @click="toggleCellDetail(cellKey(cell, cellIndex))"
+                >
+                  {{ expandedCells[cellKey(cell, cellIndex)] ? "Ocultar detalle" : "Consultar" }}
+                </button>
+              </td>
+            </tr>
+            <tr v-show="expandedCells[cellKey(cell, cellIndex)]" class="cell-detail-row">
+              <td colspan="6">
+                  <div :id="`${disclosureId}-${cellKey(cell, cellIndex)}`" class="cell-detail">
                     <article class="object-detail">
-                      <h6>Membrana {{ displayValue(cell.membrane_id) }}</h6>
+                      <h6>Región celular {{ displayValue(cell.membrane_id) }}</h6>
                       <span>ID origen: {{ displayValue(cell.source_raw_id) }}</span>
-                      <dl class="metrics-list">
-                        <div
-                          v-for="metric in metricRows(cell.metrics)"
-                          :key="metric.key"
-                        >
-                          <dt>{{ metric.label }}</dt>
-                          <dd>{{ metric.value }}</dd>
-                        </div>
-                      </dl>
+                      <SalivaObjectMetrics :metrics="cell.metrics" :extended="isExtended" />
                     </article>
 
                     <article class="object-detail">
@@ -237,15 +262,7 @@
                         <strong>Nucleo {{ displayValue(nucleus.id) }}</strong>
                         <span>ID origen: {{ displayValue(nucleus.source_raw_id) }}</span>
                         <span>Asociacion: {{ associationDisplay(nucleus.association_status) }}</span>
-                        <dl class="metrics-list">
-                          <div
-                            v-for="metric in metricRows(nucleus.metrics)"
-                            :key="metric.key"
-                          >
-                            <dt>{{ metric.label }}</dt>
-                            <dd>{{ metric.value }}</dd>
-                          </div>
-                        </dl>
+                        <SalivaObjectMetrics :metrics="nucleus.metrics" :extended="isExtended" />
                       </div>
                     </article>
 
@@ -267,21 +284,13 @@
                         <span>ID origen: {{ displayValue(micronucleus.source_raw_id) }}</span>
                         <span>Nucleo asociado: {{ displayValue(micronucleus.nucleus_id) }}</span>
                         <span>Asociacion: {{ associationDisplay(micronucleus.association_status) }}</span>
-                        <dl class="metrics-list">
-                          <div
-                            v-for="metric in metricRows(micronucleus.metrics, true)"
-                            :key="metric.key"
-                          >
-                            <dt>{{ metric.label }}</dt>
-                            <dd>{{ metric.value }}</dd>
-                          </div>
-                        </dl>
+                        <SalivaObjectMetrics :metrics="micronucleus.metrics" :extended="isExtended" :include-dependency-metrics="true" />
                       </div>
                     </article>
                   </div>
-                </details>
               </td>
             </tr>
+            </template>
           </tbody>
         </table>
       </div>
@@ -326,15 +335,7 @@
               <span v-if="group.ambiguous">
                 Membranas candidatas: {{ candidateMembranesDisplay(item) }}
               </span>
-              <dl class="metrics-list">
-                <div
-                  v-for="metric in metricRows(item.metrics, group.micronucleus)"
-                  :key="metric.key"
-                >
-                  <dt>{{ metric.label }}</dt>
-                  <dd>{{ metric.value }}</dd>
-                </div>
-              </dl>
+              <SalivaObjectMetrics :metrics="item.metrics" :extended="isExtended" :include-dependency-metrics="group.micronucleus" />
             </article>
           </div>
         </details>
@@ -366,7 +367,7 @@
           class="warning-group"
         >
           <header>
-            <strong>{{ group.code }}</strong>
+            <strong>{{ warningLabel(group.code) }}</strong>
             <span>{{ group.items.length }}</span>
           </header>
           <ul>
@@ -399,10 +400,14 @@
 </template>
 
 <script>
+import { useId } from "vue";
+import SalivaObjectMetrics from "./SalivaObjectMetrics.vue";
 import {
   displayValue,
   formatGenotoxicityPercentage,
   formatNumber,
+  textureMethodologyRows,
+  warningLabel,
 } from "../../domain/characterizationPresentation";
 
 const STATUS_LABELS = {
@@ -427,6 +432,9 @@ const NUCLEAR_CLASS_LABELS = {
 
 export default {
   name: "SalivaMorphometricResult",
+  components: { SalivaObjectMetrics },
+  setup() { return { disclosureId: useId() }; },
+  data() { return { expandedCells: {}, methodologyOpen: false }; },
   emits: ["select-cell"],
   props: {
     selectedCellId: {
@@ -440,6 +448,12 @@ export default {
   },
 
   computed: {
+    isExtended() {
+      return this.resultJson.schema_version === "2.1";
+    },
+    methodologyRows() {
+      return textureMethodologyRows(this.resultJson.methodology?.texture);
+    },
     summary() {
       return this.resultJson.summary && typeof this.resultJson.summary === "object"
         ? this.resultJson.summary
@@ -463,7 +477,7 @@ export default {
 
     primarySummaryRows() {
       return [
-        ["total_membranes", "Membranas"],
+        ["total_membranes", "Células"],
         ["total_nuclei", "Nucleos"],
         ["total_micronuclei", "Micronucleos"],
         ["cells_with_nucleus", "Celulas con nucleo"],
@@ -574,6 +588,10 @@ export default {
   },
 
   methods: {
+    warningLabel,
+    toggleCellDetail(key) {
+      this.expandedCells[key] = !this.expandedCells[key];
+    },
     scrollCellIntoView(cellId) {
       const container = this.$refs.cellsScroll;
       if (!container) return;
@@ -633,51 +651,6 @@ export default {
       return `${warning.code || "warning"}-${warning.object_id ?? "general"}-${index}`;
     },
 
-    metricRows(metrics, includeDependencyMetrics = false) {
-      const values = metrics && typeof metrics === "object" ? metrics : {};
-      const definitions = [
-        ["area_px2", "Area", value => formatNumber(value, 2, " px²")],
-        ["perimeter_px", "Perimetro", value => formatNumber(value, 2, " px")],
-        ["centroid_px", "Centroide", value => this.formatCentroid(value)],
-        ["circularity", "Circularidad", value => formatNumber(value, 4)],
-        ["mean_gray_intensity", "Intensidad media", value => formatNumber(value, 4)],
-      ];
-
-      if (includeDependencyMetrics) {
-        definitions.push(
-          [
-            "distance_to_nucleus_px",
-            "Distancia al nucleo",
-            value => formatNumber(value, 2, " px"),
-          ],
-          [
-            "area_fraction_to_nucleus",
-            "Fraccion de area al nucleo",
-            value => formatNumber(value, 4),
-          ],
-          [
-            "intensity_fraction_to_nucleus",
-            "Fraccion de intensidad al nucleo",
-            value => formatNumber(value, 4),
-          ]
-        );
-      }
-
-      return definitions.map(([key, label, formatter]) => ({
-        key,
-        label,
-        value: formatter(values[key]),
-      }));
-    },
-
-    formatCentroid(value) {
-      if (!Array.isArray(value) || value.length < 2) return "—";
-      const x = formatNumber(value[0], 2);
-      const y = formatNumber(value[1], 2);
-      if (x === "—" || y === "—") return "—";
-      return `(${x}, ${y}) px`;
-    },
-
     candidateMembranesDisplay(item) {
       const candidates = item?.candidate_membrane_ids;
       return Array.isArray(candidates) && candidates.length
@@ -707,6 +680,14 @@ export default {
 </script>
 
 <style scoped>
+.disclosure-button { background: transparent; border: 1px solid #dde4ee; border-radius: 6px; color: #344054; cursor: pointer; font: inherit; padding: 7px 9px; text-align: left; align-self: flex-start; }
+.disclosure-button:focus-visible { outline: 2px solid #1e88e5; outline-offset: 2px; }
+.metric-help p { margin: 0; color: #667085; font-size: 12px; line-height: 1.5; }
+.methodology-values { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 12px; margin: 0; font-size: 12px; }
+.methodology-values dt { color: #667085; }
+.methodology-values dd { margin: 4px 0 0; color: #344054; overflow-wrap: anywhere; }
+.cell-detail-row > td { white-space: normal; }
+
 .morphometric-result,
 .result-section {
   display: flex;
@@ -944,7 +925,8 @@ export default {
 }
 
 .cells-table {
-  min-width: 720px;
+  table-layout: fixed;
+  min-width: 620px;
 }
 
 .data-table th {
@@ -971,10 +953,10 @@ export default {
 }
 
 .detail-cell {
-  min-width: 120px;
+  overflow-wrap: anywhere;
 }
 
-.cells-table tbody > tr {
+.cells-table tbody > tr[data-membrane-id] {
   cursor: pointer;
 }
 
@@ -1015,9 +997,8 @@ details > summary {
 .cell-detail {
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(3, minmax(210px, 1fr));
-  margin-top: 10px;
-  min-width: 700px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  min-width: 0;
 }
 
 .object-detail {

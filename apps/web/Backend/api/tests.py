@@ -2908,7 +2908,7 @@ class CharacterizationCoreTests(APITestCase):
         )
         result = caracterizacion.resultado_json
         assert result['version'] == SALIVA_CHARACTERIZATION_ALGORITHM_VERSION
-        assert result['schema_version'] == '2.0'
+        assert result['schema_version'] == '2.1'
         assert result['summary']['total_membranes'] == 2
         assert result['summary']['total_nuclei'] == 1
         assert result['summary']['total_micronuclei'] == 1
@@ -3159,6 +3159,47 @@ class CharacterizationCoreTests(APITestCase):
         assert is_characterization_current(first) is False
         assert is_characterization_current(second) is True
 
+    def test_historical_2_0_is_readable_unchanged_and_new_2_1_is_idempotent(self):
+        import json
+        from pathlib import Path
+        from .serializers import ResultadoCaracterizacionSerializer
+
+        fixture = json.loads((Path(__file__).parent / 'test_data' /
+                              'characterization_saliva_2_0.json').read_text())
+        resultado = self._automatic_saliva_result(objects=[
+            {'id': 1, 'label': 'membrana', 'geometry': {
+                'type': 'polygon', 'points': self._box(0, 0, 10, 10),
+            }},
+        ])
+        # Baseline fixture is a real 2.0 output from the pre-sprint service.
+        fixture['source']['resultado_segmentacion_id'] = resultado.pk
+        historical = ResultadoCaracterizacion.objects.create(
+            resultado_segmentacion=resultado, source_type=FUENTE_AUTOMATICO,
+            sample_type=SampleType.SALIVA, algorithm_version='2.0',
+            resultado_json=deepcopy(fixture),
+        )
+        before = deepcopy(historical.resultado_json)
+        first = self.client.post(self._characterize_url(resultado))
+        second = self.client.post(self._characterize_url(resultado))
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(first.data['id'], second.data['id'])
+        self.assertNotEqual(first.data['id'], historical.pk)
+        self.assertEqual(first.data['algorithm_version'], '2.1')
+        self.assertEqual(first.data['resultado_json']['schema_version'], '2.1')
+        json.dumps(first.data['resultado_json'], allow_nan=False)
+        historical.refresh_from_db()
+        self.assertEqual(historical.algorithm_version, '2.0')
+        self.assertEqual(historical.resultado_json, before)
+        self.assertEqual(historical.resultado_json['schema_version'], '2.0')
+        serialized = ResultadoCaracterizacionSerializer(historical).data
+        self.assertEqual(serialized['resultado_json'], before)
+        self.assertFalse(serialized['vigente'])
+        listing = self.client.get(self._characterizations_url(resultado))
+        self.assertEqual(listing.status_code, 200)
+        self.assertEqual(len(listing.data), 2)
+        self.assertEqual(resultado.caracterizaciones.count(), 2)
+
     def test_characterization_becomes_stale_when_algorithm_version_changes(self):
         resultado = self._automatic_saliva_result()
         characterization = characterize_resultado_segmentacion(resultado)
@@ -3167,7 +3208,7 @@ class CharacterizationCoreTests(APITestCase):
 
         with patch(
             'api.services.characterization.service.get_characterization_algorithm_version',
-            return_value='2.1',
+            return_value='future-test-version',
         ):
             assert is_characterization_current(characterization) is False
 
@@ -3177,7 +3218,7 @@ class CharacterizationCoreTests(APITestCase):
 
         with patch(
             'api.services.characterization.service.get_characterization_algorithm_version',
-            return_value='2.1',
+            return_value='future-test-version',
         ):
             second, created = get_or_create_resultado_caracterizacion(
                 resultado
@@ -3185,8 +3226,8 @@ class CharacterizationCoreTests(APITestCase):
 
         assert created is True
         assert second.pk != first.pk
-        assert second.algorithm_version == '2.1'
-        assert second.resultado_json['version'] == '2.1'
+        assert second.algorithm_version == 'future-test-version'
+        assert second.resultado_json['version'] == 'future-test-version'
 
     def test_model_clean_rejects_cross_result_revision(self):
         resultado_a = self._automatic_saliva_result()

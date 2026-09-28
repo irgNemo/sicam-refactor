@@ -1,0 +1,81 @@
+{
+  "version": "2.0",
+  "schema_version": "2.0",
+  "sample_type": "SALIVA",
+  "source": {
+    "type": "AUTOMATICO",
+    "resultado_segmentacion_id": 1,
+    "revision_segmentacion_id": null,
+    "numero_revision": null
+  },
+  "summary": {
+    "total_membranes": 1,
+    "total_nuclei": 0,
+    "total_micronuclei": 0,
+    "anucleated_cells": 1,
+    "mononucleated_cells": 0,
+    "binucleated_cells": 0,
+    "trinucleated_cells": 0,
+    "multinucleated_cells": 0,
+    "cells_with_nucleus": 0,
+    "cells_with_2plus_micronuclei": 0,
+    "genotoxicity_index": 0.0,
+    "genotoxicity_status": "VALID",
+    "cytotoxicity_index": 0.0,
+    "cytotoxicity_status": "VALID",
+    "mean_nucleus_area_px2": null,
+    "mean_nucleus_circularity": null,
+    "unassociated_nuclei": 0,
+    "unassociated_micronuclei": 0,
+    "ambiguous_nuclei": 0,
+    "ambiguous_micronuclei": 0,
+    "association_quality": {
+      "nuclei_associated": 0,
+      "nuclei_total": 0,
+      "nuclei_association_rate": null,
+      "micronuclei_associated_to_membrane": 0,
+      "micronuclei_associated_to_nucleus": 0,
+      "micronuclei_total": 0,
+      "micronuclei_membrane_association_rate": null,
+      "micronuclei_nucleus_association_rate": null
+    }
+  },
+  "cells": [
+    {
+      "membrane_id": 1,
+      "source_raw_id": null,
+      "display_label": "Celula 1",
+      "metrics": {
+        "area_px2": 100.0,
+        "perimeter_px": 40.0,
+        "centroid_px": [
+          5.0,
+          5.0
+        ],
+        "circularity": 0.7853981633974483,
+        "mean_gray_intensity": null
+      },
+      "association_status": "ASSOCIATED",
+      "nuclear_class": "ANUCLEATED",
+      "nuclei_count": 0,
+      "micronuclei_count": 0,
+      "nuclei": [],
+      "micronuclei": []
+    }
+  ],
+  "unassociated": {
+    "nuclei": [],
+    "micronuclei": []
+  },
+  "ambiguous": {
+    "nuclei": [],
+    "micronuclei": []
+  },
+  "warnings": [
+    {
+      "code": "IMAGE_UNAVAILABLE",
+      "object_id": null,
+      "message": "La imagen original no estuvo disponible para calcular intensidad."
+    }
+  ]
+}

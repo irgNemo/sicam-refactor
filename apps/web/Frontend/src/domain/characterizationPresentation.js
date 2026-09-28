@@ -3,7 +3,7 @@ export function isSalivaMorphometricV2(resultJson) {
     resultJson &&
     typeof resultJson === "object" &&
     resultJson.sample_type === "SALIVA" &&
-    resultJson.schema_version === "2.0"
+    ["2.0", "2.1"].includes(resultJson.schema_version)
   );
 }
 

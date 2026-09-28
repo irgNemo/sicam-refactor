@@ -1,4 +1,6 @@
-from PIL import Image, ImageDraw
+from PIL import Image
+
+from .raster import rasterize_object
 
 
 def load_grayscale_image(image_path):
@@ -10,27 +12,9 @@ def mean_gray_intensity(points, grayscale_image):
     if grayscale_image is None:
         return None
 
-    mask = Image.new('L', grayscale_image.size, 0)
-    ImageDraw.Draw(mask).polygon(
-        [tuple(point) for point in points],
-        outline=1,
-        fill=1,
-    )
-
-    image_pixels = grayscale_image.load()
-    mask_pixels = mask.load()
-    width, height = grayscale_image.size
-    values = []
-
-    for y in range(height):
-        for x in range(width):
-            if mask_pixels[x, y]:
-                values.append(image_pixels[x, y])
-
-    if not values:
-        return None
-
-    return sum(values) / len(values) / 255
+    raster = rasterize_object(points, grayscale_image)
+    values = [value for value, inside in zip(raster.gray, raster.mask) if inside]
+    return sum(values) / len(values) / 255 if values else None
 
 
 def points_fit_image(points, grayscale_image):

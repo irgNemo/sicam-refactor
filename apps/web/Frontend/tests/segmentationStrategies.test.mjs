@@ -273,12 +273,13 @@ test('editor regression: polygon load/selection, vertex move undo/redo, drawing,
   assert.deepEqual(object.geometry.points[0], [0, 0], 'Source snapshot unchanged');
 });
 
-test('viewport pan/zoom/projection and strict SALIVA v2 vs legacy Characterization regression', () => {
+test('viewport pan/zoom/projection and SALIVA 2.0/2.1 vs legacy Characterization regression', () => {
   assert.deepEqual(viewport.calculateImagePanLimits({ width: 100, height: 50 }, 1, 0), { maxX: 0, maxY: 0 });
   assert.deepEqual(viewport.calculateImagePanLimits({ width: 100, height: 50 }, 2, 0), { maxX: 50, maxY: 25 });
   const containment = viewport.calculateOverlayContainment({ width: 100, height: 50 }, { width: 200, height: 200 });
   assert.deepEqual(viewport.scalePointToOverlay([10, 10], containment), [20, 70]);
   assert.equal(presentation.isSalivaMorphometricV2({ sample_type: T.SALIVA, schema_version: '2.0' }), true);
+  assert.equal(presentation.isSalivaMorphometricV2({ sample_type: T.SALIVA, schema_version: '2.1' }), true);
   for (const payload of [{ sample_type: T.SALIVA, schema_version: '1.0' }, { sample_type: T.BLOOD, schema_version: '1.0' }, null]) {
     assert.equal(presentation.isSalivaMorphometricV2(payload), false);
   }
@@ -311,7 +312,7 @@ test('revision validation reloads effective parent provenance and never sends st
 });
 
 test('Characterization renders SALIVA v1/v2 and BLOOD v1 independently of the parent strategy', async () => {
-  for (const [sampleType, version] of [[T.SALIVA, '1.0'], [T.SALIVA, '2.0'], [T.BLOOD, '1.0']]) {
+  for (const [sampleType, version] of [[T.SALIVA, '1.0'], [T.SALIVA, '2.0'], [T.SALIVA, '2.1'], [T.BLOOD, '1.0']]) {
     const props = { sampleType, selectedSegmentationResult: result(1, S.CURRENT),
       currentCharacterization: { algorithm_version: version, resultado_json: {
         sample_type: sampleType, schema_version: version,
@@ -323,5 +324,24 @@ test('Characterization renders SALIVA v1/v2 and BLOOD v1 independently of the pa
     assert.match(current, /Caracterizar/);
     assert.ok(current.includes(version));
     if (version === '1.0') assert.match(current, /Conteos/);
+    else assert.match(current, /morphometric-result/);
   }
+});
+
+// A frozen pre-18D service result must still render after the additive upgrade.
+test('historical 2.0 and additive 2.1 use identical common-field rendering', async () => {
+  const historical = JSON.parse(await readFile(new URL('../../Backend/api/test_data/characterization_saliva_2_0.json', import.meta.url), 'utf8'));
+  const upgraded = structuredClone(historical);
+  upgraded.version = upgraded.schema_version = '2.1';
+  upgraded.cells[0].metrics.eccentricity = 0;
+  upgraded.cells[0].metrics.std_gray_intensity = 0.2;
+  upgraded.cells[0].metrics.texture = { contrast: 42, valid_angles: 4, valid_pairs: 20 };
+  const render = json => renderToString(createSSRApp(Characterization, {
+    sampleType: T.SALIVA, selectedSegmentationResult: result(1, S.CURRENT),
+    currentCharacterization: { algorithm_version: json.version, resultado_json: json },
+  }));
+  const oldHtml = await render(historical);
+  const newHtml = await render(upgraded);
+  assert.equal(newHtml.replaceAll('2.1', '2.0'), oldHtml);
+  assert.doesNotMatch(newHtml, /eccentricity|std_gray_intensity|contrast/);
 });

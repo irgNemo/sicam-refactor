@@ -144,7 +144,7 @@ class SalivaStrategyIntegrationTests(APITestCase):
                 characterization = self.client.post(base + '/caracterizar/')
                 self.assertEqual(characterization.status_code, 201, characterization.data)
                 self.assertEqual(characterization.data['source_type'], 'VALIDADA')
-                self.assertEqual(characterization.data['algorithm_version'], '2.0')
+                self.assertEqual(characterization.data['algorithm_version'], '2.1')
 
     def test_characterization_is_independent_of_saliva_strategy(self):
         payloads = []
@@ -152,7 +152,7 @@ class SalivaStrategyIntegrationTests(APITestCase):
             result = self.result(self.segment({'segmentation_strategy': strategy}))
             response = self.client.post(f'/api/resultados-segmentacion/{result.pk}/caracterizar/')
             self.assertEqual(response.status_code, 201, response.data)
-            self.assertEqual(response.data['algorithm_version'], '2.0')
+            self.assertEqual(response.data['algorithm_version'], '2.1')
             payload = deepcopy(response.data['resultado_json'])
             payload.pop('source')
             payloads.append(payload)

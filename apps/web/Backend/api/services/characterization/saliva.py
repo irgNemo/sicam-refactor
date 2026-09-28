@@ -13,13 +13,15 @@ from .geometry import (
 )
 from .intensity import (
     load_grayscale_image,
-    mean_gray_intensity,
     points_fit_image,
 )
 
+from .raster import rasterize_object
+from .raster_metrics import empty_texture, measure_raster, texture_methodology
+
 
 SALIVA_LABELS = ('membrana', 'nucleo', 'micronucleo')
-SCHEMA_VERSION = '2.0'
+SCHEMA_VERSION = '2.1'
 
 ASSOCIATED = 'ASSOCIATED'
 UNASSOCIATED = 'UNASSOCIATED'
@@ -45,6 +47,13 @@ def characterize_saliva_result(effective_result, source, image_path=None):
         for item in objects
         if isinstance(item, dict)
     ]
+
+    for item in measured:
+        if item['label'] in SALIVA_LABELS and item['metrics']['eccentricity'] is None:
+            warnings.append(_warning(
+                'ECCENTRICITY_NOT_COMPUTABLE', item['id'],
+                'La geometria o los momentos de la mascara no permiten calcular excentricidad.',
+            ))
 
     membranes = [item for item in measured if item['label'] == 'membrana']
     nuclei = [item for item in measured if item['label'] == 'nucleo']
@@ -93,6 +102,7 @@ def characterize_saliva_result(effective_result, source, image_path=None):
         'version': SCHEMA_VERSION,
         'schema_version': SCHEMA_VERSION,
         'sample_type': 'SALIVA',
+        'methodology': {'texture': texture_methodology()},
         'source': source,
         'summary': summary,
         'cells': cells,
@@ -204,17 +214,26 @@ def _measure_object(item, grayscale_image, warnings):
             'La circularidad calculada excede la tolerancia numerica.',
         ))
 
-    if grayscale_image is not None:
-        if points_fit_image(points, grayscale_image):
-            public['metrics']['mean_gray_intensity'] = (
-                mean_gray_intensity(points, grayscale_image)
-            )
-        else:
-            warnings.append(_warning(
-                'COORDINATE_SPACE_MISMATCH',
-                object_id,
-                'Los puntos del objeto no coinciden con la imagen original.',
-            ))
+    if grayscale_image is not None and not points_fit_image(points, grayscale_image):
+        warnings.append(_warning(
+            'COORDINATE_SPACE_MISMATCH', object_id,
+            'Los puntos del objeto no coinciden con la imagen original.',
+        ))
+    else:
+        raster = rasterize_object(points, grayscale_image)
+        public['metrics'].update(measure_raster(raster))
+        if grayscale_image is not None:
+            texture = public['metrics']['texture']
+            if not texture['valid_angles']:
+                warnings.append(_warning(
+                    'TEXTURE_INSUFFICIENT_PAIRS', object_id,
+                    'La mascara no contiene pares de pixeles vecinos validos.',
+                ))
+            elif texture['correlation'] is None:
+                warnings.append(_warning(
+                    'TEXTURE_CORRELATION_UNDEFINED', object_id,
+                    'Ninguna orientacion tiene varianza marginal suficiente para correlacion.',
+                ))
 
     public['_valid_for_spatial'] = centroid is not None and area > 0
     return public
@@ -239,6 +258,9 @@ def _empty_metrics():
         'centroid_px': None,
         'circularity': None,
         'mean_gray_intensity': None,
+        'eccentricity': None,
+        'std_gray_intensity': None,
+        'texture': empty_texture(),
     }
 
 

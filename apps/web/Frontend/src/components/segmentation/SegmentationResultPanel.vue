@@ -313,7 +313,7 @@ export default {
   },
   methods: {
     strategyLabel(result) {
-      return segmentationStrategyLabel(this.activeSampleType, result?.segmentation_strategy);
+      return segmentationStrategyLabel(this.activeSampleType, result?.segmentation_strategy, result?.base_origin);
     },
 
     resultKey(result) {

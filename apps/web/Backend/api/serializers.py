@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.core.exceptions import ValidationError as ModelValidationError
 from .segmentation_strategies import SalivaSegmentationStrategy
 from .models import (
     AnalisisPred,
@@ -17,14 +18,49 @@ from .services.segmentation.revisions import (
 )
 
 class PacienteSerializer(serializers.ModelSerializer):
+    display_name = serializers.CharField(read_only=True)
+
     class Meta:
         model = Paciente
         fields = '__all__'
+
+    def validate(self, attrs):
+        patient = Paciente()
+        if self.instance:
+            for field in Paciente._meta.concrete_fields:
+                setattr(patient, field.attname, getattr(self.instance, field.attname))
+        for key, value in attrs.items():
+            setattr(patient, key, value)
+        try:
+            patient.clean()
+        except ModelValidationError as exc:
+            raise serializers.ValidationError(exc.messages)
+        namespace, external_id = patient.external_id_namespace, patient.external_patient_id
+        if namespace and external_id:
+            existing = Paciente.objects.filter(external_id_namespace=namespace, external_patient_id=external_id)
+            if self.instance:
+                existing = existing.exclude(pk=self.instance.pk)
+            if existing.exists():
+                raise serializers.ValidationError('La identidad externa ya existe.')
+        return attrs
 
 class CasoSerializer(serializers.ModelSerializer):
     class Meta:
         model = Caso
         fields = '__all__'
+
+    def validate(self, attrs):
+        patient = attrs.get('paciente', getattr(self.instance, 'paciente', None))
+        number = attrs.get('case_number', getattr(self.instance, 'case_number', None))
+        if number is not None:
+            if number < 1:
+                raise serializers.ValidationError({'case_number': 'Debe ser positivo.'})
+            existing = Caso.objects.filter(paciente=patient, case_number=number)
+            if self.instance:
+                existing = existing.exclude(pk=self.instance.pk)
+            if existing.exists():
+                raise serializers.ValidationError({'case_number': 'Ya existe para este paciente.'})
+        return attrs
 
 class MuestraSalivaSerializer(serializers.ModelSerializer):
     class Meta:
@@ -61,6 +97,7 @@ class ResultadoSegmentacionSerializer(serializers.ModelSerializer):
         fields = (
             'id',
             'tipo_muestra',
+            'base_origin',
             'segmentation_strategy',
             'estado',
             'respuesta_json',

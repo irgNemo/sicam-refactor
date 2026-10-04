@@ -41,6 +41,8 @@ def get_or_create_resultado_caracterizacion(resultado_or_id):
             pk=resultado_id
         )
         effective = resolve_effective_segmentation(resultado)
+        if effective['fuente'] == 'MANUAL':
+            raise ValueError('Revise y valide la anotación manual antes de caracterizarla.')
         revision_id = _get_effective_revision_id(effective)
         algorithm_version = get_characterization_algorithm_version(
             resultado.tipo_muestra

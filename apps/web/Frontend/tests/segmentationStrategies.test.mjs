@@ -29,6 +29,7 @@ const { segmentarMuestra } = await load('services/segmentationService.js');
 const { default: Panel } = await load('components/segmentation/SegmentationResultPanel.vue');
 const { default: Control } = await load('components/segmentation/SalivaSegmentationControl.vue');
 const { default: Main } = await load('components/MainContent.vue');
+const { patientDisplayName, patientInitials } = await load('domain/patientPresentation.js');
 const { useSegmentationRevision } = await load('composables/useSegmentationRevision.js');
 const { useSegmentationEditor } = await load('composables/useSegmentationEditor.js');
 const viewport = await load('composables/useSegmentationViewport.js');
@@ -351,4 +352,47 @@ test('historical 2.0 retains common fields while 2.1 adds presentation', async (
   assert.match(newHtml, /Textura GLCM/);
   assert.match(newHtml, /42.0000/);
   assert.doesNotMatch(newHtml, /eccentricity|std_gray_intensity/);
+});
+
+test('manual base has null strategy, honest presentation and editable zero membranes', async () => {
+  const manual = { ...result(50, null), base_origin: 'MANUAL' };
+  assert.equal(label(T.SALIVA, null, 'MANUAL'), 'Anotación manual');
+  assert.equal(label(T.BLOOD, null, 'MANUAL'), null);
+  const html = await renderPanel({ completedSegmentationResults: [manual], historialSegmentacion: [manual], ultimoResultadoSegmentacion: manual });
+  assert.match(html, /Anotación manual/);
+  assert.doesNotMatch(html, /Método no disponible/);
+  assert.equal(Main.computed.effectiveSegmentationDisplay.call({ effectiveSegmentation: { fuente: 'MANUAL' } }), 'Anotación manual');
+  const editor = useSegmentationEditor();
+  const objects = ['nucleo', 'micronucleo'].map((label, i) => ({ id: i+1, label, geometry: { type: 'polygon', points: [[2,2],[8,2],[8,8],[2,8]] }, source: { raw_id: 1 }, provenance: { origin: 'manual', base_object_id: null } }));
+  const original = JSON.stringify(objects);
+  editor.loadRevisionSnapshot({ resultado_editado: { objects } });
+  assert.equal(editor.workingSummary.value.counts_by_label.membrana, 0);
+  for (const id of [1, 2]) {
+    editor.selectObject(`revision-${id}`);
+    assert.equal(editor.selectedObject.value.id, id);
+    editor.beginVertexDrag({ objectId: id, vertexIndex: 0 }, {});
+    editor.updateVertexDrag([3,2]); editor.finishVertexDrag();
+    editor.undoRevisionEdit(); editor.redoRevisionEdit();
+  }
+  editor.clearSelection();
+  editor.selectObject('revision-2');
+  editor.deleteSelectedObjectEdit();
+  assert.equal(editor.workingObjects.value.length, 1);
+  editor.undoRevisionEdit(); editor.redoRevisionEdit(); editor.undoRevisionEdit();
+  assert.equal(editor.workingObjects.value.length, 2);
+  for (const point of [[0,0],[20,0],[20,20],[0,20]]) editor.appendDraftPoint(point);
+  assert.equal(editor.finishDraftPolygonEdit().label, 'membrana');
+  const snapshot = editor.buildEditableSnapshot({ version: '1.0', base_result_id: 50 });
+  assert.equal(snapshot.objects.length, 3);
+  assert.equal(snapshot.objects[0].source.raw_id, 1);
+  assert.equal(snapshot.objects[0].provenance.origin, 'manual');
+  assert.equal(JSON.stringify(objects), original);
+});
+
+test('pseudonymized patient initials and identified patient names', async () => {
+  assert.equal(patientDisplayName({ identity_mode: 'PSEUDONYMIZED', initials: 'XYZ', nombre: '', apellido: '' }), 'XYZ');
+  assert.equal(patientInitials({ identity_mode: 'PSEUDONYMIZED', initials: 'XYZ' }), 'XYZ');
+  assert.equal(patientDisplayName({ nombre: 'Synthetic', apellido: 'Patient' }), 'Synthetic Patient');
+  assert.equal(patientInitials({ nombre: 'Synthetic', apellido: 'Patient' }), 'SP');
+  assert.equal(patientDisplayName(null), '');
 });

@@ -891,7 +891,7 @@ export default {
           : "Revisión validada";
       }
 
-      return "Automático";
+      return this.effectiveSegmentation.fuente === "MANUAL" ? "Anotación manual" : "Automático";
     },
 
     resumenConteoActivo() {

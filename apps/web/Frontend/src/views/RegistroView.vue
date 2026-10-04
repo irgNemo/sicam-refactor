@@ -135,7 +135,7 @@
                     :key="paciente.id_paciente"
                     :value="paciente.id_paciente"
                   >
-                    {{ paciente.nombre }} {{ paciente.apellido }} - {{ paciente.identificacion }}
+                    {{ patientDisplayName(paciente) }} - {{ paciente.identificacion }}
                   </option>
                 </select>
               </div>
@@ -196,7 +196,7 @@
                     :key="paciente.id_paciente"
                     :value="paciente.id_paciente"
                   >
-                    {{ paciente.nombre }} {{ paciente.apellido }}
+                    {{ patientDisplayName(paciente) }}
                   </option>
                 </select>
               </div>
@@ -304,6 +304,7 @@
 </template>
 
 <script>
+import { patientDisplayName } from "../domain/patientPresentation";
 import apiClient from '../services/apiClient';
 import {
   SAMPLE_TYPES,
@@ -379,6 +380,7 @@ export default {
   },
 
   methods: {
+    patientDisplayName,
     async cargarPacientes() {
       try {
         const response = await apiClient.get('/api/pacientes/');

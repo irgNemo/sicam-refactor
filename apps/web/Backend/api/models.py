@@ -1,24 +1,79 @@
+import uuid
+
 from django.core.exceptions import ValidationError
 from django.db import models
 from .segmentation_strategies import SalivaSegmentationStrategy
 
 # Modelo de Paciente
 class Paciente(models.Model):
+    IDENTIFIED = 'IDENTIFIED'
+    PSEUDONYMIZED = 'PSEUDONYMIZED'
     id_paciente = models.AutoField(primary_key=True)
-    nombre = models.CharField(max_length=100)
-    apellido = models.CharField(max_length=100)
+    identity_mode = models.CharField(
+        max_length=20,
+        choices=[(IDENTIFIED, 'Identificado'), (PSEUDONYMIZED, 'Pseudonimizado')],
+        default=IDENTIFIED,
+    )
+    external_id_namespace = models.CharField(max_length=64, blank=True, default='')
+    external_patient_id = models.CharField(max_length=100, blank=True, default='')
+    initials = models.CharField(max_length=100, blank=True, default='')
+    nombre = models.CharField(max_length=100, blank=True, default='')
+    apellido = models.CharField(max_length=100, blank=True, default='')
     fecha_nacimiento = models.DateField()
     identificacion = models.CharField(max_length=50, unique=True)
     email = models.EmailField(blank=True, null=True)
     telefono = models.CharField(max_length=20, blank=True, null=True)
     fecha_registro = models.DateTimeField(auto_now_add=True)
     
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['external_id_namespace', 'external_patient_id'],
+                condition=~models.Q(external_id_namespace=''),
+                name='patient_external_identity_unique',
+            ),
+            models.CheckConstraint(
+                check=(
+                    models.Q(external_id_namespace='', external_patient_id='') |
+                    (~models.Q(external_id_namespace='') & ~models.Q(external_patient_id=''))
+                ),
+                name='patient_external_identity_complete',
+            ),
+            models.CheckConstraint(
+                check=(
+                    (models.Q(identity_mode='IDENTIFIED') & ~models.Q(nombre='') & ~models.Q(apellido='')) |
+                    (models.Q(identity_mode='PSEUDONYMIZED', nombre='', apellido='') &
+                     ~models.Q(initials='') & ~models.Q(external_id_namespace='') &
+                     ~models.Q(external_patient_id=''))
+                ),
+                name='patient_identity_mode_consistency',
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.identity_mode == self.IDENTIFIED:
+            if not (self.nombre or '').strip() or not (self.apellido or '').strip():
+                raise ValidationError('Nombre y apellido son obligatorios para IDENTIFIED.')
+        elif self.identity_mode == self.PSEUDONYMIZED:
+            if self.nombre or self.apellido or not all((v or '').strip() for v in (self.initials, self.external_id_namespace, self.external_patient_id)):
+                raise ValidationError('PSEUDONYMIZED requiere iniciales e identidad externa, sin nombre ni apellido.')
+        else:
+            raise ValidationError('identity_mode no válido.')
+        if bool((self.external_id_namespace or '').strip()) != bool((self.external_patient_id or '').strip()):
+            raise ValidationError('La identidad externa requiere namespace e ID.')
+
+    @property
+    def display_name(self):
+        return self.initials if self.identity_mode == self.PSEUDONYMIZED else f'{self.nombre} {self.apellido}'.strip()
+
     def __str__(self):
-        return f"{self.nombre} {self.apellido} - {self.identificacion}"
+        return f"{self.display_name} - {self.identificacion}"
 
 # Modelo de Caso
 class Caso(models.Model):
     id_caso = models.AutoField(primary_key=True)
+    case_number = models.PositiveIntegerField(null=True, blank=True)
     paciente = models.ForeignKey(
         Paciente,
         on_delete=models.CASCADE,
@@ -27,6 +82,19 @@ class Caso(models.Model):
     titulo = models.CharField(max_length=200)
     descripcion = models.TextField(blank=True, null=True)
     fecha_creacion = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['paciente', 'case_number'],
+                condition=models.Q(case_number__isnull=False),
+                name='case_number_per_patient_unique',
+            ),
+            models.CheckConstraint(
+                check=models.Q(case_number__isnull=True) | models.Q(case_number__gt=0),
+                name='case_number_positive',
+            ),
+        ]
     
     def __str__(self):
         return f"Caso {self.id_caso} - {self.titulo}"
@@ -112,6 +180,11 @@ class ResultadoAnalisis(models.Model):
 
 # Modelo de resultado JSON de segmentacion
 class ResultadoSegmentacion(models.Model):
+    base_origin = models.CharField(
+        max_length=12,
+        choices=[('AUTOMATIC', 'Automático'), ('MANUAL', 'Manual')],
+        default='AUTOMATIC',
+    )
     id_resultado_segmentacion = models.AutoField(primary_key=True)
     muestra = models.ForeignKey(
         MuestraSaliva,
@@ -143,6 +216,12 @@ class ResultadoSegmentacion(models.Model):
 
     class Meta:
         constraints = [
+            models.CheckConstraint(
+                check=models.Q(base_origin='AUTOMATIC') | models.Q(
+                    base_origin='MANUAL', tipo_muestra='SALIVA', segmentation_strategy__isnull=True,
+                ),
+                name='segmentation_base_origin_consistent',
+            ),
             models.CheckConstraint(
                 check=(
                     (
@@ -319,3 +398,32 @@ class AnalisisMascara(models.Model):
 
     def __str__(self):
         return f"Mascara {self.tipo_mascara} - Resultado {self.resultado.id_resultado}"
+
+
+class ImageJImportRecord(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    dataset_key = models.CharField(max_length=100)
+    patient_namespace = models.CharField(max_length=64)
+    external_patient_id = models.CharField(max_length=100)
+    patient_key = models.CharField(max_length=100)
+    case_number = models.PositiveIntegerField()
+    logical_basename = models.CharField(max_length=255)
+    image_sha256 = models.CharField(max_length=64)
+    mask_sha256 = models.CharField(max_length=64)
+    sample_key = models.CharField(max_length=64, unique=True)
+    annotation_key = models.CharField(max_length=64, unique=True)
+    logical_key = models.CharField(max_length=64, unique=True)
+    converter_version = models.CharField(max_length=20)
+    contract_version = models.CharField(max_length=40)
+    source_mask_file = models.FileField(upload_to='imagej/source_masks/%Y/%m/', max_length=255)
+    paciente = models.ForeignKey(Paciente, on_delete=models.PROTECT)
+    caso = models.ForeignKey(Caso, on_delete=models.PROTECT)
+    muestra = models.OneToOneField(MuestraSaliva, on_delete=models.PROTECT)
+    resultado = models.OneToOneField(ResultadoSegmentacion, on_delete=models.PROTECT)
+    status = models.CharField(max_length=16, choices=[('READY', 'Ready')], default='READY')
+    metadata = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.CheckConstraint(check=models.Q(case_number=1, status='READY') & ~models.Q(source_mask_file=''), name='imagej_record_ready')]

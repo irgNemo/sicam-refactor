@@ -19,8 +19,9 @@ export const SALIVA_STRATEGY_OPTIONS = Object.freeze([
 ]);
 
 // Missing provenance is not evidence that CURRENT produced a result.
-export function segmentationStrategyLabel(sampleType, strategy) {
+export function segmentationStrategyLabel(sampleType, strategy, baseOrigin) {
   if (sampleType !== SAMPLE_TYPES.SALIVA) return null;
+  if (baseOrigin === "MANUAL") return "Anotación manual";
   return SALIVA_STRATEGY_OPTIONS.find(option => option.value === strategy)?.label
     || "Método no disponible";
 }

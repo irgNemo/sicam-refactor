@@ -30,7 +30,7 @@ def build_revision_snapshot_from_normalized(resultado_segmentacion):
         'version': REVISION_SNAPSHOT_VERSION,
         'base_result_id': resultado_segmentacion.id_resultado_segmentacion,
         'objects': [
-            _build_automatic_revision_object(raw_object, revision_object_id)
+            _build_revision_object(raw_object, revision_object_id, getattr(resultado_segmentacion, 'base_origin', 'AUTOMATIC'))
             for raw_object, revision_object_id
             in zip(raw_objects, revision_object_ids)
         ],
@@ -126,21 +126,22 @@ def calculate_revision_summary(snapshot, sample_type=SampleType.SALIVA):
     }
 
 
-def _build_automatic_revision_object(raw_object, revision_object_id):
+def _build_revision_object(raw_object, revision_object_id, base_origin):
     if not isinstance(raw_object, dict):
         raise serializers.ValidationError(
             'Los objetos normalizados deben ser objetos JSON'
         )
 
-    return {
-        'id': revision_object_id,
-        'label': raw_object.get('label'),
-        'geometry': copy.deepcopy(raw_object.get('geometry')),
-        'provenance': {
-            'origin': 'automatic',
-            'base_object_id': raw_object.get('id'),
-        },
-    }
+    result = copy.deepcopy(raw_object)
+    result['id'] = revision_object_id
+    if base_origin == 'MANUAL':
+        result['provenance'] = {'origin': 'manual', 'base_object_id': None}
+    else:
+        result['provenance'] = {
+            'origin': 'automatic', 'base_object_id': raw_object.get('id'),
+        }
+    return result
+
 
 
 def _validate_revision_object(revision_object, index, seen_ids, allowed_labels):

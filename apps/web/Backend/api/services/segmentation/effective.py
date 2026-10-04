@@ -1,5 +1,6 @@
 FUENTE_AUTOMATICO = 'AUTOMATICO'
 FUENTE_VALIDADA = 'VALIDADA'
+FUENTE_MANUAL = 'MANUAL'
 
 
 def get_latest_validated_revision(resultado_segmentacion):
@@ -26,6 +27,7 @@ def resolve_effective_segmentation(resultado_segmentacion):
             ),
             'fuente': FUENTE_VALIDADA,
             'segmentation_strategy': resultado_segmentacion.segmentation_strategy,
+            'base_origin': getattr(resultado_segmentacion, 'base_origin', 'AUTOMATIC'),
             'revision': {
                 'id_revision_segmentacion': (
                     latest_validated.id_revision_segmentacion
@@ -47,8 +49,9 @@ def resolve_effective_segmentation(resultado_segmentacion):
         'resultado_segmentacion_id': (
             resultado_segmentacion.id_resultado_segmentacion
         ),
-        'fuente': FUENTE_AUTOMATICO,
+        'fuente': FUENTE_MANUAL if getattr(resultado_segmentacion, 'base_origin', 'AUTOMATIC') == 'MANUAL' else FUENTE_AUTOMATICO,
         'segmentation_strategy': resultado_segmentacion.segmentation_strategy,
+        'base_origin': getattr(resultado_segmentacion, 'base_origin', 'AUTOMATIC'),
         'revision': None,
         'resultado': automatic_result,
         'resumen': automatic_summary,

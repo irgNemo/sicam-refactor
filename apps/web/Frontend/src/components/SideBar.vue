@@ -24,7 +24,7 @@
           @click="seleccionarPaciente(paciente)"
         >
           <div class="paciente-info">
-            <strong>{{ paciente.nombre }} {{ paciente.apellido }}</strong>
+            <strong>{{ patientDisplayName(paciente) }}</strong>
             <span class="paciente-id">ID: {{ paciente.identificacion }}</span>
           </div>
         </div>
@@ -40,7 +40,7 @@
       <div class="paciente-header">
         <div class="paciente-avatar">{{ iniciales }}</div>
         <div class="paciente-datos">
-          <h3>{{ pacienteSeleccionado.nombre }} {{ pacienteSeleccionado.apellido }}</h3>
+          <h3>{{ patientDisplayName(pacienteSeleccionado) }}</h3>
           <p>ID: {{ pacienteSeleccionado.identificacion }}</p>
           <p class="edad">{{ calcularEdad(pacienteSeleccionado.fecha_nacimiento) }} años</p>
         </div>
@@ -152,6 +152,7 @@
 </template>
 
 <script>
+import { patientDisplayName, patientInitials } from "../domain/patientPresentation";
 import apiClient from "../services/apiClient";
 import { obtenerResumenSegmentacionCaso } from "../services/segmentationService";
 import { SAMPLE_TYPES } from "../domain/segmentationTypes";
@@ -211,9 +212,7 @@ export default {
   computed: {
     iniciales() {
       if (!this.pacienteSeleccionado) return "";
-      const nombre = this.pacienteSeleccionado.nombre.charAt(0);
-      const apellido = this.pacienteSeleccionado.apellido.charAt(0);
-      return (nombre + apellido).toUpperCase();
+      return patientInitials(this.pacienteSeleccionado);
     },
 
     casosDelPaciente() {
@@ -236,6 +235,7 @@ export default {
   },
 
   methods: {
+    patientDisplayName,
     async cargarDatos() {
       try {
         const [resPacientes, resCasos, resAnalisis] = await Promise.all([
@@ -263,9 +263,9 @@ export default {
 
       const busqueda = this.busquedaPaciente.toLowerCase();
       this.pacientesFiltrados = this.pacientes.filter(p => 
-        p.nombre.toLowerCase().includes(busqueda) ||
-        p.apellido.toLowerCase().includes(busqueda) ||
-        p.identificacion.toLowerCase().includes(busqueda)
+        patientDisplayName(p).toLowerCase().includes(busqueda) ||
+        (p.external_patient_id || '').toLowerCase().includes(busqueda) ||
+        (p.identificacion || '').toLowerCase().includes(busqueda)
       );
     },
 

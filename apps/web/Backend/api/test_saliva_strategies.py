@@ -220,7 +220,8 @@ class SalivaStrategyMigrationTests(TransactionTestCase):
         old_target = [('api', '0006_resultadocaracterizacion_and_more')]
         new_target = [('api', '0007_saliva_segmentation_strategy')]
         executor = MigrationExecutor(connection)
-        self.addCleanup(lambda: MigrationExecutor(connection).migrate(new_target))
+        latest_targets = executor.loader.graph.leaf_nodes()
+        self.addCleanup(lambda: MigrationExecutor(connection).migrate(latest_targets))
         executor.migrate(old_target)
         old = executor.loader.project_state(old_target).apps
         patient = old.get_model('api', 'Paciente').objects.create(nombre='Migration', apellido='Test', fecha_nacimiento=date(2000, 1, 1), identificacion='18B-migration')

@@ -134,6 +134,8 @@ def _build_revision_object(raw_object, revision_object_id, base_origin):
 
     result = copy.deepcopy(raw_object)
     result['id'] = revision_object_id
+    if isinstance(result.get('provenance'), dict):
+        return result
     if base_origin == 'MANUAL':
         result['provenance'] = {'origin': 'manual', 'base_object_id': None}
     else:
@@ -215,6 +217,19 @@ def _validate_provenance(provenance, object_index):
     base_object_id = provenance.get('base_object_id')
 
     if origin == 'automatic':
+        # Selective objects refer to their execution, never to an invented base match.
+        if base_object_id is None and provenance.get('segmentation_execution_id'):
+            import uuid
+            from api.segmentation_strategies import SalivaSegmentationStrategy
+            try:
+                uuid.UUID(str(provenance['segmentation_execution_id']))
+            except (ValueError, TypeError, AttributeError):
+                raise serializers.ValidationError('segmentation_execution_id no válido')
+            if provenance.get('strategy') not in SalivaSegmentationStrategy.values:
+                raise serializers.ValidationError('strategy de provenance no válida')
+            if not _is_positive_int(provenance.get('execution_object_id')):
+                raise serializers.ValidationError('execution_object_id debe ser entero positivo')
+            return
         if not _is_positive_int(base_object_id):
             raise serializers.ValidationError(
                 f'objects[{object_index}].provenance.base_object_id debe ser entero positivo para objetos automaticos'

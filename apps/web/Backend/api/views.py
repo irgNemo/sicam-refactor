@@ -44,7 +44,12 @@ from .services.segmentation.exceptions import (
     SegmentationServiceError,
     SegmentationTimeoutError,
 )
+from .models import SegmentationExecution
 from .services.segmentation.factory import segment_image
+from .services.segmentation.selective import (
+    perform_partial, SelectiveError, context_for, lock_result, reserve_ids, fail_execution,
+)
+
 from .services.segmentation.effective import resolve_effective_segmentation
 from .services.segmentation.normalizers import (
     normalize_segmentation_result,
@@ -185,9 +190,7 @@ def _controlled_segmentation_error(exc):
 
 def _get_or_create_revision_draft(resultado_segmentacion_id):
     with transaction.atomic():
-        resultado = ResultadoSegmentacion.objects.select_for_update().get(
-            pk=resultado_segmentacion_id
-        )
+        resultado = lock_result(resultado_segmentacion_id)
 
         borrador = resultado.revisiones.filter(
             estado=RevisionSegmentacion.ESTADO_BORRADOR
@@ -386,6 +389,25 @@ class MuestraSalivaViewSet(viewsets.ModelViewSet):
         selection.is_valid(raise_exception=True)
         strategy = selection.validated_data['segmentation_strategy']
 
+        if selection.validated_data['target'] != 'ALL':
+            try:
+                resultado, draft, execution = perform_partial(
+                    sample=muestra, result_id=selection.validated_data['resultado_segmentacion_id'],
+                    strategy=strategy, target=selection.validated_data['target'],
+                    source_token=selection.validated_data['source_token'],
+                    confirm_replacement=selection.validated_data['confirm_replacement'],
+                    read_image=_read_muestra_image, segment=segment_image,
+                )
+                return Response({
+                    'target': execution.target, 'execution_id': str(execution.pk),
+                    'resultado_segmentacion': {'id': resultado.pk, 'tipo_muestra': 'SALIVA',
+                        'base_origin': resultado.base_origin, 'segmentation_strategy': resultado.segmentation_strategy,
+                        'estado': resultado.estado},
+                    'revision': RevisionSegmentacionSerializer(draft).data,
+                })
+            except SelectiveError as exc:
+                return Response({'error': str(exc), 'code': exc.code}, status=exc.status)
+
         try:
             image_bytes = _read_muestra_image(muestra)
         except ValueError as exc:
@@ -393,6 +415,10 @@ class MuestraSalivaViewSet(viewsets.ModelViewSet):
                 {'error': str(exc)},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+        execution = SegmentationExecution.objects.create(
+            strategy=strategy, target='ALL', request_metadata={'sample_id': muestra.pk},
+        )
 
         try:
             result = segment_image(
@@ -402,26 +428,31 @@ class MuestraSalivaViewSet(viewsets.ModelViewSet):
                 segmentation_strategy=strategy,
             )
         except SegmentationTimeoutError as exc:
+            fail_execution(execution, 'SEGMENTATION_SERVICE_FAILED')
             return Response(
                 {'error': str(exc)},
                 status=status.HTTP_504_GATEWAY_TIMEOUT
             )
         except SegmentationConnectionError as exc:
+            fail_execution(execution, 'SEGMENTATION_SERVICE_FAILED')
             return Response(
                 {'error': str(exc)},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE
             )
         except InvalidSegmentationResponseError as exc:
+            fail_execution(execution, 'SEGMENTATION_SERVICE_FAILED')
             return Response(
                 {'error': str(exc)},
                 status=status.HTTP_502_BAD_GATEWAY
             )
         except SegmentationServiceError as exc:
+            fail_execution(execution, 'SEGMENTATION_SERVICE_FAILED')
             return Response(
                 {'error': str(exc)},
                 status=status.HTTP_502_BAD_GATEWAY
             )
         except Exception:
+            fail_execution(execution, 'SEGMENTATION_FAILED')
             return Response(
                 {'error': 'Error inesperado al solicitar segmentacion'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -433,25 +464,35 @@ class MuestraSalivaViewSet(viewsets.ModelViewSet):
                 sample_type=SampleType.SALIVA
             )
         except ValueError as exc:
+            fail_execution(execution, 'INVALID_SEGMENTATION_RESPONSE')
             return Response(
                 {'error': str(exc)},
                 status=status.HTTP_502_BAD_GATEWAY
             )
         except Exception:
+            fail_execution(execution, 'SEGMENTATION_FAILED')
             return Response(
                 {'error': 'Error inesperado al normalizar resultado de segmentacion'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
         try:
-            resultado = _create_segmentation_result(
-                muestra=muestra,
-                sample_type=SampleType.SALIVA,
-                raw_result=result,
-                normalized_result=normalized_result,
-                segmentation_strategy=strategy,
-            )
+            with transaction.atomic():
+                resultado = _create_segmentation_result(
+                    muestra=muestra,
+                    sample_type=SampleType.SALIVA,
+                    raw_result=result,
+                    normalized_result=normalized_result,
+                    segmentation_strategy=strategy,
+                )
+                execution.resultado_segmentacion = resultado
+                execution.status = 'COMPLETED'
+                execution.counts = normalized_result['summary']
+                execution.completed_at = timezone.now()
+                # ALL payload is already durable on the new base; avoid a duplicate.
+                execution.save(update_fields=['resultado_segmentacion', 'status', 'counts', 'completed_at'])
         except Exception:
+            fail_execution(execution, 'SEGMENTATION_FAILED')
             return Response(
                 {'error': 'Error al persistir resultado de segmentacion'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -493,6 +534,8 @@ class MuestraSangreViewSet(viewsets.ModelViewSet):
     def segmentar(self, request, pk=None):
         """Solicitar segmentacion de una muestra de sangre existente."""
         muestra = self.get_object()
+        if 'target' in (request.data or {}):
+            return Response({'error': 'target is only supported for SALIVA samples'}, status=400)
         if 'segmentation_strategy' in (request.data or {}):
             return Response(
                 {'error': 'segmentation_strategy is only supported for SALIVA samples'},
@@ -629,6 +672,25 @@ class ResultadoSegmentacionViewSet(viewsets.GenericViewSet):
     queryset = ResultadoSegmentacion.objects.all()
     serializer_class = ResultadoSegmentacionSerializer
 
+    @action(detail=True, methods=['get'], url_path='selective-context')
+    def selective_context(self, request, pk=None):
+        result_id = self.get_object().pk
+        try:
+            with transaction.atomic():
+                result = lock_result(result_id)
+                return Response(context_for(result))
+        except SelectiveError as exc:
+            return Response({'error': str(exc), 'code': exc.code}, status=exc.status)
+
+    @action(detail=True, methods=['post'], url_path='reserve-object-id')
+    def reserve_object_id(self, request, pk=None):
+        result_id = self.get_object().pk
+        with transaction.atomic():
+            result = lock_result(result_id)
+            if result.tipo_muestra != 'SALIVA':
+                return Response({'error': 'Sólo SALIVA'}, status=400)
+            return Response({'id': reserve_ids(result, 1)[0]})
+
     @action(detail=True, methods=['get'], url_path='efectivo')
     def efectivo(self, request, pk=None):
         resultado = self.get_object()
@@ -702,54 +764,77 @@ class RevisionSegmentacionViewSet(
 
     def partial_update(self, request, *args, **kwargs):
         revision = self.get_object()
-        if revision.estado == RevisionSegmentacion.ESTADO_VALIDADA:
-            return Response(
-                {'error': 'Una revision VALIDADA es inmutable'},
-                status=status.HTTP_409_CONFLICT
-            )
+        with transaction.atomic():
+            lock_result(revision.resultado_segmentacion_id)
+            revision = self.get_queryset().get(pk=revision.pk)
+            if ('expected_updated_at' not in request.data and
+                    revision.executions.filter(status='COMPLETED').exists()):
+                return Response({'error': 'Recargue la revisión antes de guardar o validar.',
+                                 'code': 'REVISION_PRECONDITION_REQUIRED'}, status=409)
+            if revision.estado == RevisionSegmentacion.ESTADO_VALIDADA:
+                return Response(
+                    {'error': 'Una revision VALIDADA es inmutable'},
+                    status=status.HTTP_409_CONFLICT
+                )
 
-        serializer = self.get_serializer(
-            revision,
-            data=request.data,
-            partial=True,
-        )
-        serializer.is_valid(raise_exception=True)
-        serializer.save()
-        return Response(serializer.data)
+            serializer = self.get_serializer(
+                revision,
+                data=request.data,
+                partial=True,
+            )
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return Response(serializer.data)
 
     @action(detail=True, methods=['post'])
     def validar(self, request, pk=None):
         revision = self.get_object()
+        with transaction.atomic():
+            lock_result(revision.resultado_segmentacion_id)
+            revision = self.get_queryset().get(pk=revision.pk)
+            if ('expected_updated_at' not in request.data and
+                    revision.executions.filter(status='COMPLETED').exists()):
+                return Response({'error': 'Recargue la revisión antes de guardar o validar.',
+                                 'code': 'REVISION_PRECONDITION_REQUIRED'}, status=409)
+            expected = request.data.get('expected_updated_at')
+            if expected is not None:
+                from django.utils.dateparse import parse_datetime
+                try:
+                    matches = isinstance(expected, str) and parse_datetime(expected) == revision.actualizado_en
+                except (ValueError, TypeError):
+                    matches = False
+                if not matches:
+                    return Response({'error': 'La revisión cambió.', 'code': 'SEGMENTATION_SOURCE_CHANGED'}, status=409)
 
-        if revision.estado == RevisionSegmentacion.ESTADO_VALIDADA:
-            return Response(
-                {'error': 'La revision ya esta VALIDADA'},
-                status=status.HTTP_409_CONFLICT
-            )
+            if revision.estado == RevisionSegmentacion.ESTADO_VALIDADA:
+                return Response(
+                    {'error': 'La revision ya esta VALIDADA'},
+                    status=status.HTTP_409_CONFLICT
+                )
 
-        try:
-            validate_revision_snapshot(
-                revision.resultado_editado,
-                sample_type=revision.resultado_segmentacion.tipo_muestra,
-            )
-            revision.resumen = calculate_revision_summary(
-                revision.resultado_editado,
-                sample_type=revision.resultado_segmentacion.tipo_muestra,
-            )
-        except Exception as exc:
-            return Response(
-                {'error': str(exc)},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            try:
+                validate_revision_snapshot(
+                    revision.resultado_editado,
+                    sample_type=revision.resultado_segmentacion.tipo_muestra,
+                )
+                revision.resumen = calculate_revision_summary(
+                    revision.resultado_editado,
+                    sample_type=revision.resultado_segmentacion.tipo_muestra,
+                )
+            except Exception as exc:
+                return Response(
+                    {'error': str(exc)},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
-        revision.estado = RevisionSegmentacion.ESTADO_VALIDADA
-        revision.validado_en = timezone.now()
-        revision.save(update_fields=[
-            'estado',
-            'validado_en',
-            'resumen',
-            'actualizado_en',
-        ])
+            revision.estado = RevisionSegmentacion.ESTADO_VALIDADA
+            revision.validado_en = timezone.now()
+            revision.save(update_fields=[
+                'estado',
+                'validado_en',
+                'resumen',
+                'actualizado_en',
+            ])
 
-        serializer = self.get_serializer(revision)
-        return Response(serializer.data)
+            serializer = self.get_serializer(revision)
+            return Response(serializer.data)

@@ -545,12 +545,12 @@ export function useSegmentationEditor() {
     invalidDrawMessage.value = "";
   }
 
-  function finishDraftPolygon() {
+  function finishDraftPolygon(reservedId = null) {
     if (draftPolygonPoints.value.length < 3) return null;
     cancelDraftPointDragState();
 
     const newObject = {
-      id: nextRevisionObjectId(),
+      id: reservedId ?? nextRevisionObjectId(),
       label: drawingLabel.value,
       geometry: {
         type: "polygon",

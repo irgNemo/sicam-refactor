@@ -16,12 +16,14 @@ export function getSegmentationRevision(revisionId) {
   return apiClient.get(`/api/revisiones-segmentacion/${revisionId}/`);
 }
 
-export function updateSegmentationDraft(revisionId, resultadoEditado) {
+export function updateSegmentationDraft(revisionId, resultadoEditado, expectedUpdatedAt) {
   return apiClient.patch(`/api/revisiones-segmentacion/${revisionId}/`, {
     resultado_editado: resultadoEditado,
+    ...(expectedUpdatedAt ? { expected_updated_at: expectedUpdatedAt } : {}),
   });
 }
 
-export function validateRevision(revisionId) {
-  return apiClient.post(`/api/revisiones-segmentacion/${revisionId}/validar/`);
+export function validateRevision(revisionId, expectedUpdatedAt) {
+  return apiClient.post(`/api/revisiones-segmentacion/${revisionId}/validar/`,
+    expectedUpdatedAt ? { expected_updated_at: expectedUpdatedAt } : undefined);
 }

@@ -23,6 +23,7 @@ const keepAlive = setInterval(() => {}, 1000);
 after(async () => { clearInterval(keepAlive); await server.close(); });
 const load = path => server.ssrLoadModule(`/src/${path}`);
 const { SALIVA_STRATEGIES: S, segmentationStrategyLabel: label } = await load('domain/segmentationStrategies.js');
+const { replacementWarning, SALIVA_TARGET_OPTIONS, segmentationLoadingText } = await load('domain/segmentationTargets.js');
 const { SAMPLE_TYPES: T } = await load('domain/segmentationTypes.js');
 const { default: api } = await load('services/apiClient.js');
 const { segmentarMuestra } = await load('services/segmentationService.js');
@@ -75,6 +76,7 @@ test('requests: explicit SALIVA default/CURRENT/ALT; BLOOD remains bodyless even
 // A minimal Vue host exercises reactive radio events without pretending to be a browser.
 function hostNode(type, text = '') {
   return { type, text, children: [], props: {}, listeners: {},
+    get options() { return this.children.filter(child => child.type === 'option'); },
     addEventListener(event, handler) { this.listeners[event] = handler; },
   };
 }
@@ -120,7 +122,7 @@ test('radio interaction CURRENT→ALT, execution lock, duplicate submission guar
   await nextTick();
   assert.equal(inputs[1].checked, true);
   submit();
-  assert.deepEqual(calls, [S.CURRENT, S.ALT]);
+  assert.deepEqual(calls, [S.CURRENT, S.ALT].map(segmentation_strategy => ({ segmentation_strategy, target: 'ALL' })));
   mount('SALIVA-1', true);
   assert.equal(findAll(root, 'fieldset')[0].props.disabled, true);
   assert.equal(findAll(root, 'button')[0].props.disabled, true);
@@ -130,7 +132,7 @@ test('radio interaction CURRENT→ALT, execution lock, duplicate submission guar
   inputs = findAll(root, 'input');
   assert.equal(inputs[0].checked, true);
   submit();
-  assert.equal(calls[2], S.CURRENT);
+  assert.deepEqual(calls[2], { segmentation_strategy: S.CURRENT, target: 'ALL' });
   renderer.render(null, root);
 });
 
@@ -395,4 +397,222 @@ test('pseudonymized patient initials and identified patient names', async () => 
   assert.equal(patientDisplayName({ nombre: 'Synthetic', apellido: 'Patient' }), 'Synthetic Patient');
   assert.equal(patientInitials({ nombre: 'Synthetic', apellido: 'Patient' }), 'SP');
   assert.equal(patientDisplayName(null), '');
+});
+
+// Sprint 18I: exercise the real request handler and real editor, with HTTP mocked.
+const manualObjects = [
+  { id: 8, label: 'nucleo', geometry: { type: 'polygon', points: [[1,1],[5,1],[5,5]] },
+    source: { raw_id: 1 }, provenance: { origin: 'manual', base_object_id: null }, metadata: { untouched: true } },
+  { id: 9, label: 'micronucleo', geometry: { type: 'polygon', points: [[6,6],[7,6],[7,7]] },
+    source: { raw_id: 2 }, provenance: { origin: 'manual', base_object_id: null } },
+];
+function selectiveContext() {
+  const editor = useSegmentationEditor();
+  const draft = { id_revision_segmentacion: 10, resultado_segmentacion: 5, estado: 'BORRADOR',
+    actualizado_en: '2026-10-03T00:00:00Z', resultado_editado: { objects: structuredClone(manualObjects) } };
+  editor.loadRevisionSnapshot(draft);
+  const context = { ...mainContext(), activeResultadoSegmentacionId: 5, activeRevision: draft,
+    viewerMode: 'EDIT', editorTool: 'SELECT', pendingDraftRevision: draft,
+    setActiveRevision(value) { this.activeRevision = value; },
+    loadWorkingRevision: editor.loadRevisionSnapshot,
+  };
+  Object.defineProperty(context, 'hasPendingDraftWork', { get: () => editor.hasPendingDraftWork.value });
+  return { context, editor, draft };
+}
+const sourceContext = { source_token: 'a'.repeat(64), source_kind: 'BORRADOR', revision_id: 10,
+  revision_updated_at: '2026-10-03T00:00:00Z', summary: { total_objects: 2, counts_by_label: { nucleo: 1, micronucleo: 1, membrana: 0 } } };
+
+test('18I selector exposes three targets, ALL default and target-specific loading', async () => {
+  assert.deepEqual(SALIVA_TARGET_OPTIONS.map(o => o.value), ['MEMBRANES','NUCLEI_AND_MICRONUCLEI','ALL']);
+  const root = hostNode('root'); const calls = [];
+  renderer.render(h(ClientControl, { loading: false, buttonText: 'Segmentar', onRunSegmentation: value => calls.push(value) }), root);
+  const select = findAll(root, 'select')[0];
+  assert.equal(select.selectedIndex, 2);
+  for (const option of select.options) option.selected = option.value === 'MEMBRANES';
+  select.listeners.change(); await nextTick();
+  findAll(root, 'form')[0].props.onSubmit({ preventDefault() {} });
+  assert.deepEqual(calls, [{ segmentation_strategy: S.CURRENT, target: 'MEMBRANES' }]);
+  assert.match(segmentationLoadingText('MEMBRANES'), /membranas/);
+  assert.match(segmentationLoadingText('NUCLEI_AND_MICRONUCLEI'), /núcleos y micronúcleos/);
+  renderer.render(null, root);
+});
+
+test('18I replacement warnings cover empty output, preserved categories and existing drafts', () => {
+  assert.equal(replacementWarning('MEMBRANES', sourceContext.summary), '');
+  assert.match(replacementWarning('MEMBRANES', sourceContext.summary, true), /BORRADOR actual/);
+  const warning = replacementWarning('MEMBRANES', { counts_by_label: { membrana: 1 } });
+  assert.match(warning, /reemplazará todas las membranas/); assert.match(warning, /puede ser vacío/);
+  assert.match(warning, /núcleos y micronúcleos no se modificarán/);
+  assert.match(replacementWarning('NUCLEI_AND_MICRONUCLEI', sourceContext.summary), /membranas no se modificarán/);
+  assert.match(replacementWarning('ALL', sourceContext.summary), /todas las categorías/);
+});
+
+for (const target of ['MEMBRANES', 'NUCLEI_AND_MICRONUCLEI']) {
+  test(`18I ${target} request loads backend draft, preserves returned objects, EDIT and clean undo stack`, async t => {
+    t.mock.method(globalThis, 'confirm', () => true); // window shim below
+    const { context, editor } = selectiveContext();
+    editor.undoStack.value = [{ old: true }]; editor.redoStack.value = [{ old: true }];
+    const calls = [];
+    // Deliberately return only these objects: the frontend must not combine an automatic response.
+    const merged = { ...context.activeRevision, actualizado_en: '2026-10-03T00:01:00Z',
+      resultado_editado: { objects: structuredClone(manualObjects) } };
+    api.defaults.adapter = async config => {
+      calls.push(config);
+      return response(config, config.method === 'get' ? sourceContext : {
+        target, resultado_segmentacion: { id: 5 }, revision: merged, objetos: [{ tipo: 'membrana', id: 999 }],
+      });
+    };
+    await Main.methods.ejecutarSegmentacion.call(context, { segmentation_strategy: S.ALT, target });
+    assert.equal(calls.length, 2);
+    assert.deepEqual(JSON.parse(calls[1].data), { segmentation_strategy: S.ALT, target,
+      resultado_segmentacion_id: 5, source_token: sourceContext.source_token, confirm_replacement: true });
+    assert.equal(context.viewerMode, 'EDIT'); assert.equal(context.editorTool, 'SELECT');
+    assert.deepEqual(editor.workingObjects.value, manualObjects);
+    assert.deepEqual(editor.undoStack.value, []); assert.deepEqual(editor.redoStack.value, []);
+    assert.equal(editor.hasPendingDraftWork.value, false);
+    assert.equal(context.activeRevision, merged); assert.equal(context.segmentacionLoading, false);
+    assert.equal(context.segmentacionResultado, null);
+  });
+}
+
+// No browser automation or real data: window.confirm is a local test shim only.
+const priorWindow = globalThis.window;
+const priorConfirm = globalThis.confirm;
+globalThis.confirm = () => true;
+globalThis.window = globalThis;
+after(() => { globalThis.window = priorWindow; globalThis.confirm = priorConfirm; });
+
+test('18I local unsaved edits and unfinished drawing block before any HTTP', async () => {
+  const { context, editor } = selectiveContext();
+  let calls = 0; api.defaults.adapter = async config => { calls++; return response(config, {}); };
+  editor.isDraftDirty.value = true;
+  await Main.methods.ejecutarSegmentacion.call(context, { target: 'MEMBRANES', segmentation_strategy: S.ALT });
+  assert.equal(calls, 0); assert.match(context.segmentacionError, /Guarda o descarta/);
+  editor.isDraftDirty.value = false; editor.appendDraftPoint([1, 1]);
+  await Main.methods.ejecutarSegmentacion.call(context, { target: 'MEMBRANES', segmentation_strategy: S.ALT });
+  assert.equal(calls, 0);
+});
+
+test('18I cancelled confirmation never sends POST and retains editor', async t => {
+  t.mock.method(globalThis, 'confirm', () => false);
+  const { context, editor } = selectiveContext(); const calls = [];
+  api.defaults.adapter = async config => { calls.push(config); return response(config, sourceContext); };
+  await Main.methods.ejecutarSegmentacion.call(context, { target: 'MEMBRANES', segmentation_strategy: S.ALT });
+  assert.equal(calls.length, 1); assert.equal(calls[0].method, 'get');
+  assert.deepEqual(editor.workingObjects.value, manualObjects); assert.equal(context.segmentacionLoading, false);
+});
+
+test('18I missing base and stale visible draft cannot execute', async () => {
+  const { context } = selectiveContext(); let calls = 0;
+  api.defaults.adapter = async config => { calls++; return response(config, { ...sourceContext, revision_updated_at: 'changed' }); };
+  context.activeResultadoSegmentacionId = null;
+  await Main.methods.ejecutarSegmentacion.call(context, { target: 'MEMBRANES' });
+  assert.equal(calls, 0); assert.match(context.segmentacionError, /anotación existente/);
+  context.activeResultadoSegmentacionId = 5;
+  await Main.methods.ejecutarSegmentacion.call(context, { target: 'MEMBRANES' });
+  assert.equal(calls, 1); assert.match(context.segmentacionError, /anotación cambió/);
+});
+
+test('18I failed/changed-source requests retain objects, undo stack and revision', async () => {
+  for (const status of [409, 502, 503, 504]) {
+    const { context, editor, draft } = selectiveContext(); editor.undoStack.value = [{ intact: true }];
+    api.defaults.adapter = async config => {
+      if (config.method === 'get') return response(config, sourceContext);
+      throw { response: { status, data: { error: 'No aplicado' } } };
+    };
+    await Main.methods.ejecutarSegmentacion.call(context, { target: 'MEMBRANES', segmentation_strategy: S.ALT });
+    assert.deepEqual(editor.workingObjects.value, manualObjects); assert.deepEqual(editor.undoStack.value, [{ intact: true }]);
+    assert.equal(context.activeRevision, draft); assert.equal(context.segmentacionError, 'No aplicado');
+    assert.equal(context.segmentacionLoading, false);
+  }
+});
+
+test('18I empty selected category from backend remains empty and loading blocks duplicate execution', async () => {
+  const { context, editor } = selectiveContext(); let release; let posts = 0;
+  api.defaults.adapter = async config => {
+    if (config.method === 'get') return response(config, sourceContext);
+    posts++; return new Promise(resolve => { release = () => resolve(response(config, {
+      resultado_segmentacion: { id: 5 }, revision: { ...context.activeRevision, resultado_editado: { objects: [] } },
+    })); });
+  };
+  const task = Main.methods.ejecutarSegmentacion.call(context, { target: 'NUCLEI_AND_MICRONUCLEI', segmentation_strategy: S.CURRENT });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(context.segmentacionLoading, true);
+  await Main.methods.ejecutarSegmentacion.call(context, { target: 'MEMBRANES' });
+  assert.equal(posts, 1); release(); await task;
+  assert.deepEqual(editor.workingObjects.value, []);
+});
+
+test('18I BLOOD ignores supplied targets and carries no SALIVA payload', async () => {
+  const calls = []; api.defaults.adapter = async config => { calls.push(config); return response(config, {}); };
+  await segmentarMuestra(1, T.BLOOD, S.ALT, { target: 'MEMBRANES' });
+  assert.equal(calls[0].data, undefined);
+  const html = await renderPanel({ activeSampleType: T.BLOOD, isBloodSampleType: true });
+  assert.doesNotMatch(html, /Objetos a segmentar|MEMBRANES|NUCLEI_AND_MICRONUCLEI/);
+});
+
+test('18I mixed draft has neutral presentation', async () => {
+  const html = await renderPanel({ isEditMode: true, effectiveSegmentation: { base_origin: 'MANUAL' },
+    effectiveSegmentationDisplay: 'Anotación manual' });
+  assert.match(html, /Borrador en edición/); assert.doesNotMatch(html, /Método de segmentación: Anotación manual/);
+});
+
+test('18I editor uses server-reserved ID and resets undo when loading merged snapshot', () => {
+  const editor = useSegmentationEditor();
+  editor.loadRevisionSnapshot({ resultado_editado: { objects: structuredClone(manualObjects) } });
+  for (const point of [[2,2],[8,2],[8,8]]) editor.appendDraftPoint(point);
+  const object = editor.finishDraftPolygonEdit(999);
+  assert.equal(object.id, 999); assert.equal(object.provenance.origin, 'manual');
+  editor.undoRevisionEdit(); editor.redoRevisionEdit();
+  assert.equal(editor.workingObjects.value.at(-1).id, 999);
+});
+
+test('18I base with empty selected category submits without confirmation', async t => {
+  let confirmations = 0; t.mock.method(globalThis, 'confirm', () => { confirmations++; return false; });
+  const { context, editor } = selectiveContext(); context.activeRevision = null;
+  const calls = [];
+  api.defaults.adapter = async config => {
+    calls.push(config);
+    return response(config, config.method === 'get' ? { ...sourceContext, source_kind: 'MANUAL', revision_id: null,
+      revision_updated_at: null } : { resultado_segmentacion: { id: 5 }, revision: {
+        id_revision_segmentacion: 11, resultado_segmentacion: 5, estado: 'BORRADOR', resultado_editado: { objects: manualObjects },
+      } });
+  };
+  await Main.methods.ejecutarSegmentacion.call(context, { target: 'MEMBRANES', segmentation_strategy: S.ALT });
+  assert.equal(confirmations, 0); assert.equal(calls.length, 2);
+  assert.equal(JSON.parse(calls[1].data).confirm_replacement, false);
+  assert.deepEqual(editor.workingObjects.value, manualObjects);
+});
+
+test('18I ALL with annotations requires confirmation before posting', async t => {
+  t.mock.method(globalThis, 'confirm', () => false);
+  const context = mainContext(); context.effectiveSegmentation = { resumen: sourceContext.summary };
+  let requests = 0; api.defaults.adapter = async config => { requests++; return response(config, {}); };
+  await Main.methods.ejecutarSegmentacion.call(context, { target: 'ALL', segmentation_strategy: S.CURRENT });
+  assert.equal(requests, 0); assert.equal(context.segmentacionLoading, false);
+});
+
+test('18I saving a merged draft sends its exact version precondition', async () => {
+  const revision = useSegmentationRevision();
+  const draft = { id_revision_segmentacion: 10, resultado_segmentacion: 5, estado: 'BORRADOR',
+    actualizado_en: sourceContext.revision_updated_at, resultado_editado: { objects: manualObjects } };
+  revision.setActiveRevision(draft);
+  let request;
+  api.defaults.adapter = async config => { request = JSON.parse(config.data); return response(config, draft); };
+  await revision.saveActiveDraft(draft.resultado_editado);
+  assert.deepEqual(request, { resultado_editado: draft.resultado_editado, expected_updated_at: draft.actualizado_en });
+});
+
+test('18I finishing a SALIVA drawing reserves its ID on the backend before adding it', async () => {
+  const { context, editor } = selectiveContext();
+  for (const point of [[1,1],[2,1],[2,2]]) editor.appendDraftPoint(point);
+  Object.defineProperty(context, 'draftPolygonPoints', { get: () => editor.draftPolygonPoints.value });
+  context.activeRevisionId = 10; context.cancelDraftPointDrag = () => {};
+  context.finishDraftPolygonEdit = editor.finishDraftPolygonEdit; context.showOverlayLabel = () => {};
+  const calls = [];
+  api.defaults.adapter = async config => { calls.push(config); return response(config, { id: 1001 }); };
+  await Main.methods.finishDraftPolygon.call(context);
+  assert.equal(calls[0].url, '/api/resultados-segmentacion/5/reserve-object-id/');
+  assert.equal(editor.workingObjects.value.at(-1).id, 1001);
+  assert.equal(context.reservingObjectId, false);
 });

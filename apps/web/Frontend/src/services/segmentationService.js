@@ -18,11 +18,12 @@ export function listarMuestras(sampleType = SAMPLE_TYPES.SALIVA) {
 export function segmentarMuestra(
   muestraId,
   sampleType = SAMPLE_TYPES.SALIVA,
-  strategy = SALIVA_STRATEGIES.CURRENT
+  strategy = SALIVA_STRATEGIES.CURRENT,
+  selection = {}
 ) {
   const url = `${getSampleEndpoint(sampleType)}/${muestraId}/segmentar/`;
   if (sampleType === SAMPLE_TYPES.SALIVA) {
-    return apiClient.post(url, { segmentation_strategy: strategy });
+    return apiClient.post(url, { segmentation_strategy: strategy, ...selection });
   }
   return apiClient.post(url);
 }
@@ -38,4 +39,11 @@ export function obtenerResultadosSegmentacion(
 
 export function obtenerResumenSegmentacionCaso(casoId) {
   return apiClient.get(`/api/casos/${casoId}/resumen-segmentacion/`);
+}
+
+export function getSelectiveContext(resultId) {
+  return apiClient.get(`/api/resultados-segmentacion/${resultId}/selective-context/`);
+}
+export function reserveEditorialObjectId(resultId) {
+  return apiClient.post(`/api/resultados-segmentacion/${resultId}/reserve-object-id/`);
 }

@@ -228,7 +228,8 @@ export function useSegmentationRevision() {
     try {
       const response = await updateSegmentationDraft(
         activeRevisionId.value,
-        snapshot
+        snapshot,
+        activeRevision.value?.actualizado_en
       );
 
       setActiveRevision(response.data);
@@ -237,6 +238,7 @@ export function useSegmentationRevision() {
       return response.data;
     } catch (error) {
       saveDraftError.value =
+        error.response?.data?.error ||
         error.response?.data?.resultado_editado?.[0] ||
         error.response?.data?.detail ||
         "No fue posible guardar el borrador.";
@@ -259,7 +261,7 @@ export function useSegmentationRevision() {
     validateRevisionMessage.value = "";
 
     try {
-      const response = await validateRevision(activeRevisionId.value);
+      const response = await validateRevision(activeRevisionId.value, activeRevision.value?.actualizado_en);
 
       setActiveRevision(response.data);
       pendingDraftRevision.value = null;

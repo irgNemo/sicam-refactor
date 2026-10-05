@@ -16,13 +16,20 @@
         </span>
       </label>
     </fieldset>
+    <label class="target-selector">
+      Objetos a segmentar
+      <select v-model="selectedTarget" :disabled="loading">
+        <option v-for="option in targetOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+      </select>
+    </label>
     <button class="btn-segment" :disabled="loading" type="submit">
-      {{ buttonText }}
+      {{ loading ? loadingText(selectedTarget) : buttonText }}
     </button>
   </form>
 </template>
 
 <script>
+import { SALIVA_TARGET_OPTIONS, segmentationLoadingText } from '../../domain/segmentationTargets';
 import {
   SALIVA_STRATEGIES,
   SALIVA_STRATEGY_OPTIONS,
@@ -37,13 +44,16 @@ export default {
   emits: ["run-segmentation"],
   data() {
     return {
+      selectedTarget: 'ALL',
+      targetOptions: SALIVA_TARGET_OPTIONS,
       selectedStrategy: SALIVA_STRATEGIES.CURRENT,
       options: SALIVA_STRATEGY_OPTIONS,
     };
   },
   methods: {
+    loadingText: segmentationLoadingText,
     runSegmentation() {
-      if (!this.loading) this.$emit("run-segmentation", this.selectedStrategy);
+      if (!this.loading) this.$emit("run-segmentation", { segmentation_strategy: this.selectedStrategy, target: this.selectedTarget });
     },
   },
 };

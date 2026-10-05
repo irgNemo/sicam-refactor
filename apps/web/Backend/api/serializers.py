@@ -80,6 +80,18 @@ class ResultadoAnalisisSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class SalivaSegmentationRequestSerializer(serializers.Serializer):
+    target = serializers.ChoiceField(choices=['ALL', 'MEMBRANES', 'NUCLEI_AND_MICRONUCLEI'], default='ALL')
+    resultado_segmentacion_id = serializers.IntegerField(min_value=1, required=False)
+    source_token = serializers.RegexField(r'^[a-f0-9]{64}$', required=False)
+    confirm_replacement = serializers.BooleanField(default=False)
+
+    def validate(self, attrs):
+        if attrs['target'] != 'ALL':
+            for field in ('resultado_segmentacion_id', 'source_token'):
+                if field not in attrs:
+                    raise serializers.ValidationError({field: 'Requerido para segmentación parcial.'})
+        return attrs
+
     segmentation_strategy = serializers.ChoiceField(
         choices=SalivaSegmentationStrategy.choices,
         default=SalivaSegmentationStrategy.CURRENT_CUSTOM_V1,
@@ -137,9 +149,11 @@ class ResultadoCaracterizacionSerializer(serializers.ModelSerializer):
 
 
 class RevisionSegmentacionSerializer(serializers.ModelSerializer):
+    expected_updated_at = serializers.DateTimeField(write_only=True, required=False)
     class Meta:
         model = RevisionSegmentacion
         fields = (
+            'expected_updated_at',
             'id_revision_segmentacion',
             'resultado_segmentacion',
             'numero_revision',
@@ -167,6 +181,12 @@ class RevisionSegmentacionSerializer(serializers.ModelSerializer):
         return value
 
     def update(self, instance, validated_data):
+        expected = validated_data.pop('expected_updated_at', None)
+        if expected is not None and expected != instance.actualizado_en:
+            from rest_framework.exceptions import APIException
+            error = APIException('La revisión cambió. Recargue antes de guardar.', code='SEGMENTATION_SOURCE_CHANGED')
+            error.status_code = 409
+            raise error
         if instance.estado == RevisionSegmentacion.ESTADO_VALIDADA:
             raise serializers.ValidationError(
                 'Una revision VALIDADA es inmutable'
@@ -174,6 +194,10 @@ class RevisionSegmentacionSerializer(serializers.ModelSerializer):
 
         resultado_editado = validated_data.get('resultado_editado')
         if resultado_editado is not None:
+            from .services.segmentation.selective import advance_allocator
+            parent = instance.resultado_segmentacion
+            advance_allocator(parent, resultado_editado)
+            parent.save(update_fields=['next_editorial_id'])
             instance.resultado_editado = resultado_editado
             instance.resumen = calculate_revision_summary(
                 resultado_editado,

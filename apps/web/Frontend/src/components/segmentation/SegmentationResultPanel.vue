@@ -76,7 +76,7 @@
         <span class="sr-only">Segmentacion seleccionada</span>
         <select
           :value="selectedSegmentationResultId || ''"
-          :disabled="historialLoading"
+          :disabled="historialLoading || segmentacionLoading"
           @change="$emit('change-segmentation-result', $event.target.value)"
         >
           <option
@@ -108,9 +108,9 @@
       v-else-if="effectiveSegmentation"
       class="effective-result-card"
     >
-      <strong>Resultado mostrado</strong>
-      <span>{{ effectiveSegmentationDisplay }}</span>
-      <span v-if="isSalivaSampleType">
+      <strong>{{ isEditMode ? "Borrador en edición" : "Resultado mostrado" }}</strong>
+      <span v-if="!isEditMode">{{ effectiveSegmentationDisplay }}</span>
+      <span v-if="isSalivaSampleType && !isEditMode">
         Método de segmentación: {{ strategyLabel(effectiveSegmentation) }}
       </span>
     </div>

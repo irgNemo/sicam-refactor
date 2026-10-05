@@ -141,7 +141,7 @@
                 {{ revisionError }}
               </div>
 
-              <div ref="imageFrame" class="img-placeholder">
+              <div ref="imageFrame" class="img-placeholder" :inert="segmentacionLoading || reservingObjectId || undefined">
                 <div
                   v-if="imagenSeleccionada"
                   class="image-transform-layer"
@@ -238,6 +238,7 @@
               <div
                 v-if="isEditMode"
                 class="selected-object-panel"
+                :inert="segmentacionLoading || reservingObjectId || undefined"
               >
                 <div class="selected-object-header">
                   <h4>{{ contextualPanelTitle }}</h4>
@@ -540,6 +541,8 @@
 </template>
 
 <script>
+import { replacementWarning } from '../domain/segmentationTargets';
+import { getSelectiveContext, reserveEditorialObjectId } from '../services/segmentationService';
 import apiClient from "../services/apiClient";
 import OverlayLayersCard from "./segmentation/OverlayLayersCard.vue";
 import SegmentationCountSummary from "./segmentation/SegmentationCountSummary.vue";
@@ -647,6 +650,7 @@ export default {
       loading: true,
       imagenSeleccionada: null,
       segmentacionLoading: false,
+      reservingObjectId: false,
       segmentacionResultado: null,
       segmentacionError: "",
       historialSegmentacion: [],
@@ -1140,11 +1144,11 @@ export default {
     },
 
     canUndo() {
-      return this.isEditMode && this.undoStack.length > 0;
+      return !this.segmentacionLoading && this.isEditMode && this.undoStack.length > 0;
     },
 
     canRedo() {
-      return this.isEditMode && this.redoStack.length > 0;
+      return !this.segmentacionLoading && this.isEditMode && this.redoStack.length > 0;
     },
 
     canSaveDraft() {
@@ -1416,6 +1420,7 @@ export default {
     },
 
     setSelectedSegmentationResult(resultId) {
+      if (this.segmentacionLoading || this.reservingObjectId) return;
       const parsedId = Number(resultId);
       const selected = Number.isFinite(parsedId)
         ? this.completedSegmentationResults.find(result => result.id === parsedId)
@@ -1577,51 +1582,78 @@ export default {
       }
     },
 
-    async ejecutarSegmentacion(strategy) {
-      if (!this.imagenSeleccionada || this.segmentacionLoading) return;
-
-      this.segmentacionLoading = true;
-      this.segmentacionResultado = null;
-      this.segmentacionError = "";
+    async ejecutarSegmentacion(selection) {
+      if (!this.imagenSeleccionada || this.segmentacionLoading || this.reservingObjectId) return;
+      if (this.hasPendingDraftWork || this.isSavingDraft || this.isValidatingRevision || this.vertexDrag || this.draftPointDrag) {
+        this.segmentacionError = 'Guarda o descarta primero los cambios locales antes de segmentar.';
+        return;
+      }
       const sampleType = this.activeSampleType;
+      const strategy = typeof selection === 'object' ? selection.segmentation_strategy : selection;
+      const target = sampleType === SAMPLE_TYPES.SALIVA ? (selection?.target || 'ALL') : 'ALL';
+      const partial = target !== 'ALL';
       const muestraId = this.imagenSeleccionada.id_muestra;
-
+      const parentId = this.activeResultadoSegmentacionId;
+      this.segmentacionLoading = true;
+      this.segmentacionError = '';
       try {
-        const response = await segmentarMuestra(muestraId, sampleType, strategy);
-        if (!this.isCurrentSample(muestraId, sampleType)) {
-          return;
+        let request = {};
+        if (partial) {
+          if (!parentId) {
+            this.segmentacionError = 'Selecciona una anotación existente para segmentar categorías.';
+            return;
+          }
+          const { data: context } = await getSelectiveContext(parentId);
+          if (!this.isCurrentSample(muestraId, sampleType) || this.activeResultadoSegmentacionId !== parentId) return;
+          if (this.activeRevision?.estado === 'BORRADOR' && context.revision_updated_at !== this.activeRevision.actualizado_en) {
+            this.segmentacionError = 'La anotación cambió. Recarga el borrador antes de continuar.';
+            return;
+          }
+          const warning = replacementWarning(target, context.summary, context.source_kind === 'BORRADOR');
+          if (warning && !window.confirm(warning)) return;
+          request = { target, resultado_segmentacion_id: parentId, source_token: context.source_token, confirm_replacement: Boolean(warning) };
+        } else if (sampleType === SAMPLE_TYPES.SALIVA) {
+          const summary = this.pendingDraftRevision?.resumen || this.effectiveSegmentation?.resumen
+            || this.resultadoSegmentacionActivo?.resultado_normalizado?.summary;
+          const warning = replacementWarning('ALL', summary);
+          if (warning && !window.confirm(warning)) return;
         }
+        const response = await segmentarMuestra(muestraId, sampleType, strategy, request);
+        if (!this.isCurrentSample(muestraId, sampleType)) return;
         const resultadoId = response.data?.resultado_segmentacion?.id || null;
-        this.segmentacionResultado = response.data;
-        this.syncOverlayLabelVisibility();
-        await this.cargarHistorialSegmentacion(muestraId, sampleType);
-        if (resultadoId) {
-          this.emitSegmentationResultSelected(resultadoId);
-          await this.loadEffectiveSegmentation(resultadoId);
-          await this.loadRevisionState(resultadoId);
+        if (partial) {
+          const draft = response.data.revision;
+          this.setActiveRevision(draft);
+          this.pendingDraftRevision = draft;
+          this.loadWorkingRevision(draft); // resets selection and undo/redo, no frontend merge
+          this.viewerMode = 'EDIT';
+          this.editorTool = 'SELECT';
+          this.syncOverlayLabelVisibility();
         } else {
-          await this.loadEffectiveSegmentation(this.activeResultadoSegmentacionId);
+          this.segmentacionResultado = response.data;
+          this.resetEditorState?.({ clearRevision: true });
+          this.syncOverlayLabelVisibility();
+          await this.cargarHistorialSegmentacion(muestraId, sampleType);
+          if (resultadoId) {
+            this.emitSegmentationResultSelected(resultadoId);
+            await this.loadEffectiveSegmentation(resultadoId);
+            await this.loadRevisionState(resultadoId);
+          } else {
+            await this.loadEffectiveSegmentation(this.activeResultadoSegmentacionId);
+          }
+          this.syncOverlayLabelVisibility();
         }
-        this.syncOverlayLabelVisibility();
-        this.$emit("segmentation-completed", {
-          caseId: this.caseId,
-          muestraId,
-          sampleType,
-          resultadoId,
-        });
+        this.$emit('segmentation-completed', { caseId: this.caseId, muestraId, sampleType, resultadoId });
       } catch (error) {
         if (!this.isCurrentSample(muestraId, sampleType)) return;
-        console.error("Error al segmentar muestra:", error);
-        this.segmentacionError =
-          error.response?.data?.error || "No fue posible segmentar la muestra";
+        this.segmentacionError = error.response?.data?.error || 'No fue posible segmentar la muestra';
       } finally {
-        if (this.isCurrentSample(muestraId, sampleType)) {
-          this.segmentacionLoading = false;
-        }
+        if (this.isCurrentSample(muestraId, sampleType)) this.segmentacionLoading = false;
       }
     },
 
     setViewerMode(mode) {
+      if (this.segmentacionLoading || this.reservingObjectId) return;
       if (mode === "NAVIGATE") {
         if (this.hasPendingDraftWork && !this.confirmDiscardDraftChanges()) {
           return;
@@ -1707,6 +1739,7 @@ export default {
     },
 
     setEditorTool(tool) {
+      if (this.segmentacionLoading || this.reservingObjectId) return;
       if (!["SELECT", "PAN", "DRAW", "VERTEX"].includes(tool)) return;
 
       this.cancelVertexDrag();
@@ -2089,12 +2122,24 @@ export default {
       return this.svgPointToNaturalImagePoint(svgPoint);
     },
 
-    finishDraftPolygon() {
+    async finishDraftPolygon() {
+      if (this.segmentacionLoading || this.reservingObjectId || this.draftPolygonPoints.length < 3) return;
       this.cancelDraftPointDrag();
-      const newObject = this.finishDraftPolygonEdit();
-      if (newObject) {
-        this.showOverlayLabel(newObject.label);
+      let reservedId = null;
+      const revisionId = this.activeRevisionId;
+      if (this.activeSampleType === SAMPLE_TYPES.SALIVA) {
+        this.reservingObjectId = true;
+        try {
+          const { data } = await reserveEditorialObjectId(this.activeResultadoSegmentacionId);
+          if (this.activeRevisionId !== revisionId) return;
+          reservedId = data.id;
+        } catch {
+          this.invalidDrawMessage = 'No fue posible reservar el identificador. Intenta finalizar de nuevo.';
+          return;
+        } finally { this.reservingObjectId = false; }
       }
+      const newObject = this.finishDraftPolygonEdit(reservedId);
+      if (newObject) this.showOverlayLabel(newObject.label);
     },
 
     cancelDraftPolygon() {
@@ -2103,11 +2148,13 @@ export default {
     },
 
     deleteSelectedObject() {
+      if (this.segmentacionLoading || this.reservingObjectId) return;
       this.cancelVertexDrag();
       this.deleteSelectedObjectEdit();
     },
 
     async saveDraft() {
+      if (this.segmentacionLoading || this.reservingObjectId) return;
       if (!this.canSaveDraft || !this.activeRevisionId) return;
 
       const selectedKey = this.selectedObjectKey;
@@ -2132,6 +2179,7 @@ export default {
     },
 
     async confirmAndValidateRevision() {
+      if (this.segmentacionLoading || this.reservingObjectId) return;
       if (!this.canValidateRevision || !this.activeRevisionId) return;
 
       const revisionNumber = this.activeRevision?.numero_revision;
@@ -2226,6 +2274,7 @@ export default {
     },
 
     handleEditorKeyDown(event) {
+      if (this.segmentacionLoading || this.reservingObjectId) return;
       if (
         this.isVertexMode &&
         this.selectedVertexIndex !== null &&

@@ -180,6 +180,8 @@ class ResultadoAnalisis(models.Model):
 
 # Modelo de resultado JSON de segmentacion
 class ResultadoSegmentacion(models.Model):
+    # Monotonic high-water mark shared by server replacements and editor reservations.
+    next_editorial_id = models.PositiveBigIntegerField(default=1)
     base_origin = models.CharField(
         max_length=12,
         choices=[('AUTOMATIC', 'Automático'), ('MANUAL', 'Manual')],
@@ -293,6 +295,31 @@ class RevisionSegmentacion(models.Model):
             f"Resultado {self.resultado_segmentacion_id} - "
             f"Revision {self.numero_revision} - {self.estado}"
         )
+
+
+class SegmentationExecution(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    resultado_segmentacion = models.ForeignKey(
+        ResultadoSegmentacion, null=True, on_delete=models.PROTECT, related_name='executions',
+    )
+    revision = models.ForeignKey(
+        RevisionSegmentacion, null=True, on_delete=models.PROTECT, related_name='executions',
+    )
+    strategy = models.CharField(max_length=40, choices=SalivaSegmentationStrategy.choices)
+    target = models.CharField(max_length=24, choices=[(v, v) for v in (
+        'ALL', 'MEMBRANES', 'NUCLEI_AND_MICRONUCLEI',
+    )])
+    status = models.CharField(max_length=12, default='PENDING', choices=[(v, v) for v in (
+        'PENDING', 'COMPLETED', 'FAILED', 'CANCELLED',
+    )])
+    request_metadata = models.JSONField(default=dict)
+    source_token = models.CharField(max_length=64, blank=True)
+    checkpoint = models.JSONField(null=True)
+    normalized_response = models.JSONField(null=True)
+    counts = models.JSONField(default=dict)
+    error = models.CharField(max_length=100, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True)
 
 
 class ResultadoCaracterizacion(models.Model):

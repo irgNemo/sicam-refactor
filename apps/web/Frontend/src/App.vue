@@ -11,7 +11,6 @@
       :active-sample-type="activeSampleType"
       :selected-patient-id="selectedPatientId"
       :selected-case-id="selectedCaseId"
-      :show-analysis-button="seccion === 'segmentacion'"
       @select-patient="onSelectPatient"
       @select-case="onSelectCase"
       @context-invalid="onContextInvalid"
@@ -43,15 +42,6 @@
       @segmentation-result-selected="onSegmentationResultSelected"
     />
 
-    <div v-if="seccion === 'analisis'" class="placeholder-view">
-      <div class="placeholder-content">
-        <div class="placeholder-icon">🔍</div>
-        <h2>Análisis</h2>
-        <p>Este módulo está en desarrollo</p>
-        <div class="placeholder-badge">Próximamente</div>
-      </div>
-    </div>
-
     <RegistroView v-if="seccion === 'registro'" />
   </div>
 </template>
@@ -66,7 +56,7 @@ import { SAMPLE_TYPES } from "./domain/segmentationTypes";
 
 const UI_CONTEXT_STORAGE_KEY = "sicam.uiContext.v1";
 const UI_CONTEXT_VERSION = 1;
-const VALID_SECTIONS = ["segmentacion", "caracterizacion", "analisis", "registro"];
+const VALID_SECTIONS = ["segmentacion", "caracterizacion", "registro"];
 const VALID_SAMPLE_TYPES = Object.values(SAMPLE_TYPES);
 
 function normalizeOptionalId(value) {
@@ -381,76 +371,6 @@ body {
     .app {
         flex-direction: column;
     }
-}
-
-.placeholder-view {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-    padding: 40px;
-}
-
-.placeholder-content {
-    text-align: center;
-    background: white;
-    padding: 60px 80px;
-    border-radius: 20px;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
-    max-width: 500px;
-    animation: fadeInUp 0.6s ease;
-}
-
-@keyframes fadeInUp {
-    from {
-        opacity: 0;
-        transform: translateY(30px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
-.placeholder-icon {
-    font-size: 80px;
-    margin-bottom: 20px;
-    animation: float 3s ease-in-out infinite;
-}
-
-@keyframes float {
-    0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(-10px); }
-}
-
-.placeholder-content h2 {
-    margin: 0 0 12px 0;
-    font-size: 32px;
-    font-weight: 700;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-}
-
-.placeholder-content p {
-    margin: 0 0 24px 0;
-    color: #666;
-    font-size: 16px;
-    line-height: 1.6;
-}
-
-.placeholder-badge {
-    display: inline-block;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    padding: 10px 24px;
-    border-radius: 20px;
-    font-size: 14px;
-    font-weight: 600;
-    letter-spacing: 0.5px;
-    box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
 }
 
 ::-webkit-scrollbar {

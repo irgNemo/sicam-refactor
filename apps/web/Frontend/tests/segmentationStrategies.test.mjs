@@ -30,6 +30,9 @@ const { segmentarMuestra } = await load('services/segmentationService.js');
 const { default: Panel } = await load('components/segmentation/SegmentationResultPanel.vue');
 const { default: Control } = await load('components/segmentation/SalivaSegmentationControl.vue');
 const { default: Main } = await load('components/MainContent.vue');
+const { default: App } = await server.ssrLoadModule('/src/App.vue');
+const { default: TopBar } = await load('components/TopBar.vue');
+const { default: SideBar } = await load('components/SideBar.vue');
 const { default: Layers } = await load('components/segmentation/OverlayLayersCard.vue');
 const { patientDisplayName, patientInitials } = await load('domain/patientPresentation.js');
 const { useSegmentationRevision } = await load('composables/useSegmentationRevision.js');
@@ -671,4 +674,74 @@ test('18Q has one layers card immediately after controls in the image column', a
   assert.equal(siblings[siblings.indexOf(node) - 1].tag, 'SegmentationImageControls');
   assert.ok(node.props.some(prop => prop.name === 'bind' && prop.arg?.content === 'labels' && prop.exp?.content === 'overlayLabels'));
   assert.ok(node.props.some(prop => prop.name === 'on' && prop.arg?.content === 'change-visibility' && prop.exp?.content === 'setOverlayLabelVisibility'));
+});
+
+for (const section of ['analisis', 'unknown', 'segmentacion', 'caracterizacion', 'registro']) {
+  test(`18Q-B restores ${section} safely without discarding patient/sample context`, () => {
+    const previous = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    const stored = { version: 1, activeTab: section, patientId: 7, caseId: 8,
+      sampleType: T.SALIVA, sampleId: 41, segmentationResultId: 5 };
+    let saved = null;
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: {
+      sessionStorage: {
+        getItem(key) { assert.equal(key, 'sicam.uiContext.v1'); return JSON.stringify(stored); },
+        setItem(key, value) { assert.equal(key, 'sicam.uiContext.v1'); saved = JSON.parse(value); },
+        removeItem() { assert.fail('Valid legacy context must not be deleted'); },
+      },
+    } });
+    try {
+      const state = App.data();
+      assert.equal(state.seccion, ['analisis', 'unknown'].includes(section) ? 'segmentacion' : section);
+      assert.equal(state.selectedPatientId, 7);
+      assert.equal(state.selectedCaseId, 8);
+      assert.equal(state.selectedSampleRef.sampleId, 41);
+      assert.equal(state.selectedSegmentationResultRef.resultadoId, 5);
+      App.methods.persistUiContext.call({ ...state, activeSelectedSampleId: 41, activeSelectedSegmentationResultId: 5 });
+      assert.deepEqual(saved, { ...stored, activeTab: state.seccion });
+    } finally {
+      if (previous) Object.defineProperty(globalThis, 'window', previous);
+      else delete globalThis.window;
+    }
+  });
+}
+
+test('18Q-B real navigation retains pending-edit guard and rejects removed section', () => {
+  for (const target of ['caracterizacion', 'registro']) {
+    let confirmations = 0;
+    let approved = false;
+    const context = { seccion: 'segmentacion', $refs: { mainContent: {
+      hasPendingDraftWork: true,
+      confirmDiscardDraftChanges() { confirmations++; return approved; },
+    } } };
+    context.confirmPendingDraftNavigation = () => App.methods.confirmPendingDraftNavigation.call(context);
+    App.methods.requestSectionChange.call(context, target);
+    assert.equal(context.seccion, 'segmentacion');
+    assert.equal(confirmations, 1);
+    approved = true;
+    App.methods.requestSectionChange.call(context, target);
+    assert.equal(context.seccion, target);
+    assert.equal(confirmations, 2);
+    App.methods.requestSectionChange.call(context, 'analisis');
+    assert.equal(context.seccion, target);
+    App.methods.requestSectionChange.call(context, 'segmentacion');
+    assert.equal(context.seccion, 'segmentacion');
+  }
+});
+
+test('18Q-B TopBar shows only real sections; removed controls have no orphan handlers', async () => {
+  for (const seccion of ['segmentacion', 'caracterizacion', 'registro']) {
+    const html = await renderToString(createSSRApp(TopBar, { seccion }));
+    assert.equal((html.match(/<button/g) || []).length, 3);
+    for (const title of ['Segmentación', 'Caracterización', 'Registro']) assert.ok(html.includes(title));
+    for (const removed of ['Análisis', 'Notificaciones', 'Configuración', 'notification-dot', '🔔', '⚙']) assert.ok(!html.includes(removed));
+  }
+  assert.equal(SideBar.props.showAnalysisButton, undefined);
+  assert.equal(SideBar.methods.verAnalisis, undefined);
+  for (const [file, removed] of [
+    ['MainContent.vue', ['Exportar CSV', 'Generar PDF', 'header-actions']],
+    ['SideBar.vue', ['Ver Análisis Completo', 'showAnalysisButton', 'verAnalisis']],
+  ]) {
+    const source = await readFile(new URL(`../src/components/${file}`, import.meta.url), 'utf8');
+    for (const value of removed) assert.ok(!source.includes(value));
+  }
 });

@@ -21,16 +21,6 @@
         </div>
       </div>
 
-      <div class="header-actions">
-        <button class="btn-action csv">
-          <span class="btn-icon">⬇</span>
-          Exportar CSV
-        </button>
-        <button class="btn-action pdf">
-          <span class="btn-icon">📄</span>
-          Generar PDF
-        </button>
-      </div>
     </header>
 
     <div class="layout-grid">
@@ -534,7 +524,6 @@
 
           </div>
         </div>
-
 
       </div>
     </div>
@@ -2754,45 +2743,6 @@ export default {
   font-style: italic;
 }
 
-.header-actions {
-  display: flex;
-  gap: 10px;
-}
-
-.btn-action {
-  padding: 10px 18px;
-  border: 2px solid #e0e0e0;
-  background: white;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 500;
-  border-radius: 10px;
-  transition: all 0.3s ease;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #2c3e50;
-}
-
-.btn-action:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-}
-
-.btn-action.csv:hover {
-  border-color: #43a047;
-  background: #e8f5e9;
-}
-
-.btn-action.pdf:hover {
-  border-color: #e53935;
-  background: #ffebee;
-}
-
-.btn-icon {
-  font-size: 16px;
-}
-
 /* LAYOUT */
 .layout-grid {
   align-items: start;
@@ -3437,14 +3387,6 @@ export default {
     font-size: 20px;
   }
 
-  .header-actions {
-    gap: 8px;
-  }
-
-  .btn-action {
-    padding: 8px 12px;
-  }
-
   .layout-grid {
     gap: 12px;
     grid-template-columns: minmax(176px, 196px) minmax(0, 1fr);
@@ -3504,11 +3446,6 @@ export default {
     height: auto;
     margin-bottom: 12px;
     padding-bottom: 10px;
-  }
-
-  .header-actions {
-    flex-wrap: wrap;
-    width: 100%;
   }
 
   .layout-grid {

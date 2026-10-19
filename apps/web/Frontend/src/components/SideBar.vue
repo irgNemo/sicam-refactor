@@ -80,15 +80,6 @@
       </div>
     </div>
 
-    <!-- BOTÓN VER ANÁLISIS -->
-    <button
-      v-if="casoSeleccionado && showAnalysisButton"
-      class="btn-primary"
-      @click="verAnalisis"
-    >
-      📊 Ver Análisis Completo
-    </button>
-
     <!-- RESUMEN GLOBAL -->
     <div v-if="casoSeleccionado && showSalivaCaseSummary" class="summary-panel">
       <h3>Resumen del Caso</h3>
@@ -173,10 +164,6 @@ export default {
     selectedCaseId: {
       type: Number,
       default: null,
-    },
-    showAnalysisButton: {
-      type: Boolean,
-      default: true,
     },
   },
 
@@ -279,11 +266,6 @@ export default {
 
     seleccionarCaso(caso) {
       this.$emit("select-case", caso.id_caso);
-    },
-
-    verAnalisis() {
-      // Aquí podrías agregar lógica adicional si necesitas
-      console.log("Ver análisis del caso:", this.casoSeleccionado);
     },
 
     resetResumen() {
@@ -697,27 +679,6 @@ export default {
   color: #666;
 }
 
-/* BOTÓN PRINCIPAL */
-.btn-primary {
-  width: 100%;
-  padding: 14px;
-  background: #1e88e5;
-  color: white;
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 500;
-  transition: all 0.2s ease;
-  margin-bottom: 20px;
-}
-
-.btn-primary:hover {
-  background: #1976d2;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(30, 136, 229, 0.3);
-}
-
 /* RESUMEN */
 .summary-panel {
   background: #f8f9fa;
@@ -831,8 +792,7 @@ export default {
 
   .search-section,
   .paciente-card,
-  .casos-section,
-  .btn-primary {
+  .casos-section {
     margin-bottom: 14px;
   }
 

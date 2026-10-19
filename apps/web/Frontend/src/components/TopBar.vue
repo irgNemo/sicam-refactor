@@ -23,15 +23,6 @@
         <span class="nav-icon">📊</span>
         Caracterización
       </button>
-      
-      <button
-        class="nav-btn"
-        :class="{ active: seccion === 'analisis' }"
-        @click="$emit('change-section', 'analisis')"
-      >
-        <span class="nav-icon">🔍</span>
-        Análisis
-      </button>
 
       <button
         class="nav-btn"
@@ -43,13 +34,6 @@
       </button>
     </div>
 
-    <div class="topbar-actions">
-      <button class="action-btn" title="Notificaciones">
-        <span class="notification-dot"></span>
-        🔔
-      </button>
-      <button class="action-btn" title="Configuración">⚙️</button>
-    </div>
   </nav>
 </template>
 
@@ -159,41 +143,4 @@ export default {
   50% { transform: scale(1.2); }
 }
 
-/* ACCIONES */
-.topbar-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.action-btn {
-  width: 36px;
-  height: 36px;
-  border: 2px solid #e0e0e0;
-  background: white;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-  position: relative;
-}
-
-.action-btn:hover {
-  background: #f0f4f8;
-  border-color: #1e88e5;
-  transform: translateY(-1px);
-}
-
-.notification-dot {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  width: 8px;
-  height: 8px;
-  background: #ef5350;
-  border-radius: 50%;
-  border: 2px solid white;
-}
 </style>

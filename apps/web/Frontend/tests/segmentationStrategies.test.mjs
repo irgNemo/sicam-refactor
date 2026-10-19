@@ -30,6 +30,7 @@ const { segmentarMuestra } = await load('services/segmentationService.js');
 const { default: Panel } = await load('components/segmentation/SegmentationResultPanel.vue');
 const { default: Control } = await load('components/segmentation/SalivaSegmentationControl.vue');
 const { default: Main } = await load('components/MainContent.vue');
+const { default: Layers } = await load('components/segmentation/OverlayLayersCard.vue');
 const { patientDisplayName, patientInitials } = await load('domain/patientPresentation.js');
 const { useSegmentationRevision } = await load('composables/useSegmentationRevision.js');
 const { useSegmentationEditor } = await load('composables/useSegmentationEditor.js');
@@ -615,4 +616,59 @@ test('18I finishing a SALIVA drawing reserves its ID on the backend before addin
   assert.equal(calls[0].url, '/api/resultados-segmentacion/5/reserve-object-id/');
   assert.equal(editor.workingObjects.value.at(-1).id, 1001);
   assert.equal(context.reservingObjectId, false);
+});
+
+test('18Q layer controls preserve visibility events, colors and accessible labels', async () => {
+  const source = await readFile(new URL('../src/components/segmentation/OverlayLayersCard.vue', import.meta.url), 'utf8');
+  const ClientLayers = { ...Layers, setup: undefined, ssrRender: undefined,
+    render: compile(parse(source).descriptor.template.content) };
+  const labels = [
+    { label: 'membrana', displayName: 'Membranas', stroke: '#11aa22', visible: true },
+    { label: 'nucleo', displayName: 'Núcleos', stroke: '#2233bb', visible: true },
+    { label: 'micronucleo', displayName: 'Micronúcleos', stroke: '#dd1122', visible: true },
+  ];
+  const root = hostNode('root');
+  const calls = [];
+  const mount = () => renderer.render(h(ClientLayers, {
+    labels: labels.map(item => ({ ...item })),
+    onChangeVisibility: (label, visible) => calls.push([label, visible]),
+  }), root);
+  mount();
+  assert.equal(findAll(root, 'h3').length, 1);
+  assert.equal(findAll(root, 'input').length, 3);
+  for (const [index, label] of labels.entries()) {
+    const wrapper = findAll(root, 'label')[index];
+    assert.equal(findAll(wrapper, 'input')[0].props.type, 'checkbox');
+    assert.ok(findAll(wrapper, 'span').some(node => node.text === label.displayName));
+    assert.ok(findAll(wrapper, 'span').some(node => node.props.style?.color === label.stroke));
+    for (const visible of [false, true]) {
+      findAll(root, 'input')[index].props.onChange({ target: { checked: visible } });
+      assert.deepEqual(calls.at(-1), [label.label, visible]);
+      labels[index].visible = visible;
+      mount();
+      await nextTick();
+      assert.equal(findAll(root, 'input')[index].props.checked, visible);
+    }
+  }
+  renderer.render(h(ClientLayers, { labels: [] }), root);
+  assert.equal(findAll(root, 'input').length, 0);
+  renderer.render(null, root);
+});
+
+test('18Q has one layers card immediately after controls in the image column', async () => {
+  const source = await readFile(new URL('../src/components/MainContent.vue', import.meta.url), 'utf8');
+  const ast = parse(source).descriptor.template.ast;
+  const matches = [];
+  function visit(node, parent) {
+    if (node.tag === 'OverlayLayersCard') matches.push({ node, parent });
+    for (const child of node.children || []) visit(child, node);
+  }
+  visit(ast, null);
+  assert.equal(matches.length, 1);
+  const { node, parent } = matches[0];
+  assert.ok(parent.props.some(prop => prop.name === 'class' && prop.value?.content === 'image-container'));
+  const siblings = parent.children.filter(child => child.type === 1);
+  assert.equal(siblings[siblings.indexOf(node) - 1].tag, 'SegmentationImageControls');
+  assert.ok(node.props.some(prop => prop.name === 'bind' && prop.arg?.content === 'labels' && prop.exp?.content === 'overlayLabels'));
+  assert.ok(node.props.some(prop => prop.name === 'on' && prop.arg?.content === 'change-visibility' && prop.exp?.content === 'setOverlayLabelVisibility'));
 });

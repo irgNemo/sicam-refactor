@@ -225,6 +225,11 @@
                 @rotate="rotateImage"
                 @reset="resetImageView"
               />
+
+              <OverlayLayersCard
+                :labels="overlayLabels"
+                @change-visibility="setOverlayLabelVisibility"
+              />
             </div>
 
             <!-- DATOS -->
@@ -530,10 +535,6 @@
           </div>
         </div>
 
-        <OverlayLayersCard
-          :labels="overlayLabels"
-          @change-visibility="setOverlayLabelVisibility"
-        />
 
       </div>
     </div>

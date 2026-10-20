@@ -217,3 +217,12 @@ class AnalisisSerializer(serializers.ModelSerializer):
     class Meta:
         model = AnalisisPred
         fields = '__all__'
+
+    def validate(self, attrs):
+        paciente = attrs.get('id_paciente_fk', getattr(self.instance, 'id_paciente_fk', None))
+        caso = attrs.get('id_caso_fk', getattr(self.instance, 'id_caso_fk', None))
+        if paciente and caso and caso.paciente_id != paciente.pk:
+            raise serializers.ValidationError({
+                'id_caso_fk': 'El caso no pertenece al paciente seleccionado.',
+            })
+        return attrs

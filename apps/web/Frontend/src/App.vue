@@ -42,7 +42,7 @@
       @segmentation-result-selected="onSegmentationResultSelected"
     />
 
-    <RegistroView v-if="seccion === 'registro'" />
+    <RegistroView v-if="seccion === 'registro'" ref="registro" />
   </div>
 </template>
 
@@ -173,6 +173,7 @@ export default {
       if (!VALID_SECTIONS.includes(nextSection)) return;
 
       if (!this.confirmPendingDraftNavigation()) return;
+      if (this.seccion === "registro" && this.$refs.registro?.confirmLeave() === false) return;
 
       this.seccion = nextSection;
     },

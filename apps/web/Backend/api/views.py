@@ -245,6 +245,25 @@ class PacienteViewSet(viewsets.ModelViewSet):
 class CasoViewSet(viewsets.ModelViewSet):
     queryset = Caso.objects.all()
     serializer_class = CasoSerializer
+
+    @action(detail=False, methods=['post'], url_path='crear-con-analisis')
+    def crear_con_analisis(self, request):
+        """Create the registration case and its open analysis as one operation."""
+        with transaction.atomic():
+            caso_serializer = self.get_serializer(data=request.data)
+            caso_serializer.is_valid(raise_exception=True)
+            caso = caso_serializer.save()
+            analisis_serializer = AnalisisSerializer(data={
+                'id_paciente_fk': caso.paciente_id,
+                'id_caso_fk': caso.pk,
+                'estado': 0,
+            }, context=self.get_serializer_context())
+            analisis_serializer.is_valid(raise_exception=True)
+            analisis_serializer.save()
+        return Response({
+            'caso': caso_serializer.data,
+            'analisis': analisis_serializer.data,
+        }, status=status.HTTP_201_CREATED)
     
     @action(detail=True, methods=['get'])
     def analisis(self, request, pk=None):

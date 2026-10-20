@@ -5,7 +5,7 @@
     <header class="page-header">
       <h2>Registro de Datos</h2>
       <div class="header-actions">
-        <button class="btn-outline" @click="limpiarFormularioActivo">
+        <button class="btn-outline" :disabled="isBusy" @click="limpiarFormularioActivo">
           🗑️ Limpiar
         </button>
       </div>
@@ -16,21 +16,21 @@
       <button 
         class="tab-btn"
         :class="{ active: vistaActiva === 'paciente' }"
-        @click="vistaActiva = 'paciente'"
+        :disabled="isBusy" @click="requestTabChange('paciente')"
       >
         Nuevo Paciente
       </button>
       <button 
         class="tab-btn"
         :class="{ active: vistaActiva === 'caso' }"
-        @click="vistaActiva = 'caso'"
+        :disabled="isBusy" @click="requestTabChange('caso')"
       >
         Nuevo Caso
       </button>
       <button 
         class="tab-btn"
         :class="{ active: vistaActiva === 'imagenes' }"
-        @click="vistaActiva = 'imagenes'"
+        :disabled="isBusy" @click="requestTabChange('imagenes')"
       >
         Agregar Imágenes
       </button>
@@ -48,6 +48,7 @@
           
           <div class="card-body">
             <form @submit.prevent="crearPaciente">
+              <fieldset class="registration-fields" :disabled="isCreatingPatient" :aria-busy="isCreatingPatient">
               <div class="form-grid">
                 <div class="form-group">
                   <label>Nombre *</label>
@@ -109,9 +110,10 @@
 
               <div class="form-actions">
                 <button type="submit" class="btn-primary">
-                  ✓ Registrar Paciente
+                  {{ isCreatingPatient ? 'Registrando...' : '✓ Registrar Paciente' }}
                 </button>
               </div>
+              </fieldset>
             </form>
           </div>
         </div>
@@ -126,6 +128,7 @@
           
           <div class="card-body">
             <form @submit.prevent="crearCaso">
+              <fieldset class="registration-fields" :disabled="isCreatingCase" :aria-busy="isCreatingCase">
               <div class="form-group">
                 <label>Seleccionar Paciente *</label>
                 <select v-model="formCaso.paciente" required>
@@ -170,9 +173,10 @@
 
               <div class="form-actions">
                 <button type="submit" class="btn-primary">
-                  ✓ Crear Caso
+                  {{ isCreatingCase ? 'Creando...' : '✓ Crear Caso' }}
                 </button>
               </div>
+              </fieldset>
             </form>
           </div>
         </div>
@@ -187,6 +191,7 @@
           
           <div class="card-body">
             <form @submit.prevent="subirImagenes">
+              <fieldset class="registration-fields" :disabled="isUploading" :aria-busy="isUploading">
               <div class="form-group">
                 <label>Seleccionar Paciente *</label>
                 <select v-model="formImagenes.paciente" required @change="cargarCasosPaciente">
@@ -203,7 +208,7 @@
 
               <div class="form-group" v-if="formImagenes.paciente">
                 <label>Seleccionar Caso *</label>
-                <select v-model="formImagenes.caso" required @change="cargarAnalisisCaso">
+                <select v-model="formImagenes.caso" :disabled="isLoadingCases" required @change="cargarAnalisisCaso">
                   <option value="">-- Seleccione un caso --</option>
                   <option 
                     v-for="caso in casosDisponibles" 
@@ -215,9 +220,11 @@
                 </select>
               </div>
 
+              <p v-if="isLoadingCases" role="status">Cargando casos...</p>
+              <button v-if="casesLoadError" type="button" @click="cargarCasosPaciente">Reintentar carga de casos</button>
               <div class="form-group" v-if="formImagenes.caso">
                 <label>Seleccionar Análisis *</label>
-                <select v-model="formImagenes.analisis" required>
+                <select v-model="formImagenes.analisis" :disabled="isLoadingAnalyses" required @change="resetFilesForContext">
                   <option value="">-- Seleccione un análisis --</option>
                   <option 
                     v-for="analisis in analisisDisponibles" 
@@ -229,9 +236,11 @@
                 </select>
               </div>
 
+              <p v-if="isLoadingAnalyses" role="status">Cargando análisis...</p>
+              <button v-if="analysesLoadError" type="button" @click="cargarAnalisisCaso">Reintentar carga de análisis</button>
               <div class="form-group" v-if="formImagenes.analisis">
                 <label>Tipo de muestra *</label>
-                <select v-model="formImagenes.tipoMuestra" required>
+                <select v-model="formImagenes.tipoMuestra" required @change="resetFilesForContext">
                   <option
                     v-for="tipo in sampleTypeOptions"
                     :key="tipo.sampleType"
@@ -264,7 +273,8 @@
                     :key="index"
                     class="preview-item"
                   >
-                    <img :src="img.url" :alt="`Preview ${index}`" />
+                    <img v-if="!img.previewUnavailable" :src="img.url" :alt="`Preview ${index}`" @error="img.previewUnavailable = true" />
+                    <span v-else>Vista previa no disponible</span>
                     <button 
                       type="button" 
                       class="remove-btn"
@@ -277,15 +287,22 @@
                 </div>
               </div>
 
+              <ul v-if="imagenesPreview.length" class="upload-results" aria-live="polite">
+                <li v-for="(img, index) in imagenesPreview" :key="index">
+                  {{ img.archivo.name }} — {{ uploadStatusText(img.status) }}
+                  <span v-if="img.error">: {{ img.error }}</span>
+                </li>
+              </ul>
               <div class="form-actions">
                 <button 
                   type="submit" 
                   class="btn-primary"
-                  :disabled="imagenesPreview.length === 0"
+                  :disabled="isUploading || pendingUploads.length === 0 || !formImagenes.analisis"
                 >
-                  ⬆ Subir {{ imagenesPreview.length }} Imagen{{ imagenesPreview.length !== 1 ? 'es' : '' }} de {{ selectedSampleTypeDisplayName }}
+                  {{ isUploading ? 'Subiendo...' : `⬆ Subir/reintentar ${pendingUploads.length} imagen(es) de ${selectedSampleTypeDisplayName}` }}
                 </button>
               </div>
+              </fieldset>
             </form>
           </div>
         </div>
@@ -306,6 +323,7 @@
 <script>
 import { patientDisplayName } from "../domain/patientPresentation";
 import apiClient from '../services/apiClient';
+import { registrationErrorMessage } from '../services/registrationErrors';
 import {
   SAMPLE_TYPES,
   getSegmentationTypeConfig,
@@ -317,6 +335,20 @@ export default {
   data() {
     return {
       vistaActiva: 'paciente',
+      isCreatingPatient: false,
+      isCreatingCase: false,
+      isUploading: false,
+      isLoadingCases: false,
+      isLoadingAnalyses: false,
+      casesLoadError: false,
+      analysesLoadError: false,
+      casesGeneration: 0,
+      analysesGeneration: 0,
+      disposed: false,
+      notificationTimer: null,
+      newlyCreatedPatientId: null,
+      newlyCreatedCaseId: null,
+      newlyCreatedAnalysisId: null,
 
       // Formulario Paciente
       formPaciente: {
@@ -361,6 +393,17 @@ export default {
   },
 
   computed: {
+    isBusy() {
+      return this.isCreatingPatient || this.isCreatingCase || this.isUploading;
+    },
+    pendingUploads() {
+      return this.imagenesPreview.filter(item => ['PENDING', 'ERROR'].includes(item.status));
+    },
+    hasUnsavedWork() {
+      return this.isBusy || Object.values(this.formPaciente).some(value => String(value).trim())
+        || Boolean(this.formCaso.paciente || this.formCaso.titulo.trim() || this.formCaso.descripcion.trim()
+          || !this.formCaso.crear_analisis) || this.pendingUploads.length > 0;
+    },
     sampleTypeOptions() {
       return [SAMPLE_TYPES.SALIVA, SAMPLE_TYPES.BLOOD].map(sampleType => ({
         sampleType,
@@ -377,6 +420,16 @@ export default {
 
   mounted() {
     this.cargarPacientes();
+    window.addEventListener('beforeunload', this.handleBeforeUnload);
+  },
+
+  beforeUnmount() {
+    this.disposed = true;
+    this.casesGeneration++;
+    this.analysesGeneration++;
+    clearTimeout(this.notificationTimer);
+    window.removeEventListener('beforeunload', this.handleBeforeUnload);
+    this.clearFiles();
   },
 
   methods: {
@@ -384,7 +437,7 @@ export default {
     async cargarPacientes() {
       try {
         const response = await apiClient.get('/api/pacientes/');
-        this.pacientes = response.data;
+        if (!this.disposed) this.pacientes = response.data;
       } catch (error) {
         console.error('Error al cargar pacientes:', error);
         this.mostrarNotificacion('Error al cargar pacientes', 'error');
@@ -392,115 +445,174 @@ export default {
     },
 
     async cargarCasosPaciente() {
-      if (!this.formImagenes.paciente) return;
-      
+      if (this.isUploading) return;
+      const generation = ++this.casesGeneration;
+      ++this.analysesGeneration;
+      this.formImagenes.caso = '';
+      this.formImagenes.analisis = '';
+      this.casosDisponibles = [];
+      this.analisisDisponibles = [];
+      this.isLoadingAnalyses = false;
+      this.analysesLoadError = false;
+      this.casesLoadError = false;
+      this.resetFilesForContext();
+      const patientId = this.formImagenes.paciente;
+      this.isLoadingCases = Boolean(patientId);
+      if (!patientId) return;
       try {
-        const response = await apiClient.get(
-          `/api/pacientes/${this.formImagenes.paciente}/casos/`
-        );
-        this.casosDisponibles = response.data;
-        this.formImagenes.caso = '';
-        this.formImagenes.analisis = '';
-        this.analisisDisponibles = [];
-      } catch (error) {
-        console.error('Error al cargar casos:', error);
+        const response = await apiClient.get(`/api/pacientes/${patientId}/casos/`);
+        if (!this.disposed && generation === this.casesGeneration) this.casosDisponibles = response.data;
+      } catch {
+        if (!this.disposed && generation === this.casesGeneration) {
+          this.casesLoadError = true;
+          this.mostrarNotificacion('No fue posible cargar los casos. Puede reintentar.', 'error');
+        }
+      } finally {
+        if (!this.disposed && generation === this.casesGeneration) this.isLoadingCases = false;
       }
     },
 
     async cargarAnalisisCaso() {
-      if (!this.formImagenes.caso) return;
-      
+      if (this.isUploading) return;
+      const generation = ++this.analysesGeneration;
+      this.formImagenes.analisis = '';
+      this.analisisDisponibles = [];
+      this.analysesLoadError = false;
+      this.resetFilesForContext();
+      const caseId = this.formImagenes.caso;
+      this.isLoadingAnalyses = Boolean(caseId);
+      if (!caseId) return;
       try {
-        const response = await apiClient.get(
-          `/api/casos/${this.formImagenes.caso}/analisis/`
-        );
-        this.analisisDisponibles = response.data;
-        this.formImagenes.analisis = '';
-      } catch (error) {
-        console.error('Error al cargar análisis:', error);
+        const response = await apiClient.get(`/api/casos/${caseId}/analisis/`);
+        if (!this.disposed && generation === this.analysesGeneration) this.analisisDisponibles = response.data;
+      } catch {
+        if (!this.disposed && generation === this.analysesGeneration) {
+          this.analysesLoadError = true;
+          this.mostrarNotificacion('No fue posible cargar los análisis. Puede reintentar.', 'error');
+        }
+      } finally {
+        if (!this.disposed && generation === this.analysesGeneration) this.isLoadingAnalyses = false;
       }
     },
 
     async crearPaciente() {
+      if (this.isCreatingPatient) return;
+      this.isCreatingPatient = true;
       try {
-        await apiClient.post('/api/pacientes/', this.formPaciente);
-        this.mostrarNotificacion('Paciente registrado exitosamente', 'success');
+        const response = await apiClient.post('/api/pacientes/', { ...this.formPaciente });
+        this.newlyCreatedPatientId = response.data.id_paciente ?? null;
         this.limpiarFormPaciente();
-        this.cargarPacientes();
+        this.mostrarNotificacion('Paciente registrado exitosamente', 'success');
+        await this.cargarPacientes();
       } catch (error) {
-        console.error('Error al crear paciente:', error);
-        this.mostrarNotificacion('Error al registrar paciente', 'error');
-      }
+        this.mostrarNotificacion(registrationErrorMessage(error, 'Error al registrar paciente'), 'error');
+      } finally { this.isCreatingPatient = false; }
     },
 
     async crearCaso() {
+      if (this.isCreatingCase) return;
+      this.isCreatingCase = true;
+      const withAnalysis = this.formCaso.crear_analisis;
+      const payload = { paciente: this.formCaso.paciente, titulo: this.formCaso.titulo, descripcion: this.formCaso.descripcion };
       try {
-        const response = await apiClient.post('/api/casos/', {
-          paciente: this.formCaso.paciente,
-          titulo: this.formCaso.titulo,
-          descripcion: this.formCaso.descripcion
-        });
-
-        if (this.formCaso.crear_analisis) {
-          await apiClient.post('/api/analisis/', {
-            id_paciente_fk: this.formCaso.paciente,
-            id_caso_fk: response.data.id_caso,
-            estado: 0
-          });
-        }
-
+        const response = await apiClient.post(withAnalysis ? '/api/casos/crear-con-analisis/' : '/api/casos/', payload);
+        this.newlyCreatedCaseId = (withAnalysis ? response.data.caso : response.data).id_caso;
+        this.newlyCreatedAnalysisId = withAnalysis ? response.data.analisis.id_analisis : null;
         this.mostrarNotificacion('Caso creado exitosamente', 'success');
         this.limpiarFormCaso();
       } catch (error) {
-        console.error('Error al crear caso:', error);
-        this.mostrarNotificacion('Error al crear caso', 'error');
-      }
+        this.mostrarNotificacion(registrationErrorMessage(error, 'Error al crear caso'), 'error');
+      } finally { this.isCreatingCase = false; }
     },
 
     async subirImagenes() {
-      try {
-        const endpoint = this.formImagenes.tipoMuestra === SAMPLE_TYPES.BLOOD
-          ? '/api/muestras-sangre/'
-          : '/api/muestras/';
-        const promises = this.formImagenes.archivos.map(archivo => {
-          const formData = new FormData();
-          formData.append('imagen', archivo);
-          formData.append('analisis', this.formImagenes.analisis);
-          
-          return apiClient.post(endpoint, formData, {
-            headers: { 'Content-Type': 'multipart/form-data' }
-          });
-        });
-
-        await Promise.all(promises);
-        this.mostrarNotificacion(
-          `${this.formImagenes.archivos.length} imagen(es) subida(s) exitosamente`,
-          'success'
-        );
-        this.limpiarFormImagenes();
-      } catch (error) {
-        console.error('Error al subir imágenes:', error);
-        this.mostrarNotificacion('Error al subir imágenes', 'error');
+      if (this.isUploading || !this.pendingUploads.length) return;
+      if (!this.formImagenes.paciente || !this.formImagenes.caso || !this.formImagenes.analisis
+          || this.isLoadingCases || this.isLoadingAnalyses) {
+        this.mostrarNotificacion('Seleccione paciente, caso y análisis antes de subir.', 'error');
+        return;
       }
+      this.isUploading = true;
+      const analysisId = this.formImagenes.analisis;
+      const endpoint = this.formImagenes.tipoMuestra === SAMPLE_TYPES.BLOOD ? '/api/muestras-sangre/' : '/api/muestras/';
+      const batch = [...this.pendingUploads];
+      try {
+        for (const item of batch) {
+          if (this.disposed) break;
+          item.status = 'UPLOADING'; item.error = '';
+          try {
+            const formData = new FormData();
+            formData.append('imagen', item.archivo);
+            formData.append('analisis', analysisId);
+            const response = await apiClient.post(endpoint, formData, {
+              headers: { 'Content-Type': 'multipart/form-data' },
+            });
+            item.status = 'SUCCESS'; item.sampleId = response.data.id_muestra;
+          } catch (error) {
+            item.status = 'ERROR';
+            item.error = registrationErrorMessage(error, 'No se pudo confirmar la subida.');
+          }
+        }
+        if (!this.disposed) {
+          const failed = batch.filter(item => item.status === 'ERROR').length;
+          this.mostrarNotificacion(`${batch.filter(item => item.status === 'SUCCESS').length} subida(s); ${failed} con error.`, failed ? 'error' : 'success');
+        }
+      } finally { this.isUploading = false; }
+    },
+
+    clearFiles() {
+      const previous = this.imagenesPreview;
+      this.imagenesPreview = [];
+      this.formImagenes.archivos = [];
+      previous.forEach(item => URL.revokeObjectURL(item.url));
+      if (this.$refs.fileInput) this.$refs.fileInput.value = '';
+    },
+
+    resetFilesForContext() {
+      if (this.isUploading) return;
+      const hadPending = this.pendingUploads.length > 0;
+      this.clearFiles();
+      if (hadPending) this.mostrarNotificacion('La selección de archivos se reinició por cambio de contexto.', 'info');
     },
 
     onFileChange(event) {
-      const archivos = Array.from(event.target.files);
-      this.formImagenes.archivos = archivos;
-      
-      this.imagenesPreview = archivos.map(archivo => ({
-        url: URL.createObjectURL(archivo),
-        archivo
+      if (this.isUploading) return;
+      const files = Array.from(event.target.files || []);
+      this.clearFiles();
+      this.formImagenes.archivos = files;
+      this.imagenesPreview = files.map(archivo => ({
+        archivo, url: URL.createObjectURL(archivo), status: 'PENDING', error: '', previewUnavailable: false,
       }));
     },
 
     removerImagen(index) {
-      this.imagenesPreview.splice(index, 1);
+      if (this.isUploading) return;
+      const [removed] = this.imagenesPreview.splice(index, 1);
       this.formImagenes.archivos.splice(index, 1);
-      
-      if (this.$refs.fileInput && this.imagenesPreview.length === 0) {
-        this.$refs.fileInput.value = '';
+      if (removed) URL.revokeObjectURL(removed.url);
+      if (this.$refs.fileInput && !this.imagenesPreview.length) this.$refs.fileInput.value = '';
+    },
+
+    uploadStatusText(status) {
+      return { PENDING: 'Pendiente', UPLOADING: 'Subiendo...', SUCCESS: 'Subida', ERROR: 'Error' }[status] || status;
+    },
+
+    confirmLeave() {
+      if (this.isBusy) {
+        this.mostrarNotificacion('Espere a que termine la operación en curso.', 'info');
+        return false;
       }
+      return !this.hasUnsavedWork || window.confirm('Hay trabajo sin guardar en Registro. ¿Desea continuar?');
+    },
+
+    requestTabChange(tab) {
+      if (tab === this.vistaActiva || !['paciente', 'caso', 'imagenes'].includes(tab)) return;
+      if (this.confirmLeave()) this.vistaActiva = tab;
+    },
+
+    handleBeforeUnload(event) {
+      if (!this.hasUnsavedWork) return;
+      event.preventDefault(); event.returnValue = '';
     },
 
     estadoTexto(estado) {
@@ -509,16 +621,19 @@ export default {
     },
 
     mostrarNotificacion(mensaje, tipo = 'success') {
+      if (this.disposed) return;
       this.notificacion.mensaje = mensaje;
       this.notificacion.tipo = tipo;
       this.notificacion.mostrar = true;
       
-      setTimeout(() => {
+      clearTimeout(this.notificationTimer);
+      this.notificationTimer = setTimeout(() => {
         this.notificacion.mostrar = false;
       }, 4000);
     },
 
     limpiarFormularioActivo() {
+      if (this.isBusy) return;
       if (this.vistaActiva === 'paciente') {
         this.limpiarFormPaciente();
       } else if (this.vistaActiva === 'caso') {
@@ -549,6 +664,13 @@ export default {
     },
 
     limpiarFormImagenes() {
+      this.casesGeneration++;
+      this.analysesGeneration++;
+      this.isLoadingCases = false;
+      this.isLoadingAnalyses = false;
+      this.casesLoadError = false;
+      this.analysesLoadError = false;
+      this.clearFiles();
       this.formImagenes = {
         paciente: '',
         caso: '',
@@ -568,6 +690,9 @@ export default {
 </script>
 
 <style scoped>
+.registration-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
+.upload-results { overflow-wrap: anywhere; font-size: 13px; }
+.notification.info { background: #1565c0; }
 /* TABS */
 .tabs-container {
   display: flex;

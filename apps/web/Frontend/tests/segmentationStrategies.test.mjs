@@ -973,3 +973,32 @@ test('18Q-D first membrane updates working counts and visible layers without rel
   editor.undoRevisionEdit(); assert.equal(editor.workingSummary.value.counts_by_label.membrana, 0);
   editor.redoRevisionEdit(); assert.equal(editor.workingSummary.value.counts_by_label.membrana, 1);
 });
+
+
+test('18Q-D.1 contextual instructions follow DRAW / SELECT / VERTEX without changing selection', async () => {
+  const start = mainSource.indexOf('<div v-if="!isDrawTool" class="selected-object-header">');
+  const end = mainSource.indexOf('<div\n                  v-if="editorTool ===', start);
+  const root = hostNode('root');
+  const selected = { id: 105, label: 'membrana', geometry: { points: [[0,0],[1,0],[1,1]] } };
+  const state = reactive({ isDrawTool: false, editorTool: 'VERTEX', selectedObject: null,
+    isSpacePressed: false, selectedVertexIndex: null, selectedVertexHandles: [], vertexEditMode: 'MOVE',
+    canDeleteSelectedVertex: false, showObjectContext: true,
+    overlayLabelDisplayName: () => 'Membranas', provenanceDisplayName: () => 'Manual',
+    setVertexEditMode() {}, deleteSelectedVertex() {}, deleteSelectedObject() {},
+  });
+  renderer.render(h({ setup: () => state, render: compile(mainSource.slice(start, end)) }), root);
+  const text = node => node.type === '#comment' ? '' : node.text + node.children.map(text).join(' ');
+  assert.equal((text(root).match(/Seleccione una máscara para editar su contorno\./g) || []).length, 1);
+  assert.doesNotMatch(text(root), /Seleccione una máscara para editarla/);
+  state.selectedObject = selected;
+  state.editorTool = 'DRAW'; state.isDrawTool = true; await nextTick();
+  assert.doesNotMatch(text(root), /Objeto seleccionado|#105|Seleccione una máscara/);
+  for (const mode of ['SELECT', 'VERTEX']) {
+    state.editorTool = mode; state.isDrawTool = false; await nextTick();
+    assert.match(text(root), /Objeto seleccionado/);
+    assert.match(text(root), /#105/);
+    assert.deepEqual(state.selectedObject, selected);
+  }
+  renderer.render(null, root);
+  assert.match(mainSource, /v-if="isDrawTool"\s+class="drawing-panel"[\s\S]*?<h4>Máscara en construcción<\/h4>/);
+});

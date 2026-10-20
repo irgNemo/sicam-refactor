@@ -243,7 +243,7 @@
                 class="selected-object-panel"
                 :inert="segmentacionLoading || reservingObjectId || undefined"
               >
-                <div class="selected-object-header">
+                <div v-if="!isDrawTool" class="selected-object-header">
                   <h4>Objeto seleccionado</h4>
                   <span v-if="isSpacePressed && editorTool !== 'PAN'" class="editor-hint">
                     Pan temporal
@@ -253,7 +253,7 @@
                   </span>
                 </div>
 
-                <template v-if="isEditMode">
+                <template v-if="!isDrawTool">
                   <div v-if="selectedObject" class="selected-object-grid">
                     <span>Tipo</span>
                     <strong>{{ overlayLabelDisplayName(selectedObject.label) }}</strong>
@@ -282,16 +282,11 @@
                   </div>
 
                   <div v-else class="selected-object-empty">
-                    <strong>Ninguno</strong><br />Seleccione una máscara para editarla.
+                    <template v-if="editorTool === 'VERTEX'">Seleccione una máscara para editar su contorno.</template>
+                    <template v-else><strong>Ninguno</strong><br />Seleccione una máscara para editarla.</template>
                   </div>
                   <div
-                    v-if="editorTool === 'VERTEX' && !selectedObject"
-                    class="draft-status"
-                  >
-                    Seleccione una máscara para editar su contorno.
-                  </div>
-                  <div
-                    v-else-if="editorTool === 'VERTEX' && selectedObject"
+                    v-if="editorTool === 'VERTEX' && selectedObject"
                     class="draft-status"
                   >
                     {{ selectedVertexHandles.length }} handles visibles de

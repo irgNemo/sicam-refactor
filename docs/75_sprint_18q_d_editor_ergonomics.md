@@ -147,3 +147,31 @@ y eventos no sustituyen la revisión visual. Pendiente en desktop y laptop estre
 - `docs/75_sprint_18q_d_editor_ergonomics.md`
 
 **SPRINT 18Q-D = READY_FOR_VISUAL_REVIEW**
+
+## Pulido contextual 18Q-D.1
+
+En Editar contorno sin selección se muestra una sola instrucción:
+**Seleccione una máscara para editar su contorno.** Se elimina la duplicación
+con el mensaje genérico de selección.
+
+Durante Dibujar se ocultan el encabezado y los datos de Objeto seleccionado,
+mostrando directamente Máscara en construcción. El tipo activo sigue visible
+en la toolbar y todas las acciones de construcción permanecen. Al volver a
+Seleccionar o Editar contorno, el contexto del objeto reaparece sin modificar
+la selección ni los IDs.
+
+El cambio afecta únicamente condicionales y texto de `MainContent.vue`, una
+prueba contextual y este documento. No cambia dibujo, undo/redo, finalizar,
+cancelar, eliminar punto, guardar, validar, backend/API ni BORRADOR/effective.
+
+Validaciones con Node 24.17.0:
+
+- Segmentación/editor: **59 passed**, incluida una prueba de transición
+  DRAW → SELECT/VERTEX y de instrucción única sin selección.
+- Characterization: **22 passed**.
+- `npm run build`: **PASS**.
+- `git diff --check`: **PASS**.
+
+Revisión visual en navegador pendiente. Sin commit ni push.
+
+**SPRINT 18Q-D.1 = READY_FOR_VISUAL_REVIEW**

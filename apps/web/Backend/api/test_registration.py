@@ -185,3 +185,129 @@ class RegistrationTests(TestCase):
                             self.assertEqual(Paciente.objects.filter(pk=patient.pk).values().get(), before)
             response = self.client.patch(f'/api/pacientes/{patient.pk}/', {'telefono': '5550000000'}, format='json')
             self.assertEqual(response.status_code, 200, response.data)
+
+
+class PseudonymizedRegistrationTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.payload = dict(identity_mode='PSEUDONYMIZED', initials='ACL',
+                            external_id_namespace='test', external_patient_id='007',
+                            fecha_nacimiento='2000-01-01')
+
+    def create_patient(self, **overrides):
+        response = self.client.post('/api/pacientes/', {**self.payload, **overrides}, format='json')
+        self.assertEqual(response.status_code, 201, response.data)
+        return Paciente.objects.get(pk=response.data['id_paciente'])
+
+    def test_identified_default_required_fields_and_unique_identifier(self):
+        for payload in ([1, 2], 'not-an-object'):
+            self.assertEqual(self.client.post('/api/pacientes/', payload, format='json').status_code, 400)
+        data = dict(nombre='Synthetic', apellido='Registration', identificacion='TEST', fecha_nacimiento='2000-01-01')
+        for field in ('nombre', 'apellido', 'identificacion'):
+            for missing in (True, False):
+                with self.subTest(field=field, missing=missing):
+                    invalid = dict(data)
+                    if missing:
+                        invalid.pop(field)
+                    else:
+                        invalid[field] = ''
+                    response = self.client.post('/api/pacientes/', invalid, format='json')
+                    self.assertEqual(response.status_code, 400, response.data)
+                    self.assertIn(field, response.data)
+        self.assertEqual(Paciente.objects.count(), 0)
+        response = self.client.post('/api/pacientes/', data, format='json')
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data['identity_mode'], 'IDENTIFIED')
+        self.assertEqual(response.data['identificacion'], 'TEST')
+        self.assertEqual(self.client.post('/api/pacientes/', data, format='json').status_code, 400)
+        url = f"/api/pacientes/{response.data['id_paciente']}/"
+        self.assertEqual(self.client.put(url, {k:v for k,v in data.items() if k != 'identificacion'}, format='json').status_code, 400)
+        for field in ('nombre', 'apellido', 'identificacion'):
+            self.assertEqual(self.client.patch(url, {field: ''}, format='json').status_code, 400)
+        self.assertEqual(self.client.patch(url, {'telefono': '5550000000'}, format='json').status_code, 200)
+
+    def test_generated_identifier_exact_imagej_formula_and_no_fictitious_data(self):
+        from api.services.patient_identity import pseudonymized_identification
+        patient = self.create_patient()
+        self.assertEqual(patient.identificacion, 'ext:e8c598b817db5cd4a9c49cc752763a9e')
+        self.assertEqual(patient.identificacion, pseudonymized_identification('test', '007'))
+        self.assertEqual(pseudonymized_identification('test', '007'), pseudonymized_identification('test', '007'))
+        self.assertEqual((patient.nombre, patient.apellido, patient.email, patient.telefono), ('', '', None, None))
+        other = self.create_patient(external_id_namespace='another', identificacion='client-must-not-control-this')
+        self.assertNotEqual(patient.identificacion, other.identificacion)
+        self.assertEqual(other.identificacion, pseudonymized_identification('another', '007'))
+
+    def test_duplicate_authority_is_field_error_and_other_namespace_is_allowed(self):
+        self.create_patient()
+        response = self.client.post('/api/pacientes/', self.payload, format='json')
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertIn('Ya existe un paciente con este ID', str(response.data['external_patient_id']))
+        self.create_patient(external_id_namespace='another')
+        self.assertEqual(Paciente.objects.count(), 2)
+
+    def test_missing_empty_forbidden_fields_and_future_birthdate(self):
+        for field in ('initials', 'external_id_namespace', 'external_patient_id', 'fecha_nacimiento'):
+            for missing in (True, False):
+                with self.subTest(field=field, missing=missing):
+                    payload = dict(self.payload)
+                    if missing:
+                        payload.pop(field)
+                    else:
+                        payload[field] = ' '
+                    response = self.client.post('/api/pacientes/', payload, format='json')
+                    self.assertEqual(response.status_code, 400, response.data)
+                    self.assertIn(field, response.data)
+        for field in ('nombre', 'apellido'):
+            response = self.client.post('/api/pacientes/', {**self.payload, field: 'Not allowed'}, format='json')
+            self.assertEqual(response.status_code, 400)
+            self.assertIn(field, response.data)
+        response = self.client.post('/api/pacientes/', {
+            **self.payload, 'fecha_nacimiento': str(timezone.localdate() + timedelta(days=1)),
+        }, format='json')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('fecha_nacimiento', response.data)
+        self.assertEqual(Paciente.objects.count(), 0)
+
+    def test_trim_preserves_case_and_leading_zeroes(self):
+        from api.services.patient_identity import pseudonymized_identification
+        patient = self.create_patient(initials=' aCl ', external_id_namespace=' Hospital ', external_patient_id=' 0007 ')
+        self.assertEqual((patient.initials, patient.external_id_namespace, patient.external_patient_id), ('aCl', 'Hospital', '0007'))
+        self.assertEqual(patient.identificacion, pseudonymized_identification('Hospital', '0007'))
+
+    def test_put_patch_authority_keeps_generated_identifier_coherent(self):
+        from api.services.patient_identity import pseudonymized_identification
+        patient = self.create_patient()
+        url = f'/api/pacientes/{patient.pk}/'
+        for method, payload, namespace, external_id in (
+            ('patch', {'external_patient_id': '008'}, 'test', '008'),
+            ('patch', {'external_id_namespace': 'new'}, 'new', '008'),
+            ('put', {**self.payload, 'external_id_namespace': 'final', 'external_patient_id': '009'}, 'final', '009'),
+        ):
+            response = getattr(self.client, method)(url, payload, format='json')
+            self.assertEqual(response.status_code, 200, response.data)
+            patient.refresh_from_db()
+            self.assertEqual(patient.identificacion, pseudonymized_identification(namespace, external_id))
+        self.create_patient(external_id_namespace='taken', external_patient_id='009')
+        for payload in ({'external_id_namespace': 'taken'}, {'external_patient_id': ''}, {'initials': ''}, {'nombre': 'Not allowed'}):
+            before = Paciente.objects.filter(pk=patient.pk).values().get()
+            response = self.client.patch(url, payload, format='json')
+            self.assertEqual(response.status_code, 400, response.data)
+            self.assertEqual(Paciente.objects.filter(pk=patient.pk).values().get(), before)
+
+    def test_unrelated_patch_preserves_legacy_identifier_and_cannot_override_it(self):
+        patient = Paciente.objects.create(**self.payload, identificacion='legacy-preserved')
+        url = f'/api/pacientes/{patient.pk}/'
+        response = self.client.patch(url, {'initials': 'EDIT', 'identificacion': 'tampered'}, format='json')
+        self.assertEqual(response.status_code, 200, response.data)
+        patient.refresh_from_db()
+        self.assertEqual(patient.identificacion, 'legacy-preserved')
+        self.assertEqual(patient.initials, 'EDIT')
+
+    def test_generated_identifier_collision_rejected_without_writing(self):
+        from api.services.patient_identity import pseudonymized_identification
+        Paciente.objects.create(nombre='Synthetic', apellido='Collision', fecha_nacimiento='2000-01-01',
+                                identificacion=pseudonymized_identification('test', '007'))
+        response = self.client.post('/api/pacientes/', self.payload, format='json')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('external_patient_id', response.data)
+        self.assertEqual(Paciente.objects.count(), 1)

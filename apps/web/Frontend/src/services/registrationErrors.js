@@ -4,8 +4,8 @@ const labels = {
   fecha_nacimiento: 'Fecha de nacimiento', email: 'Email', telefono: 'Teléfono',
   paciente: 'Paciente', titulo: 'Título', descripcion: 'Descripción',
   id_paciente_fk: 'Paciente', id_caso_fk: 'Caso', analisis: 'Análisis',
-  imagen: 'Imagen', identity_mode: 'Identidad', initials: 'Iniciales',
-  external_patient_id: 'ID externo', external_id_namespace: 'Namespace',
+  imagen: 'Imagen', identity_mode: 'Tipo de registro', initials: 'Iniciales',
+  external_patient_id: 'ID hospitalario', external_id_namespace: 'Origen / institución',
   non_field_errors: 'Validación',
 };
 

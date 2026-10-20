@@ -376,3 +376,29 @@ class ImageJImportTests(TestCase):
         result=ResultadoSegmentacion.objects.create(muestra=sample,respuesta_json={},resultado_normalizado={'objects':[]})
         self.assertEqual(result.base_origin,'AUTOMATIC')
         self.assertEqual(resolve_effective_segmentation(result)['fuente'],'AUTOMATICO')
+
+    def test_registration_uses_same_identity_helper_and_import_reuses_patient(self):
+        from api.services.patient_identity import pseudonymized_identification
+        from api.services.imagej import importer
+        from api import serializers as api_serializers
+        self.assertIs(importer.pseudonymized_identification, pseudonymized_identification)
+        self.assertIs(api_serializers.pseudonymized_identification, pseudonymized_identification)
+        prospective, _, _ = importer.resolve_domain(read_patients(self.excel)['acl'][0], 'test')
+        self.assertEqual(prospective.identificacion, 'ext:e8c598b817db5cd4a9c49cc752763a9e')
+        self.assertEqual(Paciente.objects.count(), 0)
+        response = self.client.post('/api/pacientes/', {
+            'identity_mode': 'PSEUDONYMIZED', 'initials': 'ACL',
+            'external_id_namespace': 'test', 'external_patient_id': '007',
+            'fecha_nacimiento': '2000-01-01',
+        }, format='json')
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data['identificacion'], 'ext:e8c598b817db5cd4a9c49cc752763a9e')
+        before = Paciente.objects.values().get()
+        record = self.imported()
+        self.assertEqual(record.paciente_id, response.data['id_paciente'])
+        self.assertEqual(Paciente.objects.values().get(), before)
+        self.assertEqual(record.resultado.base_origin, 'MANUAL')
+        again = self.run_import()
+        self.assertEqual(again['errors'], 0, again)
+        self.assertEqual(Paciente.objects.count(), 1)
+        self.assertEqual(ImageJImportRecord.objects.count(), 1)

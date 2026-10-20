@@ -1,6 +1,9 @@
+from collections.abc import Mapping
+
 from rest_framework import serializers
 from django.core.exceptions import ValidationError as ModelValidationError
 from django.utils import timezone
+from .services.patient_identity import pseudonymized_identification
 from .segmentation_strategies import SalivaSegmentationStrategy
 from .models import (
     AnalisisPred,
@@ -24,6 +27,17 @@ class PacienteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Paciente
         fields = '__all__'
+        extra_kwargs = {'identificacion': {'required': False}}
+
+    def to_internal_value(self, data):
+        if not isinstance(data, Mapping):
+            return super().to_internal_value(data)
+        mode = data.get('identity_mode', getattr(self.instance, 'identity_mode', Paciente.IDENTIFIED))
+        if mode == Paciente.PSEUDONYMIZED:
+            # A client cannot supply/override the internally derived identifier.
+            data = data.copy()
+            data.pop('identificacion', None)
+        return super().to_internal_value(data)
 
     def validate_fecha_nacimiento(self, value):
         if value > timezone.localdate():
@@ -37,6 +51,22 @@ class PacienteSerializer(serializers.ModelSerializer):
                 setattr(patient, field.attname, getattr(self.instance, field.attname))
         for key, value in attrs.items():
             setattr(patient, key, value)
+        errors = {}
+        if patient.identity_mode == Paciente.IDENTIFIED:
+            if not self.partial and 'identificacion' not in attrs:
+                errors['identificacion'] = 'Este campo es obligatorio.'
+            for field in ('nombre', 'apellido', 'identificacion'):
+                if not getattr(patient, field, '').strip():
+                    errors[field] = 'Este campo es obligatorio.'
+        elif patient.identity_mode == Paciente.PSEUDONYMIZED:
+            for field in ('initials', 'external_id_namespace', 'external_patient_id'):
+                if not getattr(patient, field, '').strip():
+                    errors[field] = 'Este campo es obligatorio.'
+            for field in ('nombre', 'apellido'):
+                if getattr(patient, field):
+                    errors[field] = 'Debe estar vacío para un paciente pseudonimizado.'
+        if errors:
+            raise serializers.ValidationError(errors)
         try:
             patient.clean()
         except ModelValidationError as exc:
@@ -47,7 +77,25 @@ class PacienteSerializer(serializers.ModelSerializer):
             if self.instance:
                 existing = existing.exclude(pk=self.instance.pk)
             if existing.exists():
-                raise serializers.ValidationError('La identidad externa ya existe.')
+                raise serializers.ValidationError({
+                    'external_patient_id': 'Ya existe un paciente con este ID en el origen seleccionado.',
+                })
+        if patient.identity_mode == Paciente.PSEUDONYMIZED:
+            changed_authority = not self.instance or (
+                self.instance.identity_mode != patient.identity_mode
+                or self.instance.external_id_namespace != namespace
+                or self.instance.external_patient_id != external_id
+            )
+            if changed_authority:
+                identification = pseudonymized_identification(namespace, external_id)
+                collision = Paciente.objects.filter(identificacion=identification)
+                if self.instance:
+                    collision = collision.exclude(pk=self.instance.pk)
+                if collision.exists():
+                    raise serializers.ValidationError({
+                        'external_patient_id': 'La identidad indicada entra en conflicto con un paciente existente.',
+                    })
+                attrs['identificacion'] = identification
         return attrs
 
 class CasoSerializer(serializers.ModelSerializer):

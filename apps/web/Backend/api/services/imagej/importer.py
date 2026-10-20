@@ -10,6 +10,7 @@ from django.core.files import File
 from django.db import IntegrityError, OperationalError, transaction
 
 from api.models import AnalisisPred, Caso, ImageJImportRecord, MuestraSaliva, Paciente, ResultadoSegmentacion
+from api.services.patient_identity import pseudonymized_identification
 from .contracts import (CONTRACT_VERSION, CONVERTER_VERSION, ImportProblem,
                         import_keys, patient_key, sha256_file, sha256_path)
 from .geometry import convert_pair
@@ -81,7 +82,7 @@ def resolve_domain(row, namespace, *, lock=False):
         patient = Paciente(identity_mode=Paciente.PSEUDONYMIZED, external_id_namespace=namespace,
                            external_patient_id=row.external_id, initials=row.initials,
                            fecha_nacimiento=row.birth_date,
-                           identificacion='ext:' + uuid.uuid5(uuid.NAMESPACE_URL, repr((namespace, row.external_id))).hex)
+                           identificacion=pseudonymized_identification(namespace, row.external_id))
         try:
             patient.full_clean()
         except ValidationError:

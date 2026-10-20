@@ -21,14 +21,31 @@
           <fieldset class="registration-fields" :disabled="isCreatingPatient" :aria-busy="isCreatingPatient">
             <legend class="sr-only">Datos del paciente</legend>
             <div class="card-body">
+              <fieldset class="sample-types identity-types">
+                <legend>Tipo de registro</legend>
+                <div class="sample-type-options">
+                  <label v-for="mode in [{ value: 'IDENTIFIED', label: 'Identificado' }, { value: 'PSEUDONYMIZED', label: 'Pseudonimizado' }]"
+                    :key="mode.value" :for="`patient-mode-${mode.value}`" :class="{ selected: patientIdentityMode === mode.value }">
+                    <input :id="`patient-mode-${mode.value}`" type="radio" name="patient-mode" :value="mode.value"
+                      :checked="patientIdentityMode === mode.value" @change="requestPatientMode(mode.value, $event)" />{{ mode.label }}
+                  </label>
+                </div>
+              </fieldset>
               <div class="form-grid">
-                <div class="form-group">
+                <div v-if="patientIdentityMode === 'IDENTIFIED'" class="form-group">
                   <label for="patient-identificacion">Identificación *</label>
                   <input id="patient-identificacion" v-model="formPaciente.identificacion" type="text" required
                     placeholder="ID o cédula"
                     :aria-invalid="Boolean(patientErrors.identificacion)"
                     :aria-describedby="patientErrors.identificacion ? 'patient-identificacion-error' : undefined" />
                   <p v-if="patientErrors.identificacion" id="patient-identificacion-error" class="field-error">{{ patientErrors.identificacion }}</p>
+                </div>
+                <div v-if="patientIdentityMode === 'PSEUDONYMIZED'" class="form-group">
+                  <label for="patient-external_patient_id">ID hospitalario *</label>
+                  <input id="patient-external_patient_id" v-model="formPaciente.external_patient_id" type="text" required
+                    :aria-invalid="Boolean(patientErrors.external_patient_id)"
+                    :aria-describedby="patientErrors.external_patient_id ? 'patient-external_patient_id-error' : undefined" />
+                  <p v-if="patientErrors.external_patient_id" id="patient-external_patient_id-error" class="field-error">{{ patientErrors.external_patient_id }}</p>
                 </div>
                 <div class="form-group">
                   <label for="patient-fecha_nacimiento">Fecha de nacimiento *</label>
@@ -39,7 +56,7 @@
                     :aria-describedby="patientErrors.fecha_nacimiento ? 'patient-fecha_nacimiento-error' : undefined" />
                   <p v-if="patientErrors.fecha_nacimiento" id="patient-fecha_nacimiento-error" class="field-error">{{ patientErrors.fecha_nacimiento }}</p>
                 </div>
-                <div class="form-group">
+                <div v-if="patientIdentityMode === 'IDENTIFIED'" class="form-group">
                   <label for="patient-nombre">Nombre *</label>
                   <input id="patient-nombre" v-model="formPaciente.nombre" type="text" required
                     placeholder="Nombre"
@@ -47,7 +64,7 @@
                     :aria-describedby="patientErrors.nombre ? 'patient-nombre-error' : undefined" />
                   <p v-if="patientErrors.nombre" id="patient-nombre-error" class="field-error">{{ patientErrors.nombre }}</p>
                 </div>
-                <div class="form-group">
+                <div v-if="patientIdentityMode === 'IDENTIFIED'" class="form-group">
                   <label for="patient-apellido">Apellido *</label>
                   <input id="patient-apellido" v-model="formPaciente.apellido" type="text" required
                     placeholder="Apellido"
@@ -55,7 +72,7 @@
                     :aria-describedby="patientErrors.apellido ? 'patient-apellido-error' : undefined" />
                   <p v-if="patientErrors.apellido" id="patient-apellido-error" class="field-error">{{ patientErrors.apellido }}</p>
                 </div>
-                <div class="form-group">
+                <div v-if="patientIdentityMode === 'IDENTIFIED'" class="form-group">
                   <label for="patient-email">Email</label>
                   <input id="patient-email" v-model="formPaciente.email" type="email"
                     placeholder="correo@ejemplo.com"
@@ -63,13 +80,28 @@
                     :aria-describedby="patientErrors.email ? 'patient-email-error' : undefined" />
                   <p v-if="patientErrors.email" id="patient-email-error" class="field-error">{{ patientErrors.email }}</p>
                 </div>
-                <div class="form-group">
+                <div v-if="patientIdentityMode === 'IDENTIFIED'" class="form-group">
                   <label for="patient-telefono">Teléfono</label>
                   <input id="patient-telefono" v-model="formPaciente.telefono" type="tel"
                     placeholder="Teléfono"
                     :aria-invalid="Boolean(patientErrors.telefono)"
                     :aria-describedby="patientErrors.telefono ? 'patient-telefono-error' : undefined" />
                   <p v-if="patientErrors.telefono" id="patient-telefono-error" class="field-error">{{ patientErrors.telefono }}</p>
+                </div>
+                <div v-if="patientIdentityMode === 'PSEUDONYMIZED'" class="form-group">
+                  <label for="patient-initials">Iniciales *</label>
+                  <input id="patient-initials" v-model="formPaciente.initials" type="text" required
+                    :aria-invalid="Boolean(patientErrors.initials)"
+                    :aria-describedby="patientErrors.initials ? 'patient-initials-error' : undefined" />
+                  <p v-if="patientErrors.initials" id="patient-initials-error" class="field-error">{{ patientErrors.initials }}</p>
+                </div>
+                <div v-if="patientIdentityMode === 'PSEUDONYMIZED'" class="form-group">
+                  <label for="patient-external_id_namespace">Origen / institución *</label>
+                  <input id="patient-external_id_namespace" v-model="formPaciente.external_id_namespace" type="text" required
+                    :aria-invalid="Boolean(patientErrors.external_id_namespace)"
+                    :aria-describedby="patientErrors.external_id_namespace ? 'patient-external_id_namespace-error' : undefined" />
+                  <p v-if="patientErrors.external_id_namespace" id="patient-external_id_namespace-error" class="field-error">{{ patientErrors.external_id_namespace }}</p>
+                  <p class="help-text">Identificador del sistema o institución de origen.</p>
                 </div>
               </div>
               <p v-if="patientErrors.non_field_errors || patientErrors.identity_mode" class="field-error" role="alert">
@@ -96,7 +128,7 @@
                   :aria-invalid="Boolean(caseErrors.paciente || caseErrors.id_paciente_fk)"
                   :aria-describedby="caseErrors.paciente || caseErrors.id_paciente_fk ? 'case-patient-error' : undefined">
                   <option value="">{{ isLoadingPatients ? 'Cargando pacientes...' : 'Seleccione un paciente' }}</option>
-                  <option v-for="patient in pacientes" :key="patient.id_paciente" :value="patient.id_paciente">{{ patientDisplayName(patient) }} — {{ patient.identificacion }}</option>
+                  <option v-for="patient in pacientes" :key="patient.id_paciente" :value="patient.id_paciente">{{ patientRegistrationLabel(patient) }}</option>
                 </select>
                 <p v-if="isLoadingPatients" class="help-text" role="status">Cargando pacientes...</p>
                 <p v-else-if="!pacientes.length" class="help-text">No hay pacientes disponibles.</p>
@@ -144,7 +176,7 @@
                     <label for="upload-patient">Paciente *</label>
                     <select id="upload-patient" v-model="formImagenes.paciente" required :disabled="isLoadingPatients" @change="cargarCasosPaciente">
                       <option value="">{{ isLoadingPatients ? 'Cargando pacientes...' : 'Seleccione un paciente' }}</option>
-                      <option v-for="patient in pacientes" :key="patient.id_paciente" :value="patient.id_paciente">{{ patientDisplayName(patient) }}</option>
+                      <option v-for="patient in pacientes" :key="patient.id_paciente" :value="patient.id_paciente">{{ patientRegistrationLabel(patient) }}</option>
                     </select>
                     <p v-if="isLoadingPatients" class="help-text" role="status">Cargando pacientes...</p>
                     <p v-else-if="!pacientes.length" class="help-text">No hay pacientes disponibles.</p>
@@ -186,7 +218,7 @@
                 </div>
               </fieldset>
               <dl v-if="formImagenes.paciente || formImagenes.caso || formImagenes.analisis" class="upload-context" aria-label="Destino de las imágenes">
-                <div v-if="formImagenes.paciente"><dt>Paciente</dt><dd>{{ uploadPatient ? patientDisplayName(uploadPatient) : '#' + formImagenes.paciente }}</dd></div>
+                <div v-if="formImagenes.paciente"><dt>Paciente</dt><dd>{{ uploadPatient ? patientRegistrationLabel(uploadPatient) : '#' + formImagenes.paciente }}</dd></div>
                 <div v-if="formImagenes.caso"><dt>Caso</dt><dd>{{ uploadCase ? uploadCase.titulo : '#' + formImagenes.caso }}</dd></div>
                 <div v-if="formImagenes.analisis"><dt>Análisis</dt><dd>#{{ formImagenes.analisis }}</dd></div>
                 <div v-if="uploadAnalysis"><dt>Estado</dt><dd>{{ estadoTexto(uploadAnalysis.estado) }}</dd></div>
@@ -240,7 +272,7 @@
 </template>
 
 <script>
-import { patientDisplayName } from "../domain/patientPresentation";
+import { patientRegistrationLabel } from "../domain/patientPresentation";
 import apiClient from '../services/apiClient';
 import { registrationErrorMessage, registrationFieldErrors } from '../services/registrationErrors';
 import {
@@ -254,6 +286,8 @@ export default {
   data() {
     return {
       vistaActiva: 'paciente',
+      patientIdentityMode: 'IDENTIFIED',
+      patientIdentityBaseline: 'IDENTIFIED',
       patientErrors: {},
       caseErrors: {},
       isLoadingPatients: false,
@@ -280,7 +314,10 @@ export default {
         identificacion: '',
         fecha_nacimiento: '',
         email: '',
-        telefono: ''
+        telefono: '',
+        initials: '',
+        external_id_namespace: '',
+        external_patient_id: ''
       },
 
       // Formulario Caso
@@ -345,7 +382,7 @@ export default {
       return this.imagenesPreview.filter(item => ['PENDING', 'ERROR'].includes(item.status));
     },
     hasUnsavedWork() {
-      return this.isBusy || Object.values(this.formPaciente).some(value => String(value).trim())
+      return this.isBusy || this.patientIdentityMode !== this.patientIdentityBaseline || Object.values(this.formPaciente).some(value => String(value).trim())
         || Boolean(this.formCaso.paciente || this.formCaso.titulo.trim() || this.formCaso.descripcion.trim()
           || !this.formCaso.crear_analisis) || this.pendingUploads.length > 0;
     },
@@ -378,7 +415,37 @@ export default {
   },
 
   methods: {
-    patientDisplayName,
+    patientRegistrationLabel,
+    requestPatientMode(mode, event) {
+      const resetRadio = () => {
+        if (event?.target?.form) {
+          for (const input of event.target.form.querySelectorAll('input[name="patient-mode"]')) {
+            input.checked = input.value === this.patientIdentityMode;
+          }
+        }
+      };
+      if (this.isCreatingPatient || !['IDENTIFIED', 'PSEUDONYMIZED'].includes(mode)
+          || mode === this.patientIdentityMode) { resetRadio(); return; }
+      const identified = ['nombre', 'apellido', 'identificacion', 'email', 'telefono'];
+      const pseudonymized = ['initials', 'external_id_namespace', 'external_patient_id'];
+      const previousFields = this.patientIdentityMode === 'IDENTIFIED' ? identified : pseudonymized;
+      if (previousFields.some(field => String(this.formPaciente[field] || '').trim())
+          && !window.confirm('Al cambiar el tipo de registro se limpiarán los campos exclusivos de la modalidad actual. ¿Desea cambiar?')) {
+        resetRadio();
+        return;
+      }
+      for (const field of [...identified, ...pseudonymized]) this.formPaciente[field] = '';
+      this.patientIdentityMode = mode;
+      this.patientErrors = {};
+    },
+    patientPayload() {
+      const fields = this.patientIdentityMode === 'PSEUDONYMIZED'
+        ? ['initials', 'external_id_namespace', 'external_patient_id', 'fecha_nacimiento']
+        : ['nombre', 'apellido', 'identificacion', 'fecha_nacimiento', 'email', 'telefono'];
+      const payload = Object.fromEntries(fields.map(field => [field, this.formPaciente[field]]));
+      if (this.patientIdentityMode === 'PSEUDONYMIZED') payload.identity_mode = 'PSEUDONYMIZED';
+      return payload;
+    },
     currentLocalDate() {
       const now = new Date();
       return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
@@ -459,7 +526,7 @@ export default {
       if (!this.validateBirthDate()) return;
       this.isCreatingPatient = true;
       try {
-        const response = await apiClient.post('/api/pacientes/', { ...this.formPaciente });
+        const response = await apiClient.post('/api/pacientes/', this.patientPayload());
         this.newlyCreatedPatientId = response.data.id_paciente ?? null;
         this.limpiarFormPaciente();
         this.mostrarNotificacion('Paciente registrado exitosamente', 'success');
@@ -651,13 +718,17 @@ export default {
 
     limpiarFormPaciente() {
       this.patientErrors = {};
+      this.patientIdentityBaseline = this.patientIdentityMode;
       this.formPaciente = {
         nombre: '',
         apellido: '',
         identificacion: '',
         fecha_nacimiento: '',
         email: '',
-        telefono: ''
+        telefono: '',
+        initials: '',
+        external_id_namespace: '',
+        external_patient_id: ''
       };
     },
 
@@ -739,6 +810,7 @@ button:disabled { opacity: .6; cursor: not-allowed; }
 .context-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 .retry-btn { align-self: flex-start; text-align: left; }
 .sample-types { margin: 0; padding: 0; border: 0; }
+.identity-types { margin-bottom: 16px; }
 .sample-types legend { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
 .sample-type-options { display: flex; flex-wrap: wrap; gap: 8px; }
 .sample-type-options label { display: flex; align-items: center; gap: 8px; border: 2px solid #d9e2ec; border-radius: 8px; padding: 10px 16px; font-size: 14px; cursor: pointer; }

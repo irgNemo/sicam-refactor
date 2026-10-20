@@ -437,3 +437,113 @@ test('18R-D birthdate max uses local date; yesterday/today accepted, tomorrow bl
   assert.match(c.patientErrors.fecha_nacimiento, /no puede ser futura/);
   assert.equal(c.isCreatingPatient, false);
 });
+
+const pseudoFields = { initials: 'ACL', external_id_namespace: 'test', external_patient_id: '007', fecha_nacimiento: '2000-01-01' };
+
+test('18R-E accessible mode selector defaults to identified and displays only relevant fields in order', async () => {
+  const c = context();
+  assert.equal(c.patientIdentityMode, 'IDENTIFIED'); assert.equal(c.hasUnsavedWork, false);
+  const identified = await render({});
+  assert.match(element(identified, 'input', 'patient-mode-IDENTIFIED'), /checked/);
+  for (const field of ['initials', 'external_patient_id', 'external_id_namespace']) assert.equal(element(identified, 'input', `patient-${field}`), '');
+  c.requestPatientMode('PSEUDONYMIZED');
+  assert.equal(c.patientIdentityMode, 'PSEUDONYMIZED'); assert.equal(c.hasUnsavedWork, true);
+  const html = await render({ patientIdentityMode: c.patientIdentityMode });
+  assert.match(element(html, 'input', 'patient-mode-PSEUDONYMIZED'), /checked/);
+  assert.match(html, /<legend[^>]*>Tipo de registro/);
+  assert.match(html, /label for="patient-mode-PSEUDONYMIZED"/);
+  assert.match(source, /@change="requestPatientMode\(mode.value, \$event\)"/);
+  let previous = -1;
+  for (const field of ['external_patient_id', 'fecha_nacimiento', 'initials', 'external_id_namespace']) {
+    const input = element(html, 'input', `patient-${field}`);
+    assert.ok(input); assert.match(input, /required/);
+    assert.ok(html.indexOf(input) > previous); previous = html.indexOf(input);
+    assert.ok(html.includes(`label for="patient-${field}"`));
+  }
+  for (const field of ['nombre', 'apellido', 'email', 'telefono', 'identificacion']) assert.equal(element(html, 'input', `patient-${field}`), '');
+  c.requestPatientMode('IDENTIFIED'); assert.equal(c.patientIdentityMode, 'IDENTIFIED'); assert.equal(c.hasUnsavedWork, false);
+});
+
+test('18R-E mode change confirms exclusive data, cancellation restores radios, confirmation retains common date', t => {
+  let accept = false, confirmations = 0;
+  mockWindow(t, { confirm: () => { confirmations++; return accept; } });
+  const c = context(); Object.assign(c.formPaciente, { nombre: 'Test', apellido: 'Fixture', identificacion: 'ADMIN', email: 'test@example.com', telefono: '555', fecha_nacimiento: '2000-01-01' });
+  const before = { ...c.formPaciente };
+  const radios = [{ value: 'IDENTIFIED', checked: false }, { value: 'PSEUDONYMIZED', checked: true }];
+  const event = { target: { form: { querySelectorAll: () => radios } } };
+  c.requestPatientMode('PSEUDONYMIZED', event);
+  assert.equal(confirmations, 1); assert.equal(c.patientIdentityMode, 'IDENTIFIED');
+  assert.deepEqual(c.formPaciente, before); assert.deepEqual(radios.map(r => r.checked), [true, false]);
+  accept = true; c.requestPatientMode('PSEUDONYMIZED');
+  for (const field of ['nombre', 'apellido', 'identificacion', 'email', 'telefono']) assert.equal(c.formPaciente[field], '');
+  assert.equal(c.formPaciente.fecha_nacimiento, '2000-01-01');
+  Object.assign(c.formPaciente, pseudoFields); accept = false;
+  c.requestPatientMode('IDENTIFIED'); assert.equal(c.patientIdentityMode, 'PSEUDONYMIZED'); assert.equal(c.formPaciente.initials, 'ACL');
+  accept = true; c.requestPatientMode('IDENTIFIED');
+  for (const field of ['initials', 'external_patient_id', 'external_id_namespace']) assert.equal(c.formPaciente[field], '');
+  assert.equal(c.formPaciente.fecha_nacimiento, '2000-01-01');
+});
+
+test('18R-E common date alone needs no confirmation; clear retains mode and resets dirty baseline', t => {
+  mockWindow(t, { confirm: () => { assert.fail('Only a common date must not trigger confirmation'); } });
+  const c = context(); c.formPaciente.fecha_nacimiento = '2000-01-01';
+  c.requestPatientMode('PSEUDONYMIZED'); assert.equal(c.formPaciente.fecha_nacimiento, '2000-01-01');
+  c.limpiarFormularioActivo(); assert.equal(c.patientIdentityMode, 'PSEUDONYMIZED'); assert.equal(c.hasUnsavedWork, false);
+  for (const field of ['initials', 'external_id_namespace', 'external_patient_id', 'fecha_nacimiento']) {
+    c.formPaciente[field] = 'test'; assert.equal(c.hasUnsavedWork, true); c.limpiarFormPaciente();
+  }
+  c.requestPatientMode('IDENTIFIED'); assert.equal(c.hasUnsavedWork, true);
+});
+
+test('18R-E pseudonymized minimal payload, double submit lock, refresh, mode retained and no autoadvance', async () => {
+  const c = context(); c.requestPatientMode('PSEUDONYMIZED'); Object.assign(c.formPaciente, pseudoFields);
+  // Even stale hidden values must not leak into the payload.
+  c.formPaciente.nombre = 'not-sent'; c.formPaciente.identificacion = 'not-sent'; c.formPaciente.email = 'not-sent';
+  const calls = deferred(), first = c.crearPaciente(); await turn(); await c.crearPaciente();
+  assert.equal(calls.length, 1);
+  assert.deepEqual(JSON.parse(calls[0].config.data), { ...pseudoFields, identity_mode: 'PSEUDONYMIZED' });
+  c.requestPatientMode('IDENTIFIED'); assert.equal(c.patientIdentityMode, 'PSEUDONYMIZED');
+  assert.match(await render({ patientIdentityMode: 'PSEUDONYMIZED', isCreatingPatient: true }), /Registrando\.\.\./);
+  calls[0].resolve({ id_paciente: 10 }); await turn();
+  calls[1].resolve([{ id_paciente: 10, identity_mode: 'PSEUDONYMIZED', ...pseudoFields }]); await first;
+  assert.equal(c.newlyCreatedPatientId, 10); assert.equal(c.pacientes[0].id_paciente, 10);
+  assert.equal(c.patientIdentityMode, 'PSEUDONYMIZED'); assert.equal(c.hasUnsavedWork, false);
+  assert.equal(c.isCreatingPatient, false); assert.equal(c.vistaActiva, 'paciente');
+  assert.ok(Object.values(c.formPaciente).every(value => value === ''));
+});
+
+test('18R-E pseudonymized errors attach to fields and duplicate authority survives failed submit', async () => {
+  const c = context(); c.requestPatientMode('PSEUDONYMIZED'); Object.assign(c.formPaciente, pseudoFields);
+  api.defaults.adapter = async () => { throw invalid({ initials: ['Iniciales requeridas'], external_id_namespace: ['Origen requerido'], external_patient_id: ['Ya existe un paciente con este ID en el origen seleccionado.'], fecha_nacimiento: ['La fecha de nacimiento no puede ser futura.'] }); };
+  await c.crearPaciente();
+  assert.equal(c.formPaciente.external_patient_id, '007'); assert.equal(c.patientIdentityMode, 'PSEUDONYMIZED');
+  assert.equal(c.isCreatingPatient, false); assert.equal(c.hasUnsavedWork, true);
+  const html = await render({ patientIdentityMode: 'PSEUDONYMIZED', patientErrors: c.patientErrors });
+  for (const field of ['initials', 'external_id_namespace', 'external_patient_id', 'fecha_nacimiento']) {
+    assert.match(element(html, 'input', `patient-${field}`), /aria-invalid="true"/);
+    assert.ok(html.includes(`aria-describedby="patient-${field}-error"`));
+    assert.ok(html.includes(c.patientErrors[field]));
+  }
+  assert.match(c.notices.at(-1).message, /ID hospitalario:/);
+  assert.match(c.notices.at(-1).message, /Origen \/ institución:/);
+});
+
+test('18R-E registration labels hide technical IDs in case, image selector and destination with safe fallbacks', async () => {
+  const c = context();
+  const patients = [
+    { id_paciente: 1, nombre: 'Test', apellido: 'Fixture', identificacion: 'ADMIN' },
+    { id_paciente: 2, identity_mode: 'PSEUDONYMIZED', ...pseudoFields, identificacion: 'TECHNICAL_SECRET' },
+  ];
+  assert.equal(c.patientRegistrationLabel(patients[0]), 'Test Fixture · ADMIN');
+  assert.equal(c.patientRegistrationLabel(patients[1]), 'ACL · test / 007');
+  assert.equal(c.patientRegistrationLabel({ identity_mode: 'PSEUDONYMIZED', identificacion: 'TECHNICAL_SECRET' }), 'Paciente pseudonimizado');
+  assert.equal(c.patientRegistrationLabel({ display_name: 'Legacy' }), 'Legacy');
+  assert.equal(c.patientRegistrationLabel(null), '');
+  for (const section of ['caso', 'imagenes']) {
+    const html = await render({ vistaActiva: section, pacientes: patients,
+      formImagenes: { ...View.data().formImagenes, paciente: 2 } });
+    assert.ok(html.includes('Test Fixture · ADMIN')); assert.ok(html.includes('ACL · test / 007'));
+    assert.doesNotMatch(html, /TECHNICAL_SECRET/);
+    if (section === 'imagenes') assert.ok(html.match(/<dl[\s\S]*?<\/dl>/)[0].includes('ACL · test / 007'));
+  }
+});

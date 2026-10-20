@@ -296,3 +296,144 @@ test('presentation: upload destination, real sample radios, statuses, preview fa
   assert.match(await render({ ...state, imagenesPreview: imagenesPreview.slice(2) }), /Reintentar fallidos/);
   assert.match(await render({ ...state, isUploading: true }), /Subiendo\.\.\./);
 });
+
+function analysisContext() {
+  const c = context();
+  c.vistaActiva = 'imagenes';
+  c.formImagenes.paciente = 1; c.formImagenes.caso = 2;
+  c.casosDisponibles = [{ id_caso: 2, paciente: 1, titulo: 'Synthetic case' }];
+  return c;
+}
+
+test('18R-D create analysis: empty case action, double submit, context lock, refresh and selected open result', async () => {
+  const c = analysisContext();
+  const html = await render({ vistaActiva: 'imagenes', formImagenes: c.formImagenes, casosDisponibles: c.casosDisponibles });
+  assert.match(html, /No hay análisis disponibles para este caso/);
+  assert.match(html, />Crear análisis<\/button>/);
+  assert.match(source, /@click="crearAnalisis"/);
+  const calls = deferred(), create = c.crearAnalisis(); await turn(); await c.crearAnalisis();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].config.url, '/api/analisis/');
+  assert.deepEqual(JSON.parse(calls[0].config.data), { id_paciente_fk: 1, id_caso_fk: 2, estado: 0 });
+  assert.equal(c.isBusy, true); assert.equal(c.confirmLeave(), false);
+  await c.cargarCasosPaciente(); await c.cargarAnalisisCaso(); c.limpiarFormularioActivo();
+  assert.equal(c.formImagenes.paciente, 1); assert.equal(c.formImagenes.caso, 2);
+  const busy = await render({ vistaActiva: 'imagenes', isCreatingAnalysis: true });
+  assert.match(busy, /<fieldset[^>]*disabled[^>]*aria-busy="true"/);
+  assert.match(busy, /Creando análisis\.\.\./);
+  const analysis = { id_analisis: 4, id_caso_fk: 2, id_paciente_fk: 1, estado: 0 };
+  calls[0].resolve(analysis); await turn();
+  assert.equal(calls[1].config.url, '/api/casos/2/analisis/');
+  calls[1].resolve([analysis]); await create;
+  assert.equal(c.formImagenes.analisis, 4); assert.equal(c.newlyCreatedAnalysisId, 4);
+  assert.equal(c.isCreatingAnalysis, false); assert.equal(c.isLoadingAnalyses, false);
+  assert.equal(c.hasUnsavedWork, false); assert.equal(c.vistaActiva, 'imagenes');
+  assert.equal(c.canCreateAnalysis, false);
+  const populated = await render({ vistaActiva: 'imagenes', formImagenes: c.formImagenes, casosDisponibles: c.casosDisponibles, analisisDisponibles: c.analisisDisponibles });
+  assert.doesNotMatch(populated, />Crear análisis<\/button>/);
+  assert.match(populated, /<dt[^>]*>Estado<\/dt><dd[^>]*>Abierto<\/dd>/);
+});
+
+test('18R-D failed analysis creation preserves context/files, reports DRF error and permits retry', async t => {
+  const c = analysisContext(); files(c, t);
+  c.formImagenes.analisis = '';
+  const preview = c.imagenesPreview[0], calls = deferred(), first = c.crearAnalisis(); await turn();
+  calls[0].reject(invalid({ id_caso_fk: ['El caso no pertenece al paciente.'] })); await first;
+  assert.equal(c.formImagenes.paciente, 1); assert.equal(c.formImagenes.caso, 2);
+  assert.equal(c.imagenesPreview[0], preview); assert.equal(c.isCreatingAnalysis, false);
+  assert.match(c.notices.at(-1).message, /Caso: El caso no pertenece/);
+  const retry = c.crearAnalisis(); await turn();
+  calls[1].resolve({ id_analisis: 4, estado: 0 }); await turn();
+  calls[2].resolve([{ id_analisis: 4, estado: 0 }]); await retry;
+  assert.equal(c.formImagenes.analisis, 4); assert.equal(c.imagenesPreview[0], preview);
+});
+
+test('18R-D confirmed creation survives failed list refresh without a second creation', async () => {
+  const c = analysisContext(), calls = deferred(), first = c.crearAnalisis(); await turn();
+  calls[0].resolve({ id_analisis: 4, estado: 0 }); await turn();
+  calls[1].reject(new Error('network')); await first;
+  assert.equal(c.formImagenes.analisis, 4); assert.equal(c.analisisDisponibles[0].id_analisis, 4);
+  assert.equal(c.analysesLoadError, true); assert.equal(c.isCreatingAnalysis, false);
+  await c.crearAnalisis(); assert.equal(calls.length, 2);
+  const refresh = c.cargarAnalisisCaso(); await turn();
+  calls[2].resolve([{ id_analisis: 4, estado: 0 }]); await refresh;
+  assert.equal(c.analysesLoadError, false); assert.equal(c.canCreateAnalysis, false);
+});
+
+test('18R-D analysis creation invalidates older GETs and ignores response after disposal', async () => {
+  const c = analysisContext(), calls = deferred();
+  const old = c.cargarAnalisisCaso(); await turn();
+  const recent = c.cargarAnalisisCaso(); await turn();
+  calls[1].resolve([]); await recent;
+  const create = c.crearAnalisis(); await turn();
+  calls[2].resolve({ id_analisis: 4, estado: 0 }); await turn();
+  calls[3].resolve([{ id_analisis: 4, estado: 0 }]); await create;
+  calls[0].resolve([]); await old;
+  assert.equal(c.formImagenes.analisis, 4); assert.equal(c.analisisDisponibles[0].id_analisis, 4);
+  const other = analysisContext(), more = deferred(), pending = other.crearAnalisis(); await turn();
+  other.disposed = true; other.analysesGeneration++;
+  more[0].resolve({ id_analisis: 5, estado: 0 }); await pending;
+  assert.equal(other.formImagenes.analisis, ''); assert.deepEqual(other.analisisDisponibles, []);
+  assert.equal(more.length, 1);
+});
+
+test('18R-D mismatched patient/case or failed/loading discovery never offers or posts creation', async () => {
+  for (const overrides of [{ formImagenes: { paciente: 99, caso: 2 } }, { isLoadingAnalyses: true },
+    { analysesLoadError: true }, { casesLoadError: true }, { analisisDisponibles: [{ id_analisis: 4 }] }]) {
+    const c = analysisContext(); Object.assign(c, overrides);
+    const calls = deferred(); await c.crearAnalisis();
+    assert.equal(c.canCreateAnalysis, false); assert.equal(calls.length, 0);
+  }
+});
+
+for (const state of [0, 1, 2]) test(`18R-D analysis state ${state}: visible destination, file picker and upload/retry guard`, async t => {
+  const c = analysisContext(); files(c, t, ['state.png']);
+  c.analisisDisponibles = [{ id_analisis: 3, estado: state }];
+  const html = await render({ vistaActiva: 'imagenes', formImagenes: c.formImagenes, analisisDisponibles: c.analisisDisponibles, imagenesPreview: c.imagenesPreview });
+  assert.match(html, new RegExp(`<dt[^>]*>Estado</dt><dd[^>]*>${c.estadoTexto(state)}</dd>`));
+  assert.equal(/\bdisabled\b/.test(element(html, 'input', 'upload-files')), state === 2);
+  assert.equal(/análisis está cerrado y no admite/.test(html), state === 2);
+  const submit = html.match(/<button type="submit"[^>]*>/)[0];
+  assert.equal(/\bdisabled\b/.test(submit), state === 2);
+  let count = 0; api.defaults.adapter = async config => { count++; return ok(config, { id_muestra: 10 }); };
+  await c.subirImagenes();
+  assert.equal(count, state === 2 ? 0 : 1);
+  c.imagenesPreview[0].status = 'ERROR'; await c.subirImagenes();
+  assert.equal(count, state === 2 ? 0 : 2);
+  assert.equal(c.analisisDisponibles[0].estado, state);
+});
+
+test('18R-D switch to closed analysis clears pending files, revokes URLs and rejects new selection', async t => {
+  const c = analysisContext(), revoked = files(c, t);
+  c.analisisDisponibles = [{ id_analisis: 3, estado: 0 }, { id_analisis: 4, estado: 2 }];
+  c.formImagenes.analisis = 4; c.resetFilesForContext();
+  assert.equal(revoked.length, 2); assert.equal(c.imagenesPreview.length, 0);
+  assert.match(c.notices.at(-1).message, /reinició por cambio de contexto/);
+  c.onFileChange({ target: { files: [new File(['x'], 'blocked.png')] } });
+  assert.equal(c.imagenesPreview.length, 0);
+});
+
+test('18R-D birthdate max uses local date; yesterday/today accepted, tomorrow blocked before HTTP', async () => {
+  const c = context(), now = new Date();
+  const local = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  assert.equal(c.currentLocalDate(), local);
+  assert.match(element(await render({}), 'input', 'patient-fecha_nacimiento'), new RegExp(`max="${local}"`));
+  c.currentLocalDate = () => '2026-10-20';
+  for (const date of ['2026-10-19', '2026-10-20', '2026-10-21']) {
+    c.formPaciente.fecha_nacimiento = date;
+    let posts = 0;
+    api.defaults.adapter = async config => { if (config.method === 'post') posts++; return ok(config, config.method === 'post' ? { id_paciente: 1 } : []); };
+    await c.crearPaciente();
+    assert.equal(posts, date === '2026-10-21' ? 0 : 1);
+  }
+  assert.match(c.patientErrors.fecha_nacimiento, /no puede ser futura/);
+  assert.match(await render({ patientErrors: c.patientErrors }), /id="patient-fecha_nacimiento-error"[^>]*>La fecha/);
+  assert.match(source, /@change="validateBirthDate" @invalid="validateBirthDate"/);
+  c.formPaciente.fecha_nacimiento = '2026-10-20';
+  assert.equal(c.validateBirthDate(), true);
+  assert.equal(c.patientErrors.fecha_nacimiento, undefined);
+  api.defaults.adapter = async () => { throw invalid({ fecha_nacimiento: ['La fecha de nacimiento no puede ser futura.'] }); };
+  await c.crearPaciente();
+  assert.match(c.patientErrors.fecha_nacimiento, /no puede ser futura/);
+  assert.equal(c.isCreatingPatient, false);
+});

@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from django.core.exceptions import ValidationError as ModelValidationError
+from django.utils import timezone
 from .segmentation_strategies import SalivaSegmentationStrategy
 from .models import (
     AnalisisPred,
@@ -23,6 +24,11 @@ class PacienteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Paciente
         fields = '__all__'
+
+    def validate_fecha_nacimiento(self, value):
+        if value > timezone.localdate():
+            raise serializers.ValidationError('La fecha de nacimiento no puede ser futura.')
+        return value
 
     def validate(self, attrs):
         patient = Paciente()
@@ -62,13 +68,24 @@ class CasoSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({'case_number': 'Ya existe para este paciente.'})
         return attrs
 
-class MuestraSalivaSerializer(serializers.ModelSerializer):
+class SampleUploadSerializer(serializers.ModelSerializer):
+    """Shared admission rule for new samples; existing samples remain readable."""
+
+    def validate_analisis(self, value):
+        if self.instance is None and value.estado == 2:
+            raise serializers.ValidationError(
+                'No se pueden agregar imágenes a un análisis cerrado.'
+            )
+        return value
+
+
+class MuestraSalivaSerializer(SampleUploadSerializer):
     class Meta:
         model = MuestraSaliva
         fields = '__all__'
 
 
-class MuestraSangreSerializer(serializers.ModelSerializer):
+class MuestraSangreSerializer(SampleUploadSerializer):
     class Meta:
         model = MuestraSangre
         fields = '__all__'

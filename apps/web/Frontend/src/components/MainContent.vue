@@ -508,6 +508,7 @@
                 :latest-validated-revision="latestValidatedRevision"
                 :pending-draft-error="pendingDraftError"
                 :is-edit-mode="isEditMode"
+                :active-revision="activeRevision"
                 :historial-segmentacion="historialSegmentacion"
                 :historial-loading="historialLoading"
                 :historial-error="historialError"

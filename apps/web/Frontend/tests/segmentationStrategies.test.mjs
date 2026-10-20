@@ -148,7 +148,7 @@ test('SALIVA history keeps different strategies and backend provenance wins over
   });
   assert.match(html, /Resultado #2 · Cellpose-SAM alternativo/);
   assert.match(html, /Resultado #1 · Modelo SICAM/);
-  assert.match(html, /<span[^>]*>Método<\/span><strong[^>]*>Cellpose-SAM alternativo<\/strong>/);
+  assert.match(html, /aria-label="Resultado actual"[\s\S]*?Método: Cellpose-SAM alternativo[\s\S]*?<\/section>/);
   assert.match(html, /Método: Cellpose-SAM alternativo/);
   assert.match(html, /<input checked[^>]*value="CURRENT_CUSTOM_V1"/);
   assert.equal((html.match(/type="radio"/g) || []).length, 2);
@@ -744,4 +744,90 @@ test('18Q-B TopBar shows only real sections; removed controls have no orphan han
     const source = await readFile(new URL(`../src/components/${file}`, import.meta.url), 'utf8');
     for (const value of removed) assert.ok(!source.includes(value));
   }
+});
+
+// 18Q-C: presentation stays independent from future execution settings.
+const currentSection = html => html.match(/<section[^>]*aria-label="Resultado actual"[\s\S]*?<\/section>/)[0];
+const validatedPanel = {
+  effectiveSegmentation: { fuente: 'VALIDADA', base_origin: 'MANUAL', segmentation_strategy: null,
+    revision: { numero_revision: 3, validado_en: '2026-10-01T10:00:00Z' } },
+  effectiveSegmentationDisplay: 'Revisión #3 validada',
+  showValidatedRevisionNotice: true,
+  latestValidatedRevision: { numero_revision: 3, validado_en: '2026-10-01T10:00:00Z' },
+};
+
+test('18Q-C effective VALIDADA consolidates revision, validation date and manual base exactly once', async () => {
+  const base = { ...result(7, null), base_origin: 'MANUAL', creado_en: '2026-09-01T10:00:00Z' };
+  const html = await renderPanel({ ...validatedPanel, completedSegmentationResults: [base],
+    ultimoResultadoSegmentacion: base, historialSegmentacion: [base] });
+  const current = currentSection(html);
+  assert.equal((html.match(/Revisión #3/g) || []).length, 1);
+  assert.equal((html.match(/Validada el/g) || []).length, 1);
+  assert.equal((current.match(/Anotación manual/g) || []).length, 1);
+  assert.match(current, /Resultado mostrado = resultado efectivo/);
+  assert.match(current, /Resultado #7/);
+  assert.match(html, /La última segmentación es el resultado seleccionado/);
+  assert.deepEqual([...html.matchAll(/aria-label="(Segmentación|Resultado actual|Historial)"/g)].map(m => m[1]),
+    ['Segmentación', 'Resultado actual', 'Historial']);
+});
+
+test('18Q-C edited BORRADOR is explicit and separate from effective VALIDADA', async () => {
+  const current = currentSection(await renderPanel({ ...validatedPanel, isEditMode: true,
+    activeRevision: { numero_revision: 4, estado: 'BORRADOR' } }));
+  assert.match(current, /Borrador en edición[\s\S]*Revisión #4/);
+  assert.match(current, /BORRADOR · No efectivo/);
+  assert.match(current, /Resultado efectivo: Revisión #3 validada/);
+  assert.match(current, /Origen de la base: Anotación manual/);
+  assert.doesNotMatch(current, /Resultado mostrado = resultado efectivo/);
+  assert.equal((current.match(/Revisión #3/g) || []).length, 1);
+  assert.equal((current.match(/Revisión #4/g) || []).length, 1);
+});
+
+test('18Q-C manual base is not labeled automatic or assigned a model', async () => {
+  const current = currentSection(await renderPanel({
+    effectiveSegmentation: { fuente: 'MANUAL', base_origin: 'MANUAL', segmentation_strategy: null },
+    effectiveSegmentationDisplay: 'Anotación manual',
+  }));
+  assert.equal((current.match(/Anotación manual/g) || []).length, 1);
+  assert.doesNotMatch(current, /Automático|Modelo SICAM|Cellpose|Método no disponible/);
+});
+
+test('18Q-C history failure retains available selection; loading and errors remain visible', async () => {
+  const html = await renderPanel({ completedSegmentationResults: [result(2, S.ALT), result(1, S.CURRENT)],
+    historialError: 'Error de historial', segmentacionError: 'Error de ejecución', effectiveSegmentationError: 'Error de effective' });
+  for (const text of ['Error de historial', 'Error de ejecución', 'Error de effective', 'Resultado #1 · Modelo SICAM']) assert.ok(html.includes(text));
+  assert.match(html, /<select/);
+  const loading = await renderPanel({ historialLoading: true, effectiveSegmentationLoading: true });
+  assert.match(loading, /Cargando historial/);
+  assert.match(loading, /Cargando resultado mostrado/);
+});
+
+const panelSource = await readFile(new URL('../src/components/segmentation/SegmentationResultPanel.vue', import.meta.url), 'utf8');
+const ClientPanel = { ...Panel, setup: undefined, ssrRender: undefined,
+  components: { SalivaSegmentationControl: ClientControl },
+  render: compile(parse(panelSource).descriptor.template.content) };
+
+test('18Q-C continue, history selection and SALIVA/BLOOD execution events survive regrouping', () => {
+  const root = hostNode('root');
+  const runs = [], selections = [];
+  let continued = 0;
+  renderer.render(h(ClientPanel, { ...panelProps, ...validatedPanel,
+    completedSegmentationResults: [result(2, S.ALT), result(1, S.CURRENT)], selectedSegmentationResultId: 2,
+    showPendingDraftNotice: true, pendingDraftRevision: { numero_revision: 4, estado: 'BORRADOR' },
+    onContinueEdit: () => continued++, onChangeSegmentationResult: value => selections.push(value),
+    onRunSegmentation: value => runs.push(value),
+  }), root);
+  findAll(root, 'button').find(button => button.text === 'Continuar edición').props.onClick();
+  const selector = findAll(root, 'select').find(select => select.props.onChange);
+  selector.props.onChange({ target: { value: '1' } });
+  findAll(root, 'form')[0].props.onSubmit({ preventDefault() {} });
+  assert.equal(continued, 1);
+  assert.deepEqual(selections, ['1']);
+  assert.deepEqual(runs, [{ segmentation_strategy: S.CURRENT, target: 'ALL' }]);
+  renderer.render(h(ClientPanel, { ...panelProps, activeSampleType: T.BLOOD, isBloodSampleType: true,
+    onRunSegmentation: value => runs.push(value) }), root);
+  findAll(root, 'button')[0].props.onClick();
+  assert.equal(runs.length, 2);
+  assert.equal(runs[1], undefined);
+  renderer.render(null, root);
 });

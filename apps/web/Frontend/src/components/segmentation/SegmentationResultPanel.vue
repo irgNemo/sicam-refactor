@@ -1,187 +1,100 @@
 <template>
   <div class="segmentation-panel">
-    <SalivaSegmentationControl
-      v-if="isSalivaSampleType"
-      :loading="segmentacionLoading"
-      :button-text="segmentacionButtonText"
-      @run-segmentation="$emit('run-segmentation', $event)"
-    />
-    <button
-      v-else
-      class="btn-segment full-width"
-      :disabled="segmentacionLoading"
-      @click="$emit('run-segmentation')"
-    >
-      {{ segmentacionButtonText }}
-    </button>
-
-    <div
-      v-if="showLongRunningNotice"
-      class="segmentation-status neutral"
-    >
-      Segmentando muestra de sangre... Este proceso puede tardar varios minutos.
-    </div>
-
-    <div v-if="segmentacionError" class="segmentation-status error">
-      {{ segmentacionError }}
-    </div>
-
-    <div v-if="segmentacionMetadata" class="segmentation-status success">
-      <div class="status-title">
-        Segmentacion {{ segmentacionMetadata.estado }}
-      </div>
-      <div class="status-grid">
-        <span>ID resultado</span>
-        <strong>#{{ segmentacionMetadata.id }}</strong>
-        <span>Tipo</span>
-        <strong>{{ segmentacionMetadata.tipo_muestra }}</strong>
-        <span>Objetos</span>
-        <strong>{{ segmentacionObjetosCount }}</strong>
-        <template v-if="isSalivaSampleType">
-          <span>Método</span>
-          <strong>{{ strategyLabel(segmentacionMetadata) }}</strong>
-        </template>
-      </div>
-    </div>
-
-    <div class="selected-segmentation-block">
-      <div class="history-title">
-        Segmentacion seleccionada
-      </div>
-
-      <div v-if="historialLoading" class="segmentation-status neutral">
-        Cargando resultados...
-      </div>
-
-      <div
-        v-else-if="!completedSegmentationResults.length"
-        class="segmentation-status neutral"
-      >
-        Sin segmentaciones completadas
-      </div>
-
-      <div
-        v-else-if="completedSegmentationResults.length === 1"
-        class="selected-result-card"
-      >
-        <strong>{{ formatearFechaResultado(completedSegmentationResults[0].creado_en) }}</strong>
-        <span>Resultado #{{ completedSegmentationResults[0].id }}</span>
-        <span v-if="isSalivaSampleType">Método: {{ strategyLabel(completedSegmentationResults[0]) }}</span>
-      </div>
-
-      <label
-        v-else
-        class="result-selector"
-      >
-        <span class="sr-only">Segmentacion seleccionada</span>
-        <select
-          :value="selectedSegmentationResultId || ''"
-          :disabled="historialLoading || segmentacionLoading"
-          @change="$emit('change-segmentation-result', $event.target.value)"
-        >
-          <option
-            v-for="result in completedSegmentationResults"
-            :key="resultKey(result)"
-            :value="result.id"
-          >
-            {{ formatearFechaResultado(result.creado_en) }} · Resultado #{{ result.id }}{{ isSalivaSampleType ? ` · ${strategyLabel(result)}` : '' }}
-          </option>
-        </select>
-      </label>
-    </div>
-
-    <div
-      v-if="effectiveSegmentationLoading"
-      class="segmentation-status neutral"
-    >
-      Cargando resultado mostrado...
-    </div>
-
-    <div
-      v-else-if="effectiveSegmentationError"
-      class="segmentation-status error"
-    >
-      {{ effectiveSegmentationError }}
-    </div>
-
-    <div
-      v-else-if="effectiveSegmentation"
-      class="effective-result-card"
-    >
-      <strong>{{ isEditMode ? "Borrador en edición" : "Resultado mostrado" }}</strong>
-      <span v-if="!isEditMode">{{ effectiveSegmentationDisplay }}</span>
-      <span v-if="isSalivaSampleType && !isEditMode">
-        Método de segmentación: {{ strategyLabel(effectiveSegmentation) }}
-      </span>
-    </div>
-
-    <div
-      v-if="showPendingDraftNotice"
-      class="pending-draft-card"
-    >
-      <div class="pending-draft-copy">
-        <strong>Revisión pendiente</strong>
-        <span>
-          Revisión #{{ pendingDraftRevision.numero_revision }} ·
-          Cambios guardados, aún no validados.
-        </span>
-      </div>
-      <button
-        class="control-btn"
-        @click="$emit('continue-edit')"
-      >
-        Continuar edición
+    <section class="panel-section segmentation-actions" aria-label="Segmentación">
+      <h4>Segmentación</h4>
+      <SalivaSegmentationControl
+        v-if="isSalivaSampleType"
+        :loading="segmentacionLoading"
+        :button-text="segmentacionButtonText"
+        @run-segmentation="$emit('run-segmentation', $event)"
+      />
+      <button v-else class="btn-segment full-width" :disabled="segmentacionLoading" @click="$emit('run-segmentation')">
+        {{ segmentacionButtonText }}
       </button>
-    </div>
+      <div v-if="showLongRunningNotice" class="segmentation-status neutral">
+        Segmentando muestra de sangre... Este proceso puede tardar varios minutos.
+      </div>
+      <div v-if="segmentacionError" class="segmentation-status error">{{ segmentacionError }}</div>
+    </section>
 
-    <div
-      v-else-if="showValidatedRevisionNotice"
-      class="validated-revision-card"
-    >
-      <strong>Revisión validada</strong>
-      <span>
-        Revisión #{{ latestValidatedRevision.numero_revision }} · VALIDADA
-        <template v-if="latestValidatedRevision.validado_en">
-          · {{ formatearFechaResultado(latestValidatedRevision.validado_en) }}
+    <section class="panel-section current-result" aria-label="Resultado actual">
+      <h4>Resultado actual</h4>
+      <div v-if="displayedBase" class="result-details">
+        <strong>Resultado #{{ displayedBase.id }} · {{ displayedBase.estado }}</strong>
+        <span>{{ formatearFechaResultado(displayedBase.creado_en) }}</span>
+        <span v-if="segmentacionMetadata && segmentacionMetadata.id === displayedBase.id">
+          {{ segmentacionMetadata.tipo_muestra }} · {{ segmentacionObjetosCount }} objetos en la base
+        </span>
+        <span v-else-if="latestIsSelected">{{ displayedBase.tipo_muestra }} · {{ ultimoHistorialObjetosCount }} objetos en la base</span>
+      </div>
+
+      <div v-if="effectiveSegmentationLoading" class="segmentation-status neutral">Cargando resultado mostrado...</div>
+      <div v-else-if="effectiveSegmentationError" class="segmentation-status error">{{ effectiveSegmentationError }}</div>
+      <div v-else-if="effectiveSegmentation" class="result-details">
+        <template v-if="isEditMode">
+          <strong>Borrador en edición<span v-if="activeRevision"> · Revisión #{{ activeRevision.numero_revision }}</span></strong>
+          <span class="state-badge draft">BORRADOR · No efectivo</span>
+          <span>Resultado efectivo: {{ effectiveSegmentationDisplay }}</span>
+          <span v-if="isSalivaSampleType">Origen de la base: {{ strategyLabel(effectiveSegmentation) }}</span>
         </template>
-      </span>
-    </div>
-
-    <div
-      v-else-if="pendingDraftError && !isEditMode"
-      class="segmentation-status neutral"
-    >
-      No fue posible consultar revisiones pendientes.
-    </div>
-
-    <div class="segmentation-history">
-      <div class="history-title">
-        Ultima segmentacion
-        <span v-if="historialSegmentacion.length">
-          {{ historialSegmentacion.length }} resultados
+        <template v-else>
+          <span class="state-badge" :class="{ validated: effectiveSegmentation.fuente === 'VALIDADA' }">{{ effectiveSegmentationDisplay }}</span>
+          <span>Resultado mostrado = resultado efectivo</span>
+        </template>
+        <span v-if="validationDate">Validada el {{ formatearFechaResultado(validationDate) }}</span>
+        <span v-if="isSalivaSampleType && !isEditMode && effectiveSegmentation.fuente !== 'MANUAL'">
+          {{ effectiveSegmentation.base_origin === 'MANUAL' ? 'Origen de la base:' : 'Método de segmentación:' }} {{ strategyLabel(effectiveSegmentation) }}
         </span>
       </div>
+      <span v-else-if="displayedBase && isSalivaSampleType">Método: {{ strategyLabel(displayedBase) }}</span>
 
-      <div v-if="historialLoading" class="segmentation-status neutral">
-        Cargando historial...
+      <div v-if="!effectiveSegmentation && showValidatedRevisionNotice" class="result-details">
+        <span>Revisión #{{ latestValidatedRevision.numero_revision }} · VALIDADA</span>
+        <span v-if="latestValidatedRevision.validado_en">Validada el {{ formatearFechaResultado(latestValidatedRevision.validado_en) }}</span>
       </div>
 
-      <div v-else-if="historialError" class="segmentation-status error">
-        {{ historialError }}
+      <div v-if="showPendingDraftNotice" class="pending-draft-card">
+        <div class="pending-draft-copy">
+          <strong>Revisión #{{ pendingDraftRevision.numero_revision }} · BORRADOR</strong>
+          <span>Cambios guardados, aún no validados. No es el resultado efectivo.</span>
+        </div>
+        <button class="control-btn" @click="$emit('continue-edit')">Continuar edición</button>
+      </div>
+      <div v-else-if="pendingDraftError && !isEditMode" class="segmentation-status neutral">
+        No fue posible consultar revisiones pendientes.
       </div>
 
-      <div v-else-if="!ultimoResultadoSegmentacion" class="segmentation-status neutral">
-        Sin resultados historicos
+      <div v-if="segmentacionMetadata && displayedBase && segmentacionMetadata.id !== displayedBase.id" class="segmentation-status success">
+        <strong>Última ejecución: resultado #{{ segmentacionMetadata.id }} · {{ segmentacionMetadata.estado }}</strong>
+        <span>{{ segmentacionMetadata.tipo_muestra }} · {{ segmentacionObjetosCount }} objetos</span>
+        <span v-if="isSalivaSampleType">Método: {{ strategyLabel(segmentacionMetadata) }}</span>
       </div>
+    </section>
 
-      <div v-else class="history-compact-card">
-        <strong>{{ formatearFechaResultado(ultimoResultadoSegmentacion.creado_en) }}</strong>
-        <span>
-          {{ ultimoHistorialObjetosCount }} objetos · {{ ultimoResultadoSegmentacion.estado }}
-        </span>
-        <span v-if="isSalivaSampleType">Método: {{ strategyLabel(ultimoResultadoSegmentacion) }}</span>
-      </div>
-    </div>
+    <section class="panel-section segmentation-history" aria-label="Historial">
+      <h4>Historial <span v-if="historialSegmentacion.length" class="history-count">{{ historialSegmentacion.length }} resultados</span></h4>
+      <div v-if="historialLoading" class="segmentation-status neutral">Cargando historial...</div>
+      <template v-else>
+        <div v-if="historialError" class="segmentation-status error">{{ historialError }}</div>
+        <label v-if="completedSegmentationResults.length > 1" class="result-selector">
+          <span>Segmentacion seleccionada</span>
+          <select :value="selectedSegmentationResultId || ''" :disabled="historialLoading || segmentacionLoading" @change="$emit('change-segmentation-result', $event.target.value)">
+            <option v-for="result in completedSegmentationResults" :key="resultKey(result)" :value="result.id">
+              {{ formatearFechaResultado(result.creado_en) }} · Resultado #{{ result.id }}{{ isSalivaSampleType ? ` · ${strategyLabel(result)}` : '' }}
+            </option>
+          </select>
+        </label>
+        <span v-else-if="!completedSegmentationResults.length">Sin segmentaciones completadas</span>
+        <span v-if="!ultimoResultadoSegmentacion">Sin resultados historicos</span>
+        <span v-else-if="latestIsSelected">La última segmentación es el resultado seleccionado.</span>
+        <div v-else class="result-details">
+          <strong>Última segmentación · Resultado #{{ ultimoResultadoSegmentacion.id }}</strong>
+          <span>{{ formatearFechaResultado(ultimoResultadoSegmentacion.creado_en) }}</span>
+          <span>{{ ultimoHistorialObjetosCount }} objetos · {{ ultimoResultadoSegmentacion.estado }}</span>
+          <span v-if="isSalivaSampleType">Método: {{ strategyLabel(ultimoResultadoSegmentacion) }}</span>
+        </div>
+      </template>
+    </section>
   </div>
 </template>
 
@@ -259,6 +172,10 @@ export default {
       type: String,
       default: "",
     },
+    activeRevision: {
+      type: Object,
+      default: null,
+    },
     isEditMode: {
       type: Boolean,
       required: true,
@@ -293,6 +210,25 @@ export default {
     },
   },
   computed: {
+    selectedResult() {
+      return this.completedSegmentationResults.find(result => result.id === this.selectedSegmentationResultId)
+        || (this.completedSegmentationResults.length === 1 ? this.completedSegmentationResults[0] : null);
+    },
+
+    displayedBase() {
+      return this.selectedResult || this.segmentacionMetadata;
+    },
+
+    latestIsSelected() {
+      return Boolean(this.ultimoResultadoSegmentacion && this.displayedBase
+        && this.ultimoResultadoSegmentacion.id === this.displayedBase.id);
+    },
+
+    validationDate() {
+      return this.effectiveSegmentation?.revision?.validado_en
+        || (this.showValidatedRevisionNotice ? this.latestValidatedRevision?.validado_en : null);
+    },
+
     isSalivaSampleType() {
       return this.activeSampleType === SAMPLE_TYPES.SALIVA;
     },
@@ -421,41 +357,8 @@ export default {
   color: #5f4b12;
   display: grid;
   gap: 10px;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   padding: 10px 12px;
-}
-
-.validated-revision-card {
-  background: #edf7ed;
-  border: 1px solid #c8e6c9;
-  border-radius: 10px;
-  color: #256029;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 10px 12px;
-}
-
-.effective-result-card {
-  background: #eef5ff;
-  border: 1px solid #c8dcf5;
-  border-radius: 10px;
-  color: #1f4f82;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 10px 12px;
-}
-
-.validated-revision-card strong,
-.effective-result-card strong {
-  font-size: 12px;
-}
-
-.validated-revision-card span,
-.effective-result-card span {
-  font-size: 11px;
-  line-height: 1.4;
 }
 
 .pending-draft-copy {
@@ -482,29 +385,6 @@ export default {
   gap: 8px;
 }
 
-.selected-segmentation-block {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.history-title {
-  align-items: center;
-  color: #2c3e50;
-  display: flex;
-  font-size: 12px;
-  font-weight: 700;
-  justify-content: space-between;
-}
-
-.history-title span {
-  background: #f0f4f8;
-  border-radius: 10px;
-  color: #666;
-  font-size: 11px;
-  padding: 2px 8px;
-}
-
 .result-selector {
   display: flex;
   flex-direction: column;
@@ -522,66 +402,6 @@ export default {
   width: 100%;
 }
 
-.selected-result-card {
-  background: #f8f9fa;
-  border: 1px solid #d9e2ec;
-  border-radius: 8px;
-  color: #2c3e50;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 8px 10px;
-}
-
-.selected-result-card strong {
-  font-size: 12px;
-}
-
-.selected-result-card span {
-  color: #666;
-  font-size: 11px;
-}
-
-.sr-only {
-  height: 1px;
-  margin: -1px;
-  overflow: hidden;
-  position: absolute;
-  width: 1px;
-  clip: rect(0, 0, 0, 0);
-}
-
-.status-title {
-  font-weight: 700;
-  margin-bottom: 8px;
-}
-
-.status-grid {
-  display: grid;
-  gap: 6px 10px;
-  grid-template-columns: 1fr auto;
-}
-
-.history-compact-card {
-  background: #f8f9fa;
-  border: 1px solid #d9e2ec;
-  border-radius: 8px;
-  color: #2c3e50;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 8px 10px;
-}
-
-.history-compact-card strong {
-  font-size: 12px;
-}
-
-.history-compact-card span {
-  color: #666;
-  font-size: 11px;
-}
-
 .full-width {
   width: 100%;
 }
@@ -595,4 +415,42 @@ export default {
     padding: 8px 10px;
   }
 }
+
+.panel-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #d9e2ec;
+  border-radius: 10px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #2c3e50;
+  font-size: 12px;
+}
+.panel-section h4 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 13px;
+  margin: 0;
+}
+.result-details, .segmentation-status.success {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.state-badge, .history-count {
+  align-self: flex-start;
+  border-radius: 8px;
+  padding: 4px 8px;
+  background: #eef5ff;
+  color: #1f4f82;
+  max-width: 100%;
+}
+.state-badge.validated { background: #edf7ed; color: #256029; }
+.state-badge.draft { background: #fff8e1; color: #5f4b12; }
+.history-count { background: #f0f4f8; color: #666; font-size: 11px; }
 </style>

@@ -764,7 +764,10 @@ test('18Q-C effective VALIDADA consolidates revision, validation date and manual
   assert.equal((html.match(/Revisión #3/g) || []).length, 1);
   assert.equal((html.match(/Validada el/g) || []).length, 1);
   assert.equal((current.match(/Anotación manual/g) || []).length, 1);
-  assert.match(current, /Resultado mostrado = resultado efectivo/);
+  assert.doesNotMatch(current, /Resultado mostrado = resultado efectivo/);
+  assert.match(current, /Tipo: SALIVA/);
+  assert.match(current, /Origen: Anotación manual/);
+  assert.doesNotMatch(current, /objetos en la base/);
   assert.match(current, /Resultado #7/);
   assert.match(html, /La última segmentación es el resultado seleccionado/);
   assert.deepEqual([...html.matchAll(/aria-label="(Segmentación|Resultado actual|Historial)"/g)].map(m => m[1]),

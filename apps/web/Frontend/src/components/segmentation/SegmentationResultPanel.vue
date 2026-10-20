@@ -22,10 +22,7 @@
       <div v-if="displayedBase" class="result-details">
         <strong>Resultado #{{ displayedBase.id }} · {{ displayedBase.estado }}</strong>
         <span>{{ formatearFechaResultado(displayedBase.creado_en) }}</span>
-        <span v-if="segmentacionMetadata && segmentacionMetadata.id === displayedBase.id">
-          {{ segmentacionMetadata.tipo_muestra }} · {{ segmentacionObjetosCount }} objetos en la base
-        </span>
-        <span v-else-if="latestIsSelected">{{ displayedBase.tipo_muestra }} · {{ ultimoHistorialObjetosCount }} objetos en la base</span>
+        <span>Tipo: {{ isBloodSampleType ? 'SANGRE' : displayedBase.tipo_muestra }}</span>
       </div>
 
       <div v-if="effectiveSegmentationLoading" class="segmentation-status neutral">Cargando resultado mostrado...</div>
@@ -39,11 +36,10 @@
         </template>
         <template v-else>
           <span class="state-badge" :class="{ validated: effectiveSegmentation.fuente === 'VALIDADA' }">{{ effectiveSegmentationDisplay }}</span>
-          <span>Resultado mostrado = resultado efectivo</span>
         </template>
         <span v-if="validationDate">Validada el {{ formatearFechaResultado(validationDate) }}</span>
         <span v-if="isSalivaSampleType && !isEditMode && effectiveSegmentation.fuente !== 'MANUAL'">
-          {{ effectiveSegmentation.base_origin === 'MANUAL' ? 'Origen de la base:' : 'Método de segmentación:' }} {{ strategyLabel(effectiveSegmentation) }}
+          {{ effectiveSegmentation.base_origin === 'MANUAL' ? 'Origen:' : 'Método de segmentación:' }} {{ strategyLabel(effectiveSegmentation) }}
         </span>
       </div>
       <span v-else-if="displayedBase && isSalivaSampleType">Método: {{ strategyLabel(displayedBase) }}</span>
@@ -66,7 +62,7 @@
 
       <div v-if="segmentacionMetadata && displayedBase && segmentacionMetadata.id !== displayedBase.id" class="segmentation-status success">
         <strong>Última ejecución: resultado #{{ segmentacionMetadata.id }} · {{ segmentacionMetadata.estado }}</strong>
-        <span>{{ segmentacionMetadata.tipo_muestra }} · {{ segmentacionObjetosCount }} objetos</span>
+        <span>Tipo: {{ isBloodSampleType ? 'SANGRE' : segmentacionMetadata.tipo_muestra }}</span>
         <span v-if="isSalivaSampleType">Método: {{ strategyLabel(segmentacionMetadata) }}</span>
       </div>
     </section>

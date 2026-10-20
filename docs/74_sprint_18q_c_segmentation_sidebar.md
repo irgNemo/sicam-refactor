@@ -34,8 +34,8 @@ No se añadió un sistema nuevo de historial.
 1. **Segmentación**: modelo, categorías y ejecutar; conserva errores de ejecución
    y aviso de proceso prolongado BLOOD.
 2. **Resultado actual**: resultado base, fecha y estado; fuente mostrada, información
-   de validación y origen/método persistido. El conteo bruto se identifica como
-   objetos de la base, no como conteo de la revisión efectiva.
+   de validación y origen/método persistido. Tras 18Q-C.1, muestra `Tipo: SALIVA`
+   o `Tipo: SANGRE`; los conteos permanecen en Resumen de Conteo.
 3. **Historial**: selector existente, cantidad de resultados y resumen de última
    segmentación si aporta información diferente.
 
@@ -107,3 +107,30 @@ Revisar manualmente en desktop y laptop estrecha:
 - Visor/capas de 18Q-A y ausencia de placeholders de 18Q-B.
 
 Estado: **SPRINT 18Q-C = READY_FOR_VISUAL_REVIEW**.
+
+
+## Pulido final 18Q-C.1
+
+Se retira la línea `Resultado mostrado = resultado efectivo` cuando ambos
+coinciden. Durante edición se mantienen el borrador mostrado y el resultado
+efectivo por separado, con `BORRADOR · No efectivo`.
+
+Resultado actual conserva ID, COMPLETADO, revisión, estado, fechas, tipo y
+origen/método persistido. Se sustituye el conteo bruto por `Tipo: SALIVA` o
+`Tipo: SANGRE`, sin modificar datos ni cálculos. El resumen de conteo existente
+permanece intacto. La información de otra última ejecución, si existe en este
+bloque, también muestra tipo sin repetir conteos.
+
+En lectura se simplifica `Origen de la base: Anotación manual` a
+`Origen: Anotación manual`. Durante edición se conserva la precisión
+`Origen de la base`, porque un borrador puede tener objetos de origen mixto.
+
+Historial y panel de ejecución no se modifican. Sin cambios de backend, API,
+modelos, endpoints ni reglas de effective. Archivos del pulido: el panel, sus
+aserciones de presentación y este documento.
+
+Validaciones repetidas con Node 24.17.0: segmentación **53 passed**,
+Characterization **22 passed**, `npm run build` **PASS** y `git diff --check`
+**PASS**. Revisión visual en navegador pendiente. Sin commit ni push.
+
+**SPRINT 18Q-C.1 = READY_FOR_VISUAL_REVIEW**

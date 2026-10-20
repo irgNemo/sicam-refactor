@@ -9,15 +9,21 @@ const labels = {
   non_field_errors: 'Validación',
 };
 
-export function registrationErrorMessage(error, fallback) {
-  if (error?.response?.status !== 400) return fallback;
+export function registrationFieldErrors(error) {
+  if (error?.response?.status !== 400) return {};
   const data = error.response.data;
-  if (!data || typeof data !== 'object' || Array.isArray(data)) return fallback;
-  const messages = [];
-  for (const [field, label] of Object.entries(labels)) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return {};
+  const errors = {};
+  for (const field of Object.keys(labels)) {
     const values = Array.isArray(data[field]) ? data[field] : [data[field]];
     const text = values.filter(value => typeof value === 'string').join(' ');
-    if (text) messages.push(`${label}: ${text.slice(0, 250)}`);
+    if (text) errors[field] = text.slice(0, 250);
   }
+  return errors;
+}
+
+export function registrationErrorMessage(error, fallback) {
+  const messages = Object.entries(registrationFieldErrors(error))
+    .map(([field, text]) => `${labels[field]}: ${text}`);
   return messages.join(' · ').slice(0, 700) || fallback;
 }

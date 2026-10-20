@@ -15,7 +15,7 @@ after(async () => { clearInterval(keepAlive); await server.close(); });
 const { default: View } = await server.ssrLoadModule('/src/views/RegistroView.vue');
 const { default: App } = await server.ssrLoadModule('/src/App.vue');
 const { default: api } = await server.ssrLoadModule('/src/services/apiClient.js');
-const { registrationErrorMessage } = await server.ssrLoadModule('/src/services/registrationErrors.js');
+const { registrationErrorMessage, registrationFieldErrors } = await server.ssrLoadModule('/src/services/registrationErrors.js');
 const source = await readFile(new URL('../src/views/RegistroView.vue', import.meta.url), 'utf8');
 const ok = (config, data) => ({ config, status: 200, statusText: 'OK', headers: {}, data });
 const invalid = data => ({ response: { status: 400, data } });
@@ -185,4 +185,114 @@ test('markup: upload busy lock, context hooks, retries and preview fallback', as
   assert.equal((source.match(/@change="resetFilesForContext"/g) || []).length, 2);
   assert.match(source, /@error="img.previewUnavailable = true"/); assert.match(source, /Vista previa no disponible/);
   assert.match(source, /Reintentar carga de casos/); assert.match(source, /Reintentar carga de análisis/); assert.doesNotMatch(source, /v-html|Promise\.all/);
+});
+
+const render = overrides => renderToString(createSSRApp({ ...View, data: () => ({ ...View.data(), ...overrides }) }));
+const element = (html, tag, id) => html.match(new RegExp(`<${tag}[^>]*id="${id}"[^>]*>`))?.[0] ?? '';
+
+test('presentation: three freely accessible sections and one current navigation button', async () => {
+  for (const [section, title, label] of [['paciente', 'Nuevo paciente', 'Paciente'], ['caso', 'Nuevo caso', 'Caso'], ['imagenes', 'Agregar imágenes', 'Imágenes']]) {
+    const html = await render({ vistaActiva: section });
+    const nav = html.match(/<nav[\s\S]*?<\/nav>/)[0];
+    for (const text of ['Paciente', 'Caso', 'Imágenes']) assert.ok(nav.includes(text));
+    assert.equal((nav.match(/aria-current="page"/g) || []).length, 1);
+    assert.match(nav, new RegExp(`aria-current="page"[^>]*>${label}</button>`));
+    assert.doesNotMatch(nav, /disabled/);
+    assert.match(html, new RegExp(`<h3[^>]*>${title}</h3>`));
+  }
+});
+
+test('presentation: patient labels, input order and required/optional fields stay intact', async () => {
+  const html = await render({});
+  const fields = ['identificacion', 'fecha_nacimiento', 'nombre', 'apellido', 'email', 'telefono'];
+  let previous = -1;
+  for (const [index, field] of fields.entries()) {
+    const id = `patient-${field}`, input = element(html, 'input', id);
+    assert.ok(input);
+    assert.ok(html.includes(`<label for="${id}"`));
+    assert.ok(html.indexOf(input) > previous);
+    previous = html.indexOf(input);
+    assert.equal(/\brequired\b/.test(input), index < 4);
+  }
+  assert.doesNotMatch(html, /id="(?:identity_mode|initials|external_patient_id|case_number)"/);
+  assert.match(await render({ isCreatingPatient: true }), /Registrando\.\.\./);
+});
+
+test('presentation: DRF field errors reach accessible inline text, escape HTML and clear on retry/reset', async () => {
+  const c = context();
+  api.defaults.adapter = async () => { throw invalid({ identificacion: ['ID duplicado <script>'], email: ['Email inválido'], traceback: ['SECRET'] }); };
+  await c.crearPaciente();
+  const html = await render({ patientErrors: c.patientErrors });
+  assert.match(element(html, 'input', 'patient-identificacion'), /aria-invalid="true"/);
+  assert.match(element(html, 'input', 'patient-identificacion'), /aria-describedby="patient-identificacion-error"/);
+  assert.match(html, /id="patient-identificacion-error"[^>]*>ID duplicado &lt;script&gt;/);
+  assert.match(html, /id="patient-email-error"[^>]*>Email inválido/);
+  assert.doesNotMatch(html, /<script>|SECRET/);
+  const calls = deferred(), retry = c.crearPaciente(); await turn();
+  assert.deepEqual(c.patientErrors, {});
+  calls[0].reject(invalid({ nombre: ['Obligatorio'] })); await retry;
+  c.limpiarFormPaciente(); assert.deepEqual(c.patientErrors, {});
+  assert.deepEqual(registrationFieldErrors({ response: { status: 500, data: { nombre: ['SECRET'] } } }), {});
+});
+
+test('presentation: case context, optional analysis, field errors and busy state', async () => {
+  const c = context(); c.vistaActiva = 'caso';
+  api.defaults.adapter = async () => { throw invalid({ id_paciente_fk: ['Paciente inválido'], titulo: ['Título obligatorio'], descripcion: ['Descripción inválida'] }); };
+  await c.crearCaso();
+  const html = await render({ vistaActiva: 'caso', caseErrors: c.caseErrors });
+  for (const id of ['case-patient', 'case-name', 'case-description']) {
+    assert.ok(html.includes(`<label for="${id}"`));
+    assert.ok(html.includes(`aria-describedby="${id}-error"`));
+    assert.ok(html.includes(`id="${id}-error"`));
+  }
+  assert.match(element(html, 'input', 'crear_analisis'), /type="checkbox"/);
+  assert.match(element(html, 'input', 'crear_analisis'), /\bchecked\b/);
+  assert.match(html, /Se creará un análisis asociado al nuevo caso/);
+  assert.match(await render({ vistaActiva: 'caso', isCreatingCase: true }), /Creando\.\.\./);
+  c.limpiarFormCaso(); assert.deepEqual(c.caseErrors, {});
+});
+
+test('presentation: patients loading lifecycle and dependent selectors with empty/loading states', async () => {
+  const c = context(), calls = deferred(), loading = c.cargarPacientes(); await turn();
+  assert.equal(c.isLoadingPatients, true);
+  for (const section of ['caso', 'imagenes']) {
+    const html = await render({ vistaActiva: section, isLoadingPatients: c.isLoadingPatients });
+    assert.match(html, /Cargando pacientes\.\.\./);
+    assert.match(element(html, 'select', section === 'caso' ? 'case-patient' : 'upload-patient'), /disabled/);
+  }
+  calls[0].resolve([]); await loading; assert.equal(c.isLoadingPatients, false);
+  const html = await render({ vistaActiva: 'imagenes' });
+  for (const id of ['upload-case', 'upload-analysis']) assert.match(element(html, 'select', id), /disabled/);
+  assert.match(element(html, 'input', 'upload-files'), /disabled/);
+  for (const text of ['Seleccione un paciente para ver sus casos.', 'Seleccione un caso para ver sus análisis.', 'No hay archivos seleccionados.']) assert.ok(html.includes(text));
+  const formImagenes = { ...View.data().formImagenes, paciente: 1, caso: 2 };
+  const busy = await render({ vistaActiva: 'imagenes', formImagenes, isLoadingCases: true, isLoadingAnalyses: true });
+  for (const [id, message] of [['upload-case', 'Cargando casos...'], ['upload-analysis', 'Cargando análisis...']]) {
+    assert.match(element(busy, 'select', id), /disabled/); assert.ok(busy.includes(message));
+  }
+  assert.match(await render({ vistaActiva: 'imagenes', formImagenes }), /No hay análisis disponibles para este caso/);
+});
+
+test('presentation: upload destination, real sample radios, statuses, preview fallback and retry label', async () => {
+  const imagenesPreview = ['PENDING', 'UPLOADING', 'SUCCESS', 'ERROR'].map((status, i) => ({
+    archivo: { name: `fixture-${i}.tif` }, url: `blob:fixture-${i}`, status,
+    previewUnavailable: i === 3, error: i === 3 ? 'Imagen inválida' : '',
+  }));
+  const state = { vistaActiva: 'imagenes', pacientes: [{ id_paciente: 1, nombre: 'Test', apellido: 'Fixture' }],
+    casosDisponibles: [{ id_caso: 2, titulo: 'Caso de prueba' }], analisisDisponibles: [{ id_analisis: 3, estado: 0 }],
+    formImagenes: { ...View.data().formImagenes, paciente: 1, caso: 2, analisis: 3 }, imagenesPreview };
+  const html = await render(state), destination = html.match(/<dl[\s\S]*?<\/dl>/)[0];
+  for (const text of ['Test Fixture', 'Caso de prueba', '#3', 'saliva']) assert.ok(destination.includes(text));
+  for (const [i, status] of ['Pendiente', 'Subiendo...', 'Subida', 'Error'].entries()) {
+    assert.ok(html.includes(`fixture-${i}.tif`)); assert.ok(html.includes(status));
+  }
+  assert.match(html, /Vista previa no disponible/); assert.match(html, /Imagen inválida/);
+  for (const type of ['SALIVA', 'SANGRE']) {
+    assert.ok(html.includes(`<label for="upload-type-${type}"`));
+    assert.match(element(html, 'input', `upload-type-${type}`), /type="radio"/);
+  }
+  assert.match(element(html, 'input', 'upload-files'), /type="file" multiple accept="image\/\*"/);
+  assert.doesNotMatch(html, /Arrastra|drag-and-drop/);
+  assert.match(await render({ ...state, imagenesPreview: imagenesPreview.slice(2) }), /Reintentar fallidos/);
+  assert.match(await render({ ...state, isUploading: true }), /Subiendo\.\.\./);
 });

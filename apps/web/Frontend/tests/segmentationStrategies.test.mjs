@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import vuePlugin from '@vitejs/plugin-vue';
 import { parse } from '@vue/compiler-sfc';
-import { compile, createRenderer, createSSRApp, h, nextTick } from 'vue';
+import { compile, createRenderer, createSSRApp, h, nextTick, reactive } from 'vue';
 import { renderToString } from '@vue/server-renderer';
 
 // Use the installed Vue/Vite toolchain and Node runner; no test dependencies.
@@ -40,6 +40,14 @@ const { useSegmentationEditor } = await load('composables/useSegmentationEditor.
 const viewport = await load('composables/useSegmentationViewport.js');
 const presentation = await load('domain/characterizationPresentation.js');
 const { default: Characterization } = await load('components/characterization/CharacterizationResultPanel.vue');
+
+const { default: EditorToolbar } = await load('components/segmentation/SegmentationEditorToolbar.vue');
+const toolbarSource = await readFile(new URL('../src/components/segmentation/SegmentationEditorToolbar.vue', import.meta.url), 'utf8');
+const mainSource = await readFile(new URL('../src/components/MainContent.vue', import.meta.url), 'utf8');
+const ClientToolbar = { ...EditorToolbar, setup: undefined, ssrRender: undefined,
+  render: compile(parse(toolbarSource).descriptor.template.content) };
+const workflowTemplate = mainSource.slice(mainSource.indexOf('<section\n                v-if="showRevisionActions"'), mainSource.indexOf('<SegmentationResultPanel'));
+
 
 const response = (config, data) => ({ config, status: 200, statusText: 'OK', headers: {}, data });
 const result = (id, strategy) => ({ id, segmentation_strategy: strategy, estado: 'COMPLETADO', tipo_muestra: T.SALIVA });
@@ -833,4 +841,135 @@ test('18Q-C continue, history selection and SALIVA/BLOOD execution events surviv
   assert.equal(runs.length, 2);
   assert.equal(runs[1], undefined);
   renderer.render(null, root);
+});
+
+
+test('18Q-D toolbar tools, drawing types and undo/redo preserve events and availability', async () => {
+  const root = hostNode('root'), events = [];
+  const base = { viewerMode: 'EDIT', isEditMode: true, revisionLoading: false, isDraftDirty: true,
+    activeRevision: { numero_revision: 8, estado: 'BORRADOR' }, editorTool: 'DRAW', canUndo: true, canRedo: false,
+    drawingLabel: 'membrana', drawingLabels: Main.computed.editableDrawingLabels.call({
+      activeSegmentationConfig: { labels: [
+        { label: 'membrana', displayName: 'Membranas', editable: true },
+        { label: 'nucleo', displayName: 'Núcleos', editable: true },
+        { label: 'micronucleo', displayName: 'Micronúcleos', editable: true },
+      ] } }),
+    onUndo: () => events.push('undo'), onRedo: () => events.push('redo'),
+    onChangeEditorTool: value => events.push(value), onChangeDrawingLabel: value => events.push(value) };
+  const mount = extra => renderer.render(h(ClientToolbar, { ...base, ...extra }), root);
+  const button = text => findAll(root, 'button').find(node => node.text.trim() === text);
+  mount();
+  assert.equal(button('Dibujar').props['aria-pressed'], true);
+  assert.equal(button('Membranas').props['aria-pressed'], true);
+  assert.equal(button('Núcleos').props['aria-pressed'], false);
+  assert.equal(button('Deshacer').props.disabled, false);
+  assert.equal(button('Rehacer').props.disabled, true);
+  button('Mover vista').props.onClick(); button('Deshacer').props.onClick(); button('Núcleos').props.onClick();
+  assert.deepEqual(events, ['PAN', 'undo', 'nucleo']);
+  mount({ editorTool: 'PAN', canUndo: false, canRedo: true });
+  assert.equal(button('Mover vista').props['aria-pressed'], true);
+  assert.equal(button('Deshacer').props.disabled, true);
+  button('Rehacer').props.onClick(); assert.equal(events.at(-1), 'redo');
+  assert.equal(button('Membranas'), undefined);
+  mount({ drawingDisabled: true }); assert.equal(button('Membranas').props.disabled, true);
+  const html = await renderToString(createSSRApp(EditorToolbar, base));
+  assert.match(html, /Revisión #8 · BORRADOR/);
+  assert.doesNotMatch(html, /Guardar borrador|Validar revisión/);
+  renderer.render(null, root);
+});
+
+test('18Q-D object context and revision workflow remain separate with existing IDs and handlers', async () => {
+  const start = mainSource.indexOf('<div v-if="selectedObject" class="selected-object-grid">');
+  const end = mainSource.indexOf('<div\n                    v-if="editorTool', start);
+  const template = mainSource.slice(start, end);
+  const renderContext = selectedObject => renderToString(createSSRApp({
+    data: () => ({ selectedObject, editorTool: 'SELECT', selectedVertexIndex: null }),
+    methods: { overlayLabelDisplayName: () => 'Membranas', provenanceDisplayName: () => 'Manual' },
+    render: compile(template),
+  }));
+  assert.match(await renderContext({ id: 105, label: 'membrana', provenance: { origin: 'manual' } }), /#105/);
+  assert.match(await renderContext({ id: 105, label: 'membrana' }), /Membranas/);
+  assert.match(await renderContext(null), /Ninguno[\s\S]*Seleccione una máscara para editarla/);
+  const context = mainSource.slice(mainSource.indexOf('class="selected-object-panel"'), mainSource.indexOf(workflowTemplate));
+  assert.doesNotMatch(context, /Guardar borrador|Validar revisión|Deshacer|Rehacer/);
+  for (const handler of ['deleteSelectedObject', 'deleteSelectedVertex', "setVertexEditMode('MOVE')", "setVertexEditMode('INSERT')"])
+    assert.ok(context.includes(handler));
+  assert.match(workflowTemplate, /BORRADOR · No efectivo/);
+  assert.match(workflowTemplate, /@click="confirmAndValidateRevision"/);
+});
+
+for (const fail of [false, true]) {
+  test(`18Q-D save: idle hover, concurrent click guard, ${fail ? 'error/retry' : 'success'} recovery`, async () => {
+    const revision = useSegmentationRevision();
+    const draft = { id_revision_segmentacion: 10, resultado_segmentacion: 5, numero_revision: 2,
+      estado: 'BORRADOR', actualizado_en: '2026-10-01T10:00:00Z', resultado_editado: { objects: manualObjects } };
+    revision.setActiveRevision(draft);
+    let release, requests = 0, payload;
+    api.defaults.adapter = config => { requests++; payload = JSON.parse(config.data); return new Promise((resolve, reject) => {
+      release = () => fail ? reject({ response: { data: { error: 'Conflicto simulado' } } }) : resolve(response(config, draft));
+    }); };
+    const ctx = reactive({ ...revision, showRevisionActions: true, segmentacionLoading: false, reservingObjectId: false,
+      isEditMode: true, isDraftDirty: true, draftPolygonPoints: [], draftPointDrag: null, vertexDrag: null,
+      selectedObjectKey: null, isDrawTool: false, validateRevisionBlockReason: '', canValidateRevision: false,
+      get canSaveDraft() { return Main.computed.canSaveDraft.call(this); },
+      buildEditableSnapshot: value => value,
+      loadWorkingRevision() { this.isDraftDirty = false; },
+      saveDraft: () => Main.methods.saveDraft.call(ctx), confirmAndValidateRevision() {},
+    });
+    const root = hostNode('root');
+    renderer.render(h({ setup: () => ctx, render: compile(workflowTemplate) }), root);
+    const saveButton = () => findAll(root, 'button').find(node => node.props.class.includes('save-draft-btn'));
+    assert.equal(saveButton().props.disabled, false);
+    assert.equal(saveButton().props['aria-busy'], false);
+    assert.doesNotMatch(saveButton().props.class, /is-saving/);
+    assert.ok(!Object.keys(saveButton().props).some(key => /mouse|pointer/i.test(key)), 'Hover has no request handler');
+    assert.equal(requests, 0);
+    const first = saveButton().props.onClick();
+    await new Promise(resolve => setImmediate(resolve));
+    await nextTick();
+    assert.equal(saveButton().props.disabled, true);
+    assert.equal(saveButton().props['aria-busy'], true);
+    assert.match(saveButton().text, /Guardando/);
+    await saveButton().props.onClick(); assert.equal(requests, 1);
+    assert.deepEqual(payload, { resultado_editado: draft.resultado_editado, expected_updated_at: draft.actualizado_en });
+    release(); await first; await nextTick();
+    assert.equal(ctx.isSavingDraft, false);
+    assert.equal(saveButton().props['aria-busy'], false);
+    assert.doesNotMatch(saveButton().props.class, /is-saving/);
+    assert.equal(saveButton().text, 'Guardar borrador');
+    assert.equal(saveButton().props.disabled, !fail);
+    assert.equal(ctx.saveDraftError, fail ? 'Conflicto simulado' : '');
+    assert.match(mainSource, /\.save-draft-btn:disabled\s*\{\s*cursor: not-allowed/);
+    assert.match(mainSource, /\.save-draft-btn\.is-saving\s*\{\s*cursor: progress/);
+    renderer.render(null, root);
+  });
+}
+
+test('18Q-D first membrane updates working counts and visible layers without reload, preserving N/MN', async () => {
+  const { context, editor } = selectiveContext();
+  Object.defineProperty(context, 'draftPolygonPoints', { get: () => editor.draftPolygonPoints.value });
+  context.activeRevisionId = 10;
+  context.cancelDraftPointDrag = () => {};
+  context.finishDraftPolygonEdit = editor.finishDraftPolygonEdit;
+  context.overlayLabelVisibility = { membrana: false };
+  context.showOverlayLabel = Main.methods.showOverlayLabel;
+  const overlayContext = { get activeOverlayObjects() { return editor.workingObjects.value; },
+    overlayObjectKey: object => String(object.id), scalePolygonPoints: points => points,
+    get overlayDrawableObjects() { return Main.computed.overlayDrawableObjects.call(this); },
+    get overlayLabelNames() { return Main.computed.overlayLabelNames.call(this); },
+    get overlayLabelVisibility() { return context.overlayLabelVisibility; },
+    overlayColorForLabel: () => ({ stroke: '#000', fill: '#fff' }), overlayLabelDisplayName: label => label,
+  };
+  assert.deepEqual(overlayContext.overlayLabelNames, ['micronucleo', 'nucleo']);
+  assert.equal(editor.workingSummary.value.counts_by_label.membrana, 0);
+  for (const point of [[0,0],[10,0],[10,10]]) editor.appendDraftPoint(point);
+  api.defaults.adapter = async config => response(config, { id: 1001 });
+  await Main.methods.finishDraftPolygon.call(context);
+  assert.deepEqual(editor.workingObjects.value.slice(0, 2), manualObjects);
+  assert.deepEqual(editor.workingSummary.value, { counts_by_label: { membrana: 1, nucleo: 1, micronucleo: 1 }, total_objects: 3 });
+  const layers = Main.computed.overlayLabels.call(overlayContext);
+  assert.deepEqual(layers.map(layer => layer.label), ['membrana', 'micronucleo', 'nucleo']);
+  assert.equal(layers[0].visible, true); assert.equal(layers[0].count, 1);
+  editor.undoRevisionEdit(); assert.equal(editor.workingSummary.value.counts_by_label.membrana, 0);
+  editor.redoRevisionEdit(); assert.equal(editor.workingSummary.value.counts_by_label.membrana, 1);
 });

@@ -120,6 +120,14 @@
                 :active-revision="activeRevision"
                 :is-draft-dirty="isDraftDirty"
                 :editor-tool="editorTool"
+                :can-undo="canUndo"
+                :can-redo="canRedo"
+                :drawing-labels="editableDrawingLabels"
+                :drawing-label="drawingLabel"
+                :drawing-disabled="segmentacionLoading || reservingObjectId"
+                @undo="undoRevisionEdit"
+                @redo="redoRevisionEdit"
+                @change-drawing-label="drawingLabel = $event"
                 @change-viewer-mode="setViewerMode"
                 @change-editor-tool="setEditorTool"
               />
@@ -236,7 +244,7 @@
                 :inert="segmentacionLoading || reservingObjectId || undefined"
               >
                 <div class="selected-object-header">
-                  <h4>{{ contextualPanelTitle }}</h4>
+                  <h4>Objeto seleccionado</h4>
                   <span v-if="isSpacePressed && editorTool !== 'PAN'" class="editor-hint">
                     Pan temporal
                   </span>
@@ -245,7 +253,7 @@
                   </span>
                 </div>
 
-                <template v-if="showObjectContext">
+                <template v-if="isEditMode">
                   <div v-if="selectedObject" class="selected-object-grid">
                     <span>Tipo</span>
                     <strong>{{ overlayLabelDisplayName(selectedObject.label) }}</strong>
@@ -274,7 +282,7 @@
                   </div>
 
                   <div v-else class="selected-object-empty">
-                    Seleccione una máscara sobre la imagen.
+                    <strong>Ninguno</strong><br />Seleccione una máscara para editarla.
                   </div>
                   <div
                     v-if="editorTool === 'VERTEX' && !selectedObject"
@@ -294,6 +302,7 @@
                     v-if="editorTool === 'VERTEX'"
                     class="vertex-mode-panel"
                   >
+                    <h4>Editar contorno</h4>
                     <div class="vertex-mode-buttons">
                       <button
                         class="mode-btn editor-tool-btn"
@@ -335,7 +344,7 @@
                   </div>
 
                   <button
-                    v-if="selectedObject"
+                    v-if="selectedObject && showObjectContext"
                     class="control-btn danger full-width"
                     @click="deleteSelectedObject"
                   >
@@ -344,7 +353,7 @@
                 </template>
 
                 <div
-                  v-else-if="editorTool === 'PAN'"
+                  v-if="editorTool === 'PAN'"
                   class="draft-status"
                 >
                   Mueva la imagen ampliada. Use Seleccionar o Editar contorno para acciones de edición.
@@ -354,22 +363,7 @@
                   v-if="isDrawTool"
                   class="drawing-panel"
                 >
-                  <div class="drawing-label-row">
-                    <span>Tipo a dibujar</span>
-                    <select
-                      v-model="drawingLabel"
-                      class="drawing-label-select"
-                      :disabled="!isEditMode"
-                    >
-                      <option
-                        v-for="labelConfig in editableDrawingLabels"
-                        :key="labelConfig.label"
-                        :value="labelConfig.label"
-                      >
-                        {{ labelConfig.displayName }}
-                      </option>
-                    </select>
-                  </div>
+                  <h4>Máscara en construcción</h4>
                   <div
                     v-if="draftPolygonPoints.length"
                     class="draft-status"
@@ -390,6 +384,12 @@
                     class="draft-status warning"
                   >
                     {{ invalidDrawMessage }}
+                  </div>
+                  <div
+                    v-if="draftPolygonPoints.length"
+                    class="segmentation-status warning"
+                  >
+                    Finalice o cancele la máscara en construcción.
                   </div>
                   <div class="editor-actions">
                     <button
@@ -415,7 +415,16 @@
                     </button>
                   </div>
                 </div>
+              </div>
 
+              <section
+                v-if="showRevisionActions"
+                class="selected-object-panel revision-workflow"
+                aria-label="Acciones de revisión"
+                :inert="segmentacionLoading || reservingObjectId || undefined"
+              >
+                <div class="selected-object-header"><h4>Acciones de revisión</h4></div>
+                <div v-if="activeRevision?.estado === 'BORRADOR'" class="draft-status">BORRADOR · No efectivo</div>
                 <div
                   v-if="showRevisionActions && saveDraftError"
                   class="segmentation-status error"
@@ -441,31 +450,13 @@
                   {{ validateRevisionMessage }}
                 </div>
                 <div
-                  v-if="isDrawTool && draftPolygonPoints.length"
-                  class="segmentation-status warning"
-                >
-                  Finalice o cancele la máscara en construcción.
-                </div>
-                <div
                   v-if="showRevisionActions"
                   class="editor-actions"
                 >
                   <button
-                    class="control-btn"
-                    :disabled="!canUndo"
-                    @click="undoRevisionEdit"
-                  >
-                    Deshacer
-                  </button>
-                  <button
-                    class="control-btn"
-                    :disabled="!canRedo"
-                    @click="redoRevisionEdit"
-                  >
-                    Rehacer
-                  </button>
-                  <button
-                    class="btn-segment"
+                    class="btn-segment save-draft-btn"
+                    :class="{ 'is-saving': isSavingDraft }"
+                    :aria-busy="isSavingDraft"
                     :disabled="!canSaveDraft"
                     @click="saveDraft"
                   >
@@ -486,7 +477,7 @@
                 >
                   {{ isValidatingRevision ? 'Validando...' : 'Validar revisión' }}
                 </button>
-              </div>
+              </section>
 
               <SegmentationResultPanel
                 v-if="imagenSeleccionada"
@@ -839,17 +830,6 @@ export default {
 
     showRevisionActions() {
       return this.isEditMode && ["SELECT", "VERTEX"].includes(this.editorTool);
-    },
-
-    contextualPanelTitle() {
-      const titles = {
-        SELECT: "Objeto seleccionado",
-        PAN: "Navegación",
-        DRAW: "Máscara en construcción",
-        VERTEX: "Editar contorno",
-      };
-
-      return titles[this.editorTool] || "Edición";
     },
 
     activeRevisionSummary() {
@@ -3191,6 +3171,8 @@ export default {
 }
 
 .selected-object-panel {
+  min-width: 0;
+  overflow-wrap: anywhere;
   background: #f8f9fa;
   border: 1px solid #d9e2ec;
   border-radius: 10px;
@@ -3224,7 +3206,7 @@ export default {
   display: grid;
   font-size: 12px;
   gap: 6px 10px;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto minmax(0, 1fr);
 }
 
 .selected-object-grid span {
@@ -3272,27 +3254,6 @@ export default {
   gap: 8px;
 }
 
-.drawing-label-row {
-  align-items: center;
-  display: flex;
-  gap: 8px;
-  justify-content: space-between;
-}
-
-.drawing-label-row span {
-  color: #667;
-  font-size: 12px;
-}
-
-.drawing-label-select {
-  border: 1px solid #d9e2ec;
-  border-radius: 8px;
-  color: #2c3e50;
-  font-size: 12px;
-  min-width: 130px;
-  padding: 6px 8px;
-}
-
 .draft-status {
   background: #f0f4f8;
   border: 1px solid #d9e2ec;
@@ -3331,6 +3292,18 @@ export default {
 .btn-segment:disabled {
   cursor: wait;
   opacity: 0.7;
+}
+
+.save-draft-btn:disabled {
+  cursor: not-allowed;
+}
+
+.save-draft-btn.is-saving {
+  cursor: progress;
+}
+
+.revision-workflow .editor-actions {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .segmentation-status {

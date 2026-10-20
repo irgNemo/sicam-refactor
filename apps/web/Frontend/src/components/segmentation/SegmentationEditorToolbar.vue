@@ -58,7 +58,7 @@
           :aria-pressed="editorTool === 'PAN'"
           @click="$emit('change-editor-tool', 'PAN')"
         >
-          Mover
+          Mover vista
         </button>
         <button
           class="mode-btn editor-tool-btn"
@@ -79,6 +79,22 @@
           Editar contorno
         </button>
       </div>
+      <div class="editor-tool-buttons" aria-label="Historial de edición" :inert="drawingDisabled || undefined">
+        <button class="mode-btn" :disabled="!canUndo" @click="$emit('undo')">Deshacer</button>
+        <button class="mode-btn" :disabled="!canRedo" @click="$emit('redo')">Rehacer</button>
+      </div>
+    </div>
+    <div v-if="isEditMode && editorTool === 'DRAW'" class="editor-tool-buttons" role="group" aria-label="Tipo a dibujar">
+      <span class="drawing-type-label">Dibujar:</span>
+      <button
+        v-for="labelConfig in drawingLabels"
+        :key="labelConfig.label"
+        class="mode-btn"
+        :disabled="drawingDisabled"
+        :class="{ active: drawingLabel === labelConfig.label }"
+        :aria-pressed="drawingLabel === labelConfig.label"
+        @click="$emit('change-drawing-label', labelConfig.label)"
+      >{{ labelConfig.displayName }}</button>
     </div>
   </div>
 </template>
@@ -86,8 +102,13 @@
 <script>
 export default {
   name: "SegmentationEditorToolbar",
-  emits: ["change-viewer-mode", "change-editor-tool"],
+  emits: ["change-viewer-mode", "change-editor-tool", "undo", "redo", "change-drawing-label"],
   props: {
+    canUndo: { type: Boolean, default: false },
+    canRedo: { type: Boolean, default: false },
+    drawingDisabled: { type: Boolean, default: false },
+    drawingLabels: { type: Array, default: () => [] },
+    drawingLabel: { type: String, default: "" },
     viewerMode: {
       type: String,
       required: true,
@@ -172,7 +193,7 @@ export default {
 }
 
 .mode-btn:disabled {
-  cursor: wait;
+  cursor: not-allowed;
   opacity: 0.7;
 }
 
@@ -183,7 +204,8 @@ export default {
   font-size: 12px;
   font-weight: 700;
   padding: 6px 10px;
-  white-space: nowrap;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .revision-badge.dirty {
@@ -200,5 +222,11 @@ export default {
 
 .editor-tool-btn {
   padding-inline: 10px;
+}
+
+.drawing-type-label {
+  align-self: center;
+  font-size: 12px;
+  font-weight: 700;
 }
 </style>

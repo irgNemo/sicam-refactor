@@ -10,7 +10,7 @@ class MeasurementError(ValueError):
         self.metrics = metrics or {}
 
 
-def normalized_gray(gray):
+def normalized_gray(gray, *, smoothing_sigma=1.0):
     """Robust bright-background plane, estimated from tiles, on the original raster.
 
     Float32 raster buffers limit memory; plane estimation and all fits use float64.
@@ -39,7 +39,9 @@ def normalized_gray(gray):
     normalized = np.clip(gray.astype(np.float32) * 200.0 / np.maximum(plane, 1), 0, 255).astype(np.uint8)
     if np.ptp(normalized) < 5:
         raise MeasurementError('NO_REFERENCE_DETECTED')
-    return cv2.GaussianBlur(normalized, (0, 0), 1.0), coef.tolist()
+    if not np.isfinite(smoothing_sigma) or smoothing_sigma <= 0:
+        raise ValueError('smoothing_sigma must be positive and finite')
+    return cv2.GaussianBlur(normalized, (0, 0), smoothing_sigma), coef.tolist()
 
 
 def dark_mask(gray):

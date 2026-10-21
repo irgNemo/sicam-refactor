@@ -5,8 +5,14 @@ from .common import (MeasurementError, normalized_gray, dark_mask, fit_ellipse,
                      ellipse_residual, ellipse_metrics, scales)
 
 
-def measure_circle(gray, known_diameter_um):
-    normalized, illumination = normalized_gray(gray)
+def measure_circle(gray, known_diameter_um, *, smoothing_sigma=1.0,
+                   radial_points=1440, rejection_mad=4.5):
+    # Optional study parameters; defaults retain the 18S-A calculation exactly.
+    if isinstance(radial_points, bool) or not isinstance(radial_points, int) or radial_points < 360:
+        raise ValueError('radial_points must be an integer >= 360')
+    if not np.isfinite(rejection_mad) or rejection_mad <= 0:
+        raise ValueError('rejection_mad must be positive and finite')
+    normalized, illumination = normalized_gray(gray, smoothing_sigma=smoothing_sigma)
     mask, threshold = dark_mask(normalized)
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
     h, w = gray.shape
@@ -42,7 +48,7 @@ def measure_circle(gray, known_diameter_um):
     initial = fit_ellipse(contour[:, 0, :])
     center, radii, axes = initial
     # Radial profiles sampled from the original-resolution, normalized image.
-    angles = np.linspace(0, 2*np.pi, 1440, endpoint=False, dtype=np.float64)
+    angles = np.linspace(0, 2*np.pi, radial_points, endpoint=False, dtype=np.float64)
     directions = np.column_stack((np.cos(angles), np.sin(angles)))
     radial = 1/np.sqrt(np.sum(((directions @ axes)/radii)**2, axis=1))
     search = max(6., .02*float(radii.max()))
@@ -67,7 +73,7 @@ def measure_circle(gray, known_diameter_um):
         residual = ellipse_residual(points, ellipse)
         med = np.median(residual[keep])
         mad = 1.4826*np.median(abs(residual[keep]-med))
-        keep = valid & (abs(residual-med) <= max(.75, 4.5*mad))
+        keep = valid & (abs(residual-med) <= max(.75, rejection_mad*mad))
         if keep.sum() < 30:
             raise MeasurementError('INSUFFICIENT_EDGE_POINTS', info)
     ellipse = fit_ellipse(points[keep])

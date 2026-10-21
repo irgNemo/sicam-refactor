@@ -1,0 +1,26 @@
+[
+  {
+    "file": "../../../../../../data/calibration/Cal_DIV0.01mm_40x.jpg",
+    "pattern_type": "graduated_grid",
+    "division_um": 10.0,
+    "objective_magnification": 40,
+    "expected_dimensions_px": [4928, 4928],
+    "acquisition": {"microscope": "OPTIKA B-1000FLHBO", "camera": "OPTIKA C-B25+", "adapter": "M-114"}
+  },
+  {
+    "file": "../../../../../../data/calibration/Cal_0.15mm_40x (1).jpg",
+    "pattern_type": "circle",
+    "known_diameter_um": 150.0,
+    "objective_magnification": 40,
+    "expected_dimensions_px": [4928, 4928],
+    "acquisition": {"microscope": "OPTIKA B-1000FLHBO", "camera": "OPTIKA C-B25+", "adapter": "M-114"}
+  },
+  {
+    "file": "../../../../../../data/calibration/Cal_0.07mm_40x (1).jpg",
+    "pattern_type": "circle",
+    "known_diameter_um": 70.0,
+    "objective_magnification": 40,
+    "expected_dimensions_px": [4928, 4928],
+    "acquisition": {"microscope": "OPTIKA B-1000FLHBO", "camera": "OPTIKA C-B25+", "adapter": "M-114"}
+  }
+]

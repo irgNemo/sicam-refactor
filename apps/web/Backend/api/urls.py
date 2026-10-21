@@ -10,7 +10,16 @@ from .views import (
     RevisionSegmentacionViewSet,
 )
 
+from .acquisition_views import (
+    AcquisitionProfileViewSet, CalibrationViewSet, CalibrationReferenceViewSet,
+    AcquisitionSeriesViewSet, AcquisitionCompatibilityView,
+)
+
 router = DefaultRouter()
+router.register('acquisition-profiles', AcquisitionProfileViewSet, basename='acquisition-profile')
+router.register('calibrations', CalibrationViewSet, basename='calibration')
+router.register('calibration-references', CalibrationReferenceViewSet, basename='calibration-reference')
+router.register('acquisition-series', AcquisitionSeriesViewSet, basename='acquisition-series')
 router.register(r'pacientes', PacienteViewSet, basename='paciente')
 router.register(r'casos', CasoViewSet, basename='caso')
 router.register(r'analisis', AnalisisViewSet, basename='analisis')
@@ -32,5 +41,6 @@ router.register(
 )
 
 urlpatterns = [
+    path('acquisition-compatibility/<str:sample_type>/<int:pk>/', AcquisitionCompatibilityView.as_view()),
     path('', include(router.urls)),
 ]

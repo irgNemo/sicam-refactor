@@ -1,8 +1,10 @@
 import uuid
 
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
 from .segmentation_strategies import SalivaSegmentationStrategy
+from .acquisition_models import (AcquisitionProfile, Calibration, CalibrationReference,
+                                 AcquisitionSeries, AcquisitionSampleMixin)
 
 # Modelo de Paciente
 class Paciente(models.Model):
@@ -125,11 +127,27 @@ class AnalisisPred(models.Model):
     )
     observaciones = models.TextField(blank=True, null=True)
 
+    def clean(self):
+        super().clean()
+        if self.pk:
+            old = type(self).objects.filter(pk=self.pk).first()
+            if old and old.id_paciente_fk_id != self.id_paciente_fk_id:
+                if (self.muestras_saliva.filter(acquisition_series__isnull=False).exists()
+                        or self.muestras_sangre.filter(acquisition_series__isnull=False).exists()):
+                    raise ValidationError({'id_paciente_fk': 'PATIENT_MISMATCH: el análisis tiene muestras vinculadas a adquisición.'})
+
+    def save(self, *args, **kwargs):
+        with transaction.atomic():
+            if self.pk:
+                type(self).objects.select_for_update().filter(pk=self.pk).first()
+            self.clean()
+            return super().save(*args, **kwargs)
+
     def __str__(self):
         return f"Analisis {self.id_analisis} - {self.get_estado_display()}"
 
 # Modelo de Muestra de Saliva
-class MuestraSaliva(models.Model):
+class MuestraSaliva(AcquisitionSampleMixin):
     id_muestra = models.AutoField(primary_key=True)
     analisis = models.ForeignKey(
         AnalisisPred,
@@ -146,7 +164,7 @@ class MuestraSaliva(models.Model):
 
 
 # Modelo de Muestra de Sangre
-class MuestraSangre(models.Model):
+class MuestraSangre(AcquisitionSampleMixin):
     id_muestra = models.AutoField(primary_key=True)
     analisis = models.ForeignKey(
         AnalisisPred,

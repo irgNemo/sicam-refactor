@@ -3,6 +3,7 @@ from collections.abc import Mapping
 from rest_framework import serializers
 from django.core.exceptions import ValidationError as ModelValidationError
 from django.utils import timezone
+from .acquisition_serializers import validate_candidate, ValidatedSerializer
 from .services.patient_identity import pseudonymized_identification
 from .segmentation_strategies import SalivaSegmentationStrategy
 from .models import (
@@ -116,8 +117,15 @@ class CasoSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({'case_number': 'Ya existe para este paciente.'})
         return attrs
 
-class SampleUploadSerializer(serializers.ModelSerializer):
+class SampleUploadSerializer(ValidatedSerializer):
     """Shared admission rule for new samples; existing samples remain readable."""
+
+    def validate(self, attrs):
+        if 'acquisition_series' in attrs and attrs['acquisition_series'] is not None:
+            request = self.context.get('request')
+            if not request or not request.user.is_authenticated:
+                raise serializers.ValidationError({'acquisition_series': 'Se requiere autenticación para asignar una serie.'})
+        return validate_candidate(self.Meta.model, self.instance, attrs)
 
     def validate_analisis(self, value):
         if self.instance is None and value.estado == 2:
@@ -276,7 +284,7 @@ class RevisionSegmentacionSerializer(serializers.ModelSerializer):
 
         return instance
 
-class AnalisisSerializer(serializers.ModelSerializer):
+class AnalisisSerializer(ValidatedSerializer):
     muestras_saliva = MuestraSalivaSerializer(many=True, read_only=True)
     
     class Meta:
@@ -290,4 +298,4 @@ class AnalisisSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({
                 'id_caso_fk': 'El caso no pertenece al paciente seleccionado.',
             })
-        return attrs
+        return validate_candidate(self.Meta.model, self.instance, attrs)

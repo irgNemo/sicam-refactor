@@ -3,7 +3,7 @@ export function isSalivaMorphometricV2(resultJson) {
     resultJson &&
     typeof resultJson === "object" &&
     resultJson.sample_type === "SALIVA" &&
-    ["2.0", "2.1"].includes(resultJson.schema_version)
+    ["2.0", "2.1", "2.2"].includes(resultJson.schema_version)
   );
 }
 
@@ -68,11 +68,9 @@ export function formatMetric(key, value) {
   return formatNumber(value, 4);
 }
 
-export function objectMetricGroups(metrics, extended = false, includeDependencyMetrics = false) {
+export function objectMetricGroups(metrics, extended = false, includeDependencyMetrics = false, physical = false) {
   const values = metrics && typeof metrics === "object" ? metrics : {};
-  const rows = (keys, source = values) => keys.map(key => ({
-    key, label: METRIC_LABELS[key], value: formatMetric(key, source?.[key]),
-  }));
+  const rows = (keys, source = values) => keys.map(key => metricPresentation(key, source, physical));
   const morphology = ["area_px2", "perimeter_px", "centroid_px", "circularity"];
   const intensity = ["mean_gray_intensity"];
   if (extended) {
@@ -134,4 +132,42 @@ const WARNING_LABELS = Object.freeze({
 export function warningLabel(code) {
   if (Object.prototype.hasOwnProperty.call(WARNING_LABELS, code)) return WARNING_LABELS[code];
   return typeof code === "string" && code ? `Advertencia: ${code}` : "Advertencia";
+}
+
+// Backend values only. Never derive physical measures from calibration in Vue.
+const PHYSICAL_METRICS = Object.freeze({
+  area_px2: ["area_um2", " µm²"], perimeter_px: ["perimeter_um", " µm"],
+  centroid_px: ["centroid_um", " µm"], distance_to_nucleus_px: ["distance_to_nucleus_um", " µm"],
+  mean_nucleus_area_px2: ["mean_nucleus_area_um2", " µm²"],
+});
+export function metricPresentation(key, metrics, physical = false) {
+  const pixel = key === "mean_nucleus_area_px2"
+    ? formatMetric("area_px2", metrics?.[key]) : formatMetric(key, metrics?.[key]);
+  const mapping = PHYSICAL_METRICS[key];
+  const value = mapping ? metrics?.[mapping[0]] : null;
+  const coordinate = key === "centroid_px";
+  const valid = coordinate
+    ? Array.isArray(value) && value.length === 2 && value.every(Number.isFinite)
+    : Number.isFinite(value);
+  return {
+    key, label: METRIC_LABELS[key],
+    value: physical && mapping && valid
+      ? coordinate ? `(${formatNumber(value[0], 3)}, ${formatNumber(value[1], 3)}) µm`
+        : formatNumber(value, 3, mapping[1]) : pixel,
+    secondary: physical && mapping && valid ? pixel : null,
+  };
+}
+
+const PHYSICAL_REASONS = Object.freeze({
+  NO_ACQUISITION_SERIES: "Sin serie de adquisición.",
+  NO_CALIBRATION: "Sin calibración.", CALIBRATION_RETIRED: "La calibración está retirada.",
+  PROFILE_MISMATCH: "El perfil de adquisición no coincide.",
+  RESOLUTION_MISMATCH: "Resolución incompatible.", PATIENT_MISMATCH: "La serie no corresponde al paciente.",
+  IMAGE_MODE_MISMATCH: "El modo de imagen no coincide con el perfil.",
+  INVALID_IMAGE: "No se pudo leer la imagen original.",
+  INVALID_CALIBRATION: "La calibración no es válida.",
+});
+export function physicalUnavailableReason(reason) {
+  return Object.hasOwn(PHYSICAL_REASONS, reason) ? PHYSICAL_REASONS[reason]
+    : "Compatibilidad física no disponible para este resultado.";
 }

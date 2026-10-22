@@ -9,7 +9,8 @@
       <dl class="metric-values">
         <div v-for="metric in group.rows" :key="metric.key">
           <dt>{{ metric.label }}</dt>
-          <dd>{{ metric.value }}</dd>
+          <dd v-if="metric.secondary">{{ metric.value }}<small class="pixel-secondary">{{ metric.secondary }}</small></dd>
+          <dd v-else>{{ metric.value }}</dd>
         </div>
       </dl>
       <div v-if="group.quality" class="texture-quality">
@@ -33,17 +34,19 @@ export default {
   props: {
     metrics: { type: Object, default: null },
     extended: { type: Boolean, default: false },
+    physical: { type: Boolean, default: false },
     includeDependencyMetrics: { type: Boolean, default: false },
   },
   computed: {
     groups() {
-      return objectMetricGroups(this.metrics, this.extended, this.includeDependencyMetrics);
+      return objectMetricGroups(this.metrics, this.extended, this.includeDependencyMetrics, this.physical);
     },
   },
 };
 </script>
 
 <style scoped>
+.pixel-secondary { display: block; color: #667085; font-size: 11px; margin-top: 3px; }
 .object-metric-groups { display: grid; gap: 12px; min-width: 0; }
 .metric-group { border-top: 1px solid #e4e7ec; padding-top: 9px; min-width: 0; }
 .metric-group h6 { color: #344054; font-size: 12px; margin: 0 0 8px; }

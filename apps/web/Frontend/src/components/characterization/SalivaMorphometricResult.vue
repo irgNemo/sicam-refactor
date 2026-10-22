@@ -1,5 +1,29 @@
 <template>
   <div class="morphometric-result">
+    <section v-if="resultJson.schema_version === '2.2'" class="physical-context">
+      <template v-if="hasPhysical">
+        <div class="calibration-heading">
+          <strong>Calibración: {{ resultJson.calibration?.label }}</strong>
+          <span class="schema-badge">{{ resultJson.calibration?.status === 'PROVISIONAL' ? 'Provisional' : 'Validada' }}</span>
+        </div>
+        <p v-if="resultJson.calibration?.status === 'PROVISIONAL'">Las medidas físicas utilizan una calibración provisional.</p>
+        <p v-else>Medidas físicas con calibración validada.</p>
+        <details>
+          <summary>Detalle de calibración utilizada</summary>
+          <dl class="methodology-values">
+            <div><dt>Escala X</dt><dd>{{ formatNumber(resultJson.calibration?.scale_x_um_per_px, 6, ' µm/px') }}</dd></div>
+            <div><dt>Escala Y</dt><dd>{{ formatNumber(resultJson.calibration?.scale_y_um_per_px, 6, ' µm/px') }}</dd></div>
+            <div><dt>Resolución</dt><dd>{{ resultJson.image_dimensions_px?.width }} × {{ resultJson.image_dimensions_px?.height }} px</dd></div>
+          </dl>
+          <p>Los centroides indican posición relativa al origen de la imagen, no del portaobjetos.</p>
+          <p>El estado y las escalas corresponden al momento de la caracterización.</p>
+        </details>
+      </template>
+      <template v-else>
+        <strong>Medidas físicas no disponibles.</strong>
+        <p>{{ physicalUnavailableReason(resultJson.physical_unavailable_reason) }}</p>
+      </template>
+    </section>
     <section class="result-section">
       <div class="section-heading">
         <div>
@@ -54,6 +78,7 @@
           </div>
         </dl>
         <p v-else>Metodología no disponible en este resultado.</p>
+        <p v-if="resultJson.schema_version === '2.2'">GLCM conserva la distancia en píxeles; no está normalizada a una distancia física. Excentricidad y circularidad conservan su definición en píxeles.</p>
       </div>
     </section>
 
@@ -94,7 +119,8 @@
         </article>
         <article class="science-metric-card">
           <span>Area nuclear promedio</span>
-          <strong>{{ formatNumber(summary.mean_nucleus_area_px2, 2, " px²") }}</strong>
+          <strong>{{ meanNucleusArea.value }}</strong>
+          <small v-if="meanNucleusArea.secondary">{{ meanNucleusArea.secondary }}</small>
         </article>
         <article class="science-metric-card">
           <span>Circularidad nuclear promedio</span>
@@ -243,7 +269,7 @@
                     <article class="object-detail">
                       <h6>Región celular {{ displayValue(cell.membrane_id) }}</h6>
                       <span>ID origen: {{ displayValue(cell.source_raw_id) }}</span>
-                      <SalivaObjectMetrics :metrics="cell.metrics" :extended="isExtended" />
+                      <SalivaObjectMetrics :metrics="cell.metrics" :extended="isExtended" :physical="hasPhysical" />
                     </article>
 
                     <article class="object-detail">
@@ -262,7 +288,7 @@
                         <strong>Nucleo {{ displayValue(nucleus.id) }}</strong>
                         <span>ID origen: {{ displayValue(nucleus.source_raw_id) }}</span>
                         <span>Asociacion: {{ associationDisplay(nucleus.association_status) }}</span>
-                        <SalivaObjectMetrics :metrics="nucleus.metrics" :extended="isExtended" />
+                        <SalivaObjectMetrics :metrics="nucleus.metrics" :extended="isExtended" :physical="hasPhysical" />
                       </div>
                     </article>
 
@@ -284,7 +310,7 @@
                         <span>ID origen: {{ displayValue(micronucleus.source_raw_id) }}</span>
                         <span>Nucleo asociado: {{ displayValue(micronucleus.nucleus_id) }}</span>
                         <span>Asociacion: {{ associationDisplay(micronucleus.association_status) }}</span>
-                        <SalivaObjectMetrics :metrics="micronucleus.metrics" :extended="isExtended" :include-dependency-metrics="true" />
+                        <SalivaObjectMetrics :metrics="micronucleus.metrics" :extended="isExtended" :physical="hasPhysical" :include-dependency-metrics="true" />
                       </div>
                     </article>
                   </div>
@@ -335,7 +361,7 @@
               <span v-if="group.ambiguous">
                 Membranas candidatas: {{ candidateMembranesDisplay(item) }}
               </span>
-              <SalivaObjectMetrics :metrics="item.metrics" :extended="isExtended" :include-dependency-metrics="group.micronucleus" />
+              <SalivaObjectMetrics :metrics="item.metrics" :extended="isExtended" :physical="hasPhysical" :include-dependency-metrics="group.micronucleus" />
             </article>
           </div>
         </details>
@@ -406,6 +432,8 @@ import {
   displayValue,
   formatGenotoxicityPercentage,
   formatNumber,
+  metricPresentation,
+  physicalUnavailableReason,
   textureMethodologyRows,
   warningLabel,
 } from "../../domain/characterizationPresentation";
@@ -449,7 +477,13 @@ export default {
 
   computed: {
     isExtended() {
-      return this.resultJson.schema_version === "2.1";
+      return ["2.1", "2.2"].includes(this.resultJson.schema_version);
+    },
+    hasPhysical() {
+      return this.resultJson.schema_version === "2.2" && this.resultJson.physical_units_available === true;
+    },
+    meanNucleusArea() {
+      return metricPresentation("mean_nucleus_area_px2", this.summary, this.hasPhysical);
     },
     methodologyRows() {
       return textureMethodologyRows(this.resultJson.methodology?.texture);
@@ -588,6 +622,7 @@ export default {
   },
 
   methods: {
+    physicalUnavailableReason,
     warningLabel,
     toggleCellDetail(key) {
       this.expandedCells[key] = !this.expandedCells[key];
@@ -680,6 +715,12 @@ export default {
 </script>
 
 <style scoped>
+.physical-context { background: #f0f7fa; border: 1px solid #d5e4eb; border-radius: 8px; padding: 12px; font-size: 12px; color: #344054; }
+.calibration-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.physical-context p { line-height: 1.5; margin: 8px 0; }
+.physical-context dl { margin-top: 12px; }
+.science-metric-card small { color: #667085; }
+
 .disclosure-button { background: transparent; border: 1px solid #dde4ee; border-radius: 6px; color: #344054; cursor: pointer; font: inherit; padding: 7px 9px; text-align: left; align-self: flex-start; }
 .disclosure-button:focus-visible { outline: 2px solid #1e88e5; outline-offset: 2px; }
 .metric-help p { margin: 0; color: #667085; font-size: 12px; line-height: 1.5; }

@@ -10,6 +10,7 @@ from api.services.segmentation.effective import (
 from api.services.segmentation.types import SampleType
 
 from .saliva import characterize_saliva_result
+from .physical import calibration_context, fingerprint, extend_physical_result
 from .types import (
     CAPABILITY_COUNTS,
     CAPABILITY_CYTOTOXICITY_INDEX,
@@ -48,12 +49,20 @@ def get_or_create_resultado_caracterizacion(resultado_or_id):
             resultado.tipo_muestra
         )
 
-        existing = ResultadoCaracterizacion.objects.filter(
+        context = None
+        if resultado.tipo_muestra == SampleType.SALIVA:
+            context = calibration_context(resultado.muestra, lock=True)
+
+        candidates = ResultadoCaracterizacion.objects.filter(
             resultado_segmentacion=resultado,
             revision_segmentacion_id=revision_id,
             source_type=effective['fuente'],
             algorithm_version=algorithm_version,
-        ).order_by('created_at', 'id_resultado_caracterizacion').first()
+        ).order_by('created_at', 'id_resultado_caracterizacion')
+        if context is not None:
+            _effective_hash, key = fingerprint(effective, context, algorithm_version)
+            candidates = candidates.filter(resultado_json__provenance__fingerprint=key)
+        existing = candidates.first()
 
         if existing:
             return existing, False
@@ -63,6 +72,11 @@ def get_or_create_resultado_caracterizacion(resultado_or_id):
             sample_type=resultado.tipo_muestra,
             image_path=_get_original_image_path(resultado),
         )
+
+        if context is not None:
+            resultado_json = extend_physical_result(
+                resultado_json, effective, context, algorithm_version,
+            )
 
         caracterizacion = ResultadoCaracterizacion(
             resultado_segmentacion=resultado,
@@ -87,7 +101,10 @@ def characterize_effective_segmentation(
 
     effective_result = copy.deepcopy(effective.get('resultado'))
     source = _build_source(effective)
-    algorithm_version = get_characterization_algorithm_version(sample_type)
+    # Keep the pure pixel-domain 2.1 entry point reproducible. Persistence
+    # adds the separately versioned 2.2 physical representation above.
+    algorithm_version = ('2.1' if sample_type == SampleType.SALIVA
+                         else get_characterization_algorithm_version(sample_type))
 
     if sample_type == SampleType.SALIVA:
         characterization = characterize_saliva_result(
@@ -110,9 +127,10 @@ def characterize_effective_segmentation(
 
 
 def is_characterization_current(characterization):
-    effective = resolve_effective_segmentation(
-        characterization.resultado_segmentacion
-    )
+    from api.models import ResultadoSegmentacion
+    # Do not let a previously cached FK/base snapshot declare old data current.
+    resultado = ResultadoSegmentacion.objects.get(pk=characterization.resultado_segmentacion_id)
+    effective = resolve_effective_segmentation(resultado)
 
     if (
         characterization.algorithm_version !=
@@ -122,6 +140,12 @@ def is_characterization_current(characterization):
 
     if characterization.source_type != effective['fuente']:
         return False
+
+    if characterization.sample_type == SampleType.SALIVA:
+        context = calibration_context(resultado.muestra)
+        _effective_hash, key = fingerprint(effective, context, characterization.algorithm_version)
+        if characterization.resultado_json.get('provenance', {}).get('fingerprint') != key:
+            return False
 
     if effective['fuente'] == FUENTE_AUTOMATICO:
         return characterization.revision_segmentacion_id is None

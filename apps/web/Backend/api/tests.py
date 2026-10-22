@@ -2908,7 +2908,7 @@ class CharacterizationCoreTests(APITestCase):
         )
         result = caracterizacion.resultado_json
         assert result['version'] == SALIVA_CHARACTERIZATION_ALGORITHM_VERSION
-        assert result['schema_version'] == '2.1'
+        assert result['schema_version'] == '2.2'
         assert result['summary']['total_membranes'] == 2
         assert result['summary']['total_nuclei'] == 1
         assert result['summary']['total_micronuclei'] == 1
@@ -3159,7 +3159,7 @@ class CharacterizationCoreTests(APITestCase):
         assert is_characterization_current(first) is False
         assert is_characterization_current(second) is True
 
-    def test_historical_2_0_is_readable_unchanged_and_new_2_1_is_idempotent(self):
+    def test_historical_2_0_is_readable_unchanged_and_new_2_2_is_idempotent(self):
         import json
         from pathlib import Path
         from .serializers import ResultadoCaracterizacionSerializer
@@ -3185,8 +3185,8 @@ class CharacterizationCoreTests(APITestCase):
         self.assertEqual(second.status_code, 200)
         self.assertEqual(first.data['id'], second.data['id'])
         self.assertNotEqual(first.data['id'], historical.pk)
-        self.assertEqual(first.data['algorithm_version'], '2.1')
-        self.assertEqual(first.data['resultado_json']['schema_version'], '2.1')
+        self.assertEqual(first.data['algorithm_version'], '2.2')
+        self.assertEqual(first.data['resultado_json']['schema_version'], '2.2')
         json.dumps(first.data['resultado_json'], allow_nan=False)
         historical.refresh_from_db()
         self.assertEqual(historical.algorithm_version, '2.0')

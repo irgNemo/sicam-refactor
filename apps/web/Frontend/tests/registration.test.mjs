@@ -136,12 +136,14 @@ for (const type of ['SALIVA', 'SANGRE']) test(`${type} sequential upload, partia
   await c.subirImagenes(); assert.equal(calls.length, 1);
   c.resetFilesForContext(); c.removerImagen(0); c.limpiarFormularioActivo(); assert.equal(c.imagenesPreview.length, 2);
   calls[0].resolve({ id_muestra: 10 }); await turn(); assert.equal(calls.length, 2);
-  calls[1].reject(invalid({ imagen: ['Imagen inválida'] })); await first;
+  assert.match(calls[1].config.url, /acquisition-compatibility/);
+  calls[1].resolve({ status: 'NO_ACQUISITION_SERIES' }); await turn();
+  calls[2].reject(invalid({ imagen: ['Imagen inválida'] })); await first;
   assert.deepEqual(c.imagenesPreview.map(x => x.status), ['SUCCESS', 'ERROR']); assert.equal(c.isUploading, false); assert.equal(c.hasUnsavedWork, true);
-  const retry = c.subirImagenes(); await turn(); assert.equal(calls.length, 3); assert.equal(calls[2].config.data.get('imagen').name, 'b.tif');
-  calls[2].resolve({ id_muestra: 11 }); await retry;
+  const retry = c.subirImagenes(); await turn(); assert.equal(calls.length, 4); assert.equal(calls[3].config.data.get('imagen').name, 'b.tif');
+  calls[3].resolve({ id_muestra: 11 }); await turn(); calls[4].resolve({ status: 'NO_ACQUISITION_SERIES' }); await retry;
   assert.deepEqual(c.imagenesPreview.map(x => x.status), ['SUCCESS', 'SUCCESS']); await c.subirImagenes();
-  assert.equal(calls.length, 3); assert.equal(c.hasUnsavedWork, false);
+  assert.equal(calls.length, 5); assert.equal(c.hasUnsavedWork, false);
 });
 
 test('missing upload context is rejected; reset/replacement/remove/clear release URLs', async t => {
@@ -395,11 +397,15 @@ for (const state of [0, 1, 2]) test(`18R-D analysis state ${state}: visible dest
   assert.equal(/análisis está cerrado y no admite/.test(html), state === 2);
   const submit = html.match(/<button type="submit"[^>]*>/)[0];
   assert.equal(/\bdisabled\b/.test(submit), state === 2);
-  let count = 0; api.defaults.adapter = async config => { count++; return ok(config, { id_muestra: 10 }); };
+  let count = 0, compatibilityChecks = 0; api.defaults.adapter = async config => {
+    if (config.method === 'post') { count++; return ok(config, { id_muestra: 10 }); }
+    compatibilityChecks++; return ok(config, { status: 'NO_ACQUISITION_SERIES' });
+  };
   await c.subirImagenes();
   assert.equal(count, state === 2 ? 0 : 1);
   c.imagenesPreview[0].status = 'ERROR'; await c.subirImagenes();
   assert.equal(count, state === 2 ? 0 : 2);
+  assert.equal(compatibilityChecks, state === 2 ? 0 : 2);
   assert.equal(c.analisisDisponibles[0].estado, state);
 });
 

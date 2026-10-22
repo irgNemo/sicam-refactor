@@ -7,6 +7,9 @@ const labels = {
   imagen: 'Imagen', identity_mode: 'Tipo de registro', initials: 'Iniciales',
   external_patient_id: 'ID hospitalario', external_id_namespace: 'Origen / institución',
   non_field_errors: 'Validación',
+  acquisition_series: 'Serie', acquisition_profile: 'Configuración', patient: 'Paciente', calibration: 'Calibración',
+  label: 'Nombre', name: 'Nombre', image_width_px: 'Ancho', image_height_px: 'Alto', objective_magnification: 'Objetivo',
+  binning_x: 'Binning X', binning_y: 'Binning Y', detail: 'Detalle', source_token: 'Medición',
 };
 
 export function registrationFieldErrors(error) {

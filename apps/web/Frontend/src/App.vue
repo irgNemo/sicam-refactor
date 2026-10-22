@@ -42,6 +42,7 @@
       @segmentation-result-selected="onSegmentationResultSelected"
     />
 
+    <AdquisicionView v-if="seccion === 'adquisicion'" ref="adquisicion" />
     <RegistroView v-if="seccion === 'registro'" ref="registro" />
   </div>
 </template>
@@ -50,13 +51,14 @@
 import TopBar from "./components/TopBar.vue";
 import SideBar from "./components/SideBar.vue";
 import MainContent from "./components/MainContent.vue";
+import AdquisicionView from "./views/AdquisicionView.vue";
 import RegistroView from "./views/RegistroView.vue";
 import CaracterizacionView from "./views/CaracterizacionView.vue";
 import { SAMPLE_TYPES } from "./domain/segmentationTypes";
 
 const UI_CONTEXT_STORAGE_KEY = "sicam.uiContext.v1";
 const UI_CONTEXT_VERSION = 1;
-const VALID_SECTIONS = ["segmentacion", "caracterizacion", "registro"];
+const VALID_SECTIONS = ["segmentacion", "caracterizacion", "registro", "adquisicion"];
 const VALID_SAMPLE_TYPES = Object.values(SAMPLE_TYPES);
 
 function normalizeOptionalId(value) {
@@ -107,6 +109,7 @@ export default {
     SideBar,
     MainContent,
     RegistroView,
+    AdquisicionView,
     CaracterizacionView,
   },
 
@@ -175,6 +178,7 @@ export default {
       if (!this.confirmPendingDraftNavigation()) return;
       if (this.seccion === "registro" && this.$refs.registro?.confirmLeave() === false) return;
 
+      if (this.seccion === "adquisicion" && this.$refs.adquisicion?.confirmLeave() === false) return;
       this.seccion = nextSection;
     },
 

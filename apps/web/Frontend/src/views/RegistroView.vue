@@ -166,7 +166,7 @@
       <section v-if="vistaActiva === 'imagenes'" class="registration-card" aria-labelledby="images-title">
         <header class="card-header"><h3 id="images-title">Agregar imágenes</h3><p>Seleccione el destino y revise los archivos antes de subirlos.</p></header>
         <form @submit.prevent="subirImagenes">
-          <fieldset class="registration-fields" :disabled="isUploading || isCreatingAnalysis" :aria-busy="isUploading || isCreatingAnalysis">
+          <fieldset class="registration-fields" :disabled="isUploading || isCreatingAnalysis || isCreatingSeries" :aria-busy="isUploading || isCreatingAnalysis || isCreatingSeries">
             <legend class="sr-only">Carga de imágenes</legend>
             <div class="card-body form-stack">
               <section class="upload-section" aria-labelledby="context-title">
@@ -207,6 +207,8 @@
                   </div>
                 </div>
               </section>
+              <AcquisitionSeriesSelector :patient-id="formImagenes.paciente" :disabled="isUploading || isCreatingAnalysis"
+                @change="acquisitionChanged" @dirty="seriesDirty = $event" @busy="isCreatingSeries = $event" />
               <fieldset class="sample-types upload-section" :disabled="!formImagenes.analisis || isAnalysisClosed">
                 <legend>Tipo de muestra *</legend>
                 <div class="sample-type-options">
@@ -221,6 +223,9 @@
                 <div v-if="formImagenes.paciente"><dt>Paciente</dt><dd>{{ uploadPatient ? patientRegistrationLabel(uploadPatient) : '#' + formImagenes.paciente }}</dd></div>
                 <div v-if="formImagenes.caso"><dt>Caso</dt><dd>{{ uploadCase ? uploadCase.titulo : '#' + formImagenes.caso }}</dd></div>
                 <div v-if="formImagenes.analisis"><dt>Análisis</dt><dd>#{{ formImagenes.analisis }}</dd></div>
+                <div><dt>Serie</dt><dd>{{ selectedAcquisition.series?.label || 'Sin serie' }}</dd></div>
+                <div v-if="selectedAcquisition.profile"><dt>Configuración</dt><dd>{{ selectedAcquisition.profile.name }}</dd></div>
+                <div v-if="selectedAcquisition.series"><dt>Calibración</dt><dd>{{ selectedAcquisition.calibration?.label || 'Sin calibración física' }}{{ selectedAcquisition.calibration ? ' · ' + selectedAcquisition.calibration.status : '' }}</dd></div>
                 <div v-if="uploadAnalysis"><dt>Estado</dt><dd>{{ estadoTexto(uploadAnalysis.estado) }}</dd></div>
                 <div v-if="formImagenes.analisis"><dt>Tipo</dt><dd>{{ selectedSampleTypeDisplayName }}</dd></div>
               </dl>
@@ -246,6 +251,9 @@
                     <div class="preview-detail">
                       <strong class="file-name">{{ img.archivo.name }}</strong>
                       <span class="status-badge" :class="img.status.toLowerCase()">{{ uploadStatusText(img.status) }}</span>
+                      <p v-if="img.dimensions" class="help-text">{{ img.dimensions.width }} × {{ img.dimensions.height }} px</p>
+                      <p v-if="img.status !== 'SUCCESS'" class="help-text">{{ resolutionFeedback(img.dimensions, selectedAcquisition.profile) }}</p>
+                      <p v-if="img.compatibility" class="help-text">Calibración física: {{ compatibilityText(img.compatibility.status) }}</p>
                       <p v-if="img.error" class="field-error">{{ img.error }}</p>
                     </div>
                     <button type="button" class="remove-btn" :aria-label="`Quitar ${img.archivo.name} de la lista`"
@@ -274,6 +282,8 @@
 <script>
 import { patientRegistrationLabel } from "../domain/patientPresentation";
 import apiClient from '../services/apiClient';
+import AcquisitionSeriesSelector from '../components/acquisition/AcquisitionSeriesSelector.vue';
+import { compatibilityText, resolutionFeedback, readDimensions } from '../services/acquisitionService';
 import { registrationErrorMessage, registrationFieldErrors } from '../services/registrationErrors';
 import {
   SAMPLE_TYPES,
@@ -282,10 +292,13 @@ import {
 
 export default {
   name: 'RegistroView',
+  components: { AcquisitionSeriesSelector },
 
   data() {
     return {
       vistaActiva: 'paciente',
+      selectedAcquisition: { series: null, profile: null, calibration: null },
+      seriesDirty: false, isCreatingSeries: false,
       patientIdentityMode: 'IDENTIFIED',
       patientIdentityBaseline: 'IDENTIFIED',
       patientErrors: {},
@@ -376,13 +389,13 @@ export default {
         ? 'Reintentar fallidos' : 'Subir imágenes';
     },
     isBusy() {
-      return this.isCreatingPatient || this.isCreatingCase || this.isCreatingAnalysis || this.isUploading;
+      return this.isCreatingPatient || this.isCreatingCase || this.isCreatingAnalysis || this.isUploading || this.isCreatingSeries;
     },
     pendingUploads() {
       return this.imagenesPreview.filter(item => ['PENDING', 'ERROR'].includes(item.status));
     },
     hasUnsavedWork() {
-      return this.isBusy || this.patientIdentityMode !== this.patientIdentityBaseline || Object.values(this.formPaciente).some(value => String(value).trim())
+      return this.isBusy || this.seriesDirty || this.patientIdentityMode !== this.patientIdentityBaseline || Object.values(this.formPaciente).some(value => String(value).trim())
         || Boolean(this.formCaso.paciente || this.formCaso.titulo.trim() || this.formCaso.descripcion.trim()
           || !this.formCaso.crear_analisis) || this.pendingUploads.length > 0;
     },
@@ -416,6 +429,13 @@ export default {
 
   methods: {
     patientRegistrationLabel,
+    compatibilityText,
+    resolutionFeedback,
+    acquisitionChanged(context) {
+      if (this.isUploading) return;
+      if (this.selectedAcquisition.series?.id !== context.series?.id) this.resetFilesForContext();
+      this.selectedAcquisition = context;
+    },
     requestPatientMode(mode, event) {
       const resetRadio = () => {
         if (event?.target?.form) {
@@ -471,6 +491,8 @@ export default {
 
     async cargarCasosPaciente() {
       if (this.isUploading || this.isCreatingAnalysis) return;
+      this.selectedAcquisition = { series: null, profile: null, calibration: null };
+      this.seriesDirty = false;
       const generation = ++this.casesGeneration;
       ++this.analysesGeneration;
       this.formImagenes.caso = '';
@@ -595,7 +617,7 @@ export default {
     },
 
     async subirImagenes() {
-      if (this.isUploading || this.isCreatingAnalysis || !this.pendingUploads.length) return;
+      if (this.isUploading || this.isCreatingAnalysis || this.isCreatingSeries || !this.pendingUploads.length) return;
       if (this.isAnalysisClosed) {
         this.mostrarNotificacion('Este análisis está cerrado y no admite nuevas imágenes.', 'error');
         return;
@@ -607,6 +629,8 @@ export default {
       }
       this.isUploading = true;
       const analysisId = this.formImagenes.analisis;
+      const seriesId = this.selectedAcquisition.series?.id;
+      const sampleType = this.formImagenes.tipoMuestra;
       const endpoint = this.formImagenes.tipoMuestra === SAMPLE_TYPES.BLOOD ? '/api/muestras-sangre/' : '/api/muestras/';
       const batch = [...this.pendingUploads];
       try {
@@ -617,10 +641,16 @@ export default {
             const formData = new FormData();
             formData.append('imagen', item.archivo);
             formData.append('analisis', analysisId);
+            if (seriesId) formData.append('acquisition_series', seriesId);
             const response = await apiClient.post(endpoint, formData, {
               headers: { 'Content-Type': 'multipart/form-data' },
             });
             item.status = 'SUCCESS'; item.sampleId = response.data.id_muestra;
+            item.compatibility = response.data.physical_compatibility || { status: 'CHECK_PENDING' };
+            if (!response.data.physical_compatibility) try {
+              const checked = await apiClient.get(`/api/acquisition-compatibility/${sampleType}/${item.sampleId}/`);
+              item.compatibility = checked.data;
+            } catch { item.compatibility = { status: 'CHECK_FAILED' }; }
           } catch (error) {
             item.status = 'ERROR';
             item.error = registrationErrorMessage(error, 'No se pudo confirmar la subida.');
@@ -654,8 +684,13 @@ export default {
       this.clearFiles();
       this.formImagenes.archivos = files;
       this.imagenesPreview = files.map(archivo => ({
-        archivo, url: URL.createObjectURL(archivo), status: 'PENDING', error: '', previewUnavailable: false,
+        archivo, url: URL.createObjectURL(archivo), status: 'PENDING', error: '', previewUnavailable: false, dimensions: null, compatibility: null,
       }));
+      for (const item of this.imagenesPreview) {
+        readDimensions(item.url).then(dimensions => {
+          if (!this.disposed && this.imagenesPreview.some(current => current.url === item.url)) item.dimensions = dimensions;
+        });
+      }
     },
 
     removerImagen(index) {
@@ -743,6 +778,8 @@ export default {
     },
 
     limpiarFormImagenes() {
+      this.selectedAcquisition = { series: null, profile: null, calibration: null };
+      this.seriesDirty = false;
       this.casesGeneration++;
       this.analysesGeneration++;
       this.isLoadingCases = false;

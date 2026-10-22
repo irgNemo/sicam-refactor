@@ -32,6 +32,9 @@
         <span class="nav-icon">📝</span>
         Registro
       </button>
+      <button class="nav-btn" :class="{ active: seccion === 'adquisicion' }" @click="$emit('change-section', 'adquisicion')">
+        <span class="nav-icon">🔬</span> Adquisición
+      </button>
     </div>
 
   </nav>
@@ -143,4 +146,5 @@ export default {
   50% { transform: scale(1.2); }
 }
 
+@media(max-width: 700px) { .topbar { height: auto; min-height: 60px; padding: 8px; flex-wrap: wrap; }.nav-buttons { padding: 0; flex-wrap: wrap; }.nav-btn { padding: 8px; font-size: 13px; } }
 </style>

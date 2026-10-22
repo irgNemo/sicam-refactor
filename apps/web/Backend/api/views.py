@@ -374,6 +374,16 @@ class AnalisisViewSet(viewsets.ModelViewSet):
             status=status.HTTP_400_BAD_REQUEST
         )
 
+def _sample_upload_data(serializer):
+    # Upload success and physical compatibility are independent outcomes.
+    from .services.acquisition import physical_compatibility
+    try:
+        compatibility = physical_compatibility(serializer.instance)
+    except Exception:
+        compatibility = {'compatible_for_physical_units': False, 'status': 'CHECK_FAILED'}
+    return {**serializer.data, 'physical_compatibility': compatibility}
+
+
 class MuestraSalivaViewSet(viewsets.ModelViewSet):
     queryset = MuestraSaliva.objects.all()
     serializer_class = MuestraSalivaSerializer
@@ -384,7 +394,7 @@ class MuestraSalivaViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(_sample_upload_data(serializer), status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['get'], url_path='resultados-segmentacion')
     def resultados_segmentacion(self, request, pk=None):
@@ -533,7 +543,7 @@ class MuestraSangreViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(_sample_upload_data(serializer), status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['get'], url_path='resultados-segmentacion')
     def resultados_segmentacion(self, request, pk=None):

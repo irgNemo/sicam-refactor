@@ -12,7 +12,7 @@ from .views import (
 
 from .acquisition_views import (
     AcquisitionProfileViewSet, CalibrationViewSet, CalibrationReferenceViewSet,
-    AcquisitionSeriesViewSet, AcquisitionCompatibilityView,
+    AcquisitionSeriesViewSet, AcquisitionCompatibilityView, AcquisitionOperatorView,
 )
 
 router = DefaultRouter()
@@ -41,6 +41,7 @@ router.register(
 )
 
 urlpatterns = [
+    path('acquisition-operator/', AcquisitionOperatorView.as_view()),
     path('acquisition-compatibility/<str:sample_type>/<int:pk>/', AcquisitionCompatibilityView.as_view()),
     path('', include(router.urls)),
 ]

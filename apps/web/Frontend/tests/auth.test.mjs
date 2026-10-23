@@ -34,6 +34,15 @@ test('login bootstraps CSRF then rotates token, uses cookies and no Basic auth',
   assert.equal(calls[1].withCredentials,true);assert.equal(calls[1].auth,undefined);assert.equal(api.defaults.headers.common['X-CSRFToken'],'rotated');assert.equal(auth.user.must_change_password,true);
   assert.equal(sessionStorage.getItem('password'),null);
 });
+test('auth errors never expose Django HTML and retain structured validation messages',()=>{
+  const html='<!DOCTYPE html><html><body>CSRF cookie not set.</body></html>';
+  const message=service.authErrorMessage({response:{status:403,data:html}});
+  assert.match(message,/cookies/);assert.doesNotMatch(message,/DOCTYPE|<html>|CSRF cookie not set/);
+  assert.equal(service.authErrorMessage({response:{status:403,data:{detail:'Credenciales o acceso no válidos.'}}}),'Credenciales o acceso no válidos.');
+  assert.equal(service.authErrorMessage({response:{status:400,data:{new_password:['Use una contraseña nueva.']}}}),'Use una contraseña nueva.');
+  assert.equal(service.authErrorMessage({response:{status:500,data:html}}),'No se pudo completar la solicitud. Inténtelo de nuevo.');
+  assert.equal(service.authErrorMessage(new Error('network')),'No se pudo conectar.');
+});
 test('password change clears operational gate only after server success',async()=>{
   auth.user=user('OPERATOR',{must_change_password:true});let body;
   api.defaults.adapter=async config=>{body=JSON.parse(config.data);return ok(config,{user:user(),csrf_token:'new'});};

@@ -17,7 +17,7 @@
 <script setup>
 import { ref } from 'vue';
 import App from './App.vue';
-import { auth, initializeSession, login, logout, changePassword } from './services/auth';
+import { auth, authErrorMessage, initializeSession, login, logout, changePassword } from './services/auth';
 const username = ref(''), password = ref(''), newPassword = ref(''), confirmation = ref(''), error = ref(''), busy = ref(false);
 initializeSession();
 async function submit() {
@@ -26,7 +26,7 @@ async function submit() {
   try {
     if (auth.user) await changePassword(password.value, newPassword.value, confirmation.value);
     else await login(username.value, password.value);
-  } catch (e) { error.value = e.response?.data ? Object.values(e.response.data).flat().join(' ') : 'No se pudo conectar.'; }
+  } catch (e) { error.value = authErrorMessage(e); }
   finally { password.value = ''; newPassword.value = ''; confirmation.value = ''; busy.value = false; }
 }
 async function leave() { try { await logout(); } catch { error.value = 'No se pudo cerrar la sesión.'; } }

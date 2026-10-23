@@ -2,6 +2,19 @@ import { reactive } from 'vue';
 import api from './apiClient';
 
 export const auth = reactive({ user: null, ready: false, error: '' });
+export function authErrorMessage(error) {
+  const data = error.response?.data;
+  // Django's CSRF middleware may return HTML before DRF handles the request.
+  // Only structured API messages are suitable for the login form.
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    const messages = Object.values(data).flat().filter(value => typeof value === 'string' && !/<[^>]+>/.test(value));
+    if (messages.length) return messages.join(' ');
+  }
+  if (error.response?.status === 403) {
+    return 'No se pudo verificar la sesión. Recargue la página y compruebe que las cookies estén habilitadas para este sitio.';
+  }
+  return error.response ? 'No se pudo completar la solicitud. Inténtelo de nuevo.' : 'No se pudo conectar.';
+}
 export const can = (capability, user = auth.user) => {
   if (!user || user.must_change_password) return false;
   if (user.is_superuser) return true;

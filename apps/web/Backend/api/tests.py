@@ -1,3 +1,4 @@
+from api.testing import tenant_fixture
 import shutil
 import tempfile
 import json
@@ -16,7 +17,7 @@ from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework import serializers, status
-from rest_framework.test import APITestCase
+from api.testing import PlatformAPITestCase as APITestCase
 from PIL import Image
 
 from .models import (
@@ -92,7 +93,7 @@ class SeedDemoDataCommandTests(APITestCase):
 
     def _call_command(self, **options):
         output = StringIO()
-        call_command('seed_demo_data', stdout=output, **options)
+        call_command('seed_demo_data', institution=tenant_fixture().code, stdout=output, **options)
         return output.getvalue()
 
     def _write_image(self, directory, filename, content=b'demo image bytes'):

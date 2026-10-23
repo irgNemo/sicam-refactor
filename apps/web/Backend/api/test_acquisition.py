@@ -1,3 +1,4 @@
+from api.testing import tenant_fixture
 """Synthetic acquisition tests; no real images, calibration or working DB writes."""
 import hashlib
 from decimal import Decimal
@@ -12,7 +13,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db.models.deletion import ProtectedError
 from django.test import TestCase, override_settings
 from PIL import Image
-from rest_framework.test import APIClient
+from api.testing import PlatformClient as APIClient
 
 from api.models import (Paciente, Caso, AnalisisPred, MuestraSaliva, MuestraSangre,
                         AcquisitionProfile, Calibration, CalibrationReference, AcquisitionSeries)
@@ -45,7 +46,7 @@ class AcquisitionTests(TestCase):
         self.profile = AcquisitionProfile.objects.create(name='Synthetic', image_width_px=32, image_height_px=32)
         self.calibration = self.make_calibration()
         self.client = APIClient()
-        self.user = get_user_model().objects.create_user(username='acquisition-test')
+        self.user = get_user_model().objects.create_user(username='acquisition-test', is_superuser=True)
         self.client.force_authenticate(self.user)
 
     def make_calibration(self, **overrides):
@@ -288,13 +289,12 @@ class AcquisitionTests(TestCase):
                 self.assertEqual(self.client.patch(detail, {'acquisition_series': series.pk}, format='multipart').status_code, 200)
                 self.assertEqual(self.client.patch(detail, {'acquisition_series': ''}, format='multipart').status_code, 400)
 
-    def test_anonymous_upload_legacy_allowed_but_series_binding_rejected(self):
+    def test_anonymous_upload_and_series_binding_rejected(self):
         series = self.make_series()
         self.client.force_authenticate(None)
         response = self.client.post('/api/muestras/', {'analisis': self.analysis.pk, 'imagen': upload()}, format='multipart')
-        self.assertEqual(response.status_code, 201)
-        response = self.client.patch(f"/api/muestras/{response.data['id_muestra']}/", {'acquisition_series': series.pk}, format='multipart')
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(MuestraSaliva.objects.count(), 0)
 
     def test_compatibility_api_both_types_and_missing_sample(self):
         for sample_type, model in (('SALIVA', MuestraSaliva), ('SANGRE', MuestraSangre)):

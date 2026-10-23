@@ -10,6 +10,9 @@ import { renderToString } from '@vue/server-renderer';
 const server = await createServer({ root: fileURLToPath(new URL('../', import.meta.url)), configFile: false,
   plugins: [vuePlugin()], optimizeDeps: { noDiscovery: true, include: [] },
   server: { middlewareMode: true, hmr: false, ws: false, watch: null }, appType: 'custom' });
+const { auth } = await server.ssrLoadModule('/src/services/auth.js');
+const sessionFixture = () => ({ id: 1, username: 'fixture', role: 'ADMIN', institution: { id: 1, code: 'TEST' }, must_change_password: false });
+auth.user = sessionFixture();
 const keepAlive = setInterval(() => {}, 1000);
 after(async () => { clearInterval(keepAlive); await server.close(); });
 const { default: View } = await server.ssrLoadModule('/src/views/RegistroView.vue');

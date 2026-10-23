@@ -11,7 +11,7 @@ from django.test import TransactionTestCase, override_settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 from PIL import Image
 from requests.exceptions import ConnectionError, HTTPError, Timeout
-from rest_framework.test import APITestCase
+from api.testing import PlatformAPITestCase as APITestCase
 
 from api.models import AnalisisPred, Caso, MuestraSaliva, MuestraSangre, Paciente, ResultadoSegmentacion
 from api.segmentation_strategies import SalivaSegmentationStrategy as Strategy

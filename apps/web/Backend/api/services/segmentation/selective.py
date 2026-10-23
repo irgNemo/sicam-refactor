@@ -97,7 +97,7 @@ def fail_execution(execution, code, cancelled=False):
 
 
 def perform_partial(*, sample, result_id, strategy, target, source_token,
-                    confirm_replacement, read_image, segment):
+                    confirm_replacement, read_image, segment, actor=None):
     with transaction.atomic():
         try:
             result = lock_result(result_id)
@@ -163,10 +163,11 @@ def perform_partial(*, sample, result_id, strategy, target, source_token,
             draft = current['draft']
             if draft:
                 draft.resultado_editado, draft.resumen = snapshot, summary
-                draft.save(update_fields=['resultado_editado', 'resumen', 'actualizado_en'])
+                draft.updated_by = actor
+                draft.save(update_fields=['updated_by', 'resultado_editado', 'resumen', 'actualizado_en'])
             else:
                 last = result.revisiones.order_by('-numero_revision').first()
-                draft = RevisionSegmentacion.objects.create(
+                draft = RevisionSegmentacion.objects.create(created_by=actor, updated_by=actor,
                     resultado_segmentacion=result, numero_revision=(last.numero_revision + 1 if last else 1),
                     resultado_editado=snapshot, resumen=summary,
                 )

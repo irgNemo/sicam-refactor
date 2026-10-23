@@ -1,3 +1,4 @@
+from .access_models import Institution, SicamUserProfile, AuthoredModel
 import uuid
 
 from django.core.exceptions import ValidationError
@@ -7,7 +8,8 @@ from .acquisition_models import (AcquisitionProfile, Calibration, CalibrationRef
                                  AcquisitionSeries, AcquisitionSampleMixin)
 
 # Modelo de Paciente
-class Paciente(models.Model):
+class Paciente(AuthoredModel):
+    institution = models.ForeignKey(Institution, null=True, blank=True, on_delete=models.PROTECT)
     IDENTIFIED = 'IDENTIFIED'
     PSEUDONYMIZED = 'PSEUDONYMIZED'
     id_paciente = models.AutoField(primary_key=True)
@@ -22,17 +24,20 @@ class Paciente(models.Model):
     nombre = models.CharField(max_length=100, blank=True, default='')
     apellido = models.CharField(max_length=100, blank=True, default='')
     fecha_nacimiento = models.DateField()
-    identificacion = models.CharField(max_length=50, unique=True)
+    identificacion = models.CharField(max_length=50)
     email = models.EmailField(blank=True, null=True)
     telefono = models.CharField(max_length=20, blank=True, null=True)
     fecha_registro = models.DateTimeField(auto_now_add=True)
     
     class Meta:
         constraints = [
+            models.UniqueConstraint(fields=['institution', 'identificacion'], name='patient_tenant_identification_unique'),
+            models.UniqueConstraint(fields=['identificacion'], condition=models.Q(institution__isnull=True), name='legacy_patient_identification_unique'),
+            models.UniqueConstraint(fields=['external_id_namespace', 'external_patient_id'], condition=models.Q(institution__isnull=True) & ~models.Q(external_id_namespace=''), name='legacy_patient_external_unique'),
             models.UniqueConstraint(
-                fields=['external_id_namespace', 'external_patient_id'],
+                fields=['institution', 'external_id_namespace', 'external_patient_id'],
                 condition=~models.Q(external_id_namespace=''),
-                name='patient_external_identity_unique',
+                name='patient_tenant_external_unique',
             ),
             models.CheckConstraint(
                 check=(
@@ -73,7 +78,7 @@ class Paciente(models.Model):
         return f"{self.display_name} - {self.identificacion}"
 
 # Modelo de Caso
-class Caso(models.Model):
+class Caso(AuthoredModel):
     id_caso = models.AutoField(primary_key=True)
     case_number = models.PositiveIntegerField(null=True, blank=True)
     paciente = models.ForeignKey(
@@ -102,7 +107,7 @@ class Caso(models.Model):
         return f"Caso {self.id_caso} - {self.titulo}"
 
 # Modelo de Análisis
-class AnalisisPred(models.Model):
+class AnalisisPred(AuthoredModel):
     ESTADO_CHOICES = [
         (0, 'Abierto'),
         (1, 'En Proceso'),
@@ -267,7 +272,7 @@ class ResultadoSegmentacion(models.Model):
 
 
 # Modelo de Máscara
-class RevisionSegmentacion(models.Model):
+class RevisionSegmentacion(AuthoredModel):
     ESTADO_BORRADOR = 'BORRADOR'
     ESTADO_VALIDADA = 'VALIDADA'
     ESTADO_CHOICES = [
@@ -340,7 +345,7 @@ class SegmentationExecution(models.Model):
     completed_at = models.DateTimeField(null=True)
 
 
-class ResultadoCaracterizacion(models.Model):
+class ResultadoCaracterizacion(AuthoredModel):
     SOURCE_AUTOMATICO = 'AUTOMATICO'
     SOURCE_VALIDADA = 'VALIDADA'
     SOURCE_CHOICES = [

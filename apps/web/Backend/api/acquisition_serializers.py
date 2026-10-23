@@ -1,3 +1,4 @@
+from .access import ScopedSerializerMixin
 """Validated metadata writes for acquisition APIs, including partial updates."""
 import copy
 from decimal import Decimal
@@ -22,7 +23,7 @@ def validate_candidate(model, instance, attrs, *, full=False):
     return attrs
 
 
-class ValidatedSerializer(serializers.ModelSerializer):
+class ValidatedSerializer(ScopedSerializerMixin, serializers.ModelSerializer):
     def validate(self, attrs):
         return validate_candidate(self.Meta.model, self.instance, attrs, full=True)
 
@@ -82,7 +83,7 @@ class AutomaticReferenceSerializer(serializers.Serializer):
         return attrs
 
 
-class AutomaticCalibrationSerializer(serializers.Serializer):
+class AutomaticCalibrationSerializer(ScopedSerializerMixin, serializers.Serializer):
     acquisition_profile = serializers.PrimaryKeyRelatedField(queryset=AcquisitionProfile.objects.all())
     label = serializers.CharField(max_length=150, required=False, default='', allow_blank=True)
     source_token = serializers.CharField(required=False, allow_blank=True)

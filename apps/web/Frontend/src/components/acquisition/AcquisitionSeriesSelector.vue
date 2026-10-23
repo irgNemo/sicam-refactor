@@ -67,7 +67,7 @@ export default {
         api.get('/api/acquisition-series/', { params: { patient } }), api.get('/api/acquisition-profiles/'), api.get('/api/calibrations/'),
       ]);
         if (this.disposed || generation !== this.generation) return;
-        this.series = series.data.filter(item => item.patient === Number(patient)); this.profiles = profiles.data; this.calibrations = calibrations.data;
+        this.series = series.data.filter(item => item.patient === Number(patient)); this.profiles = profiles.data.filter(profile => profile.active !== false); this.calibrations = calibrations.data;
         if (this.series.length === 1 && !this.disabled) this.choose(this.series[0].id);
       } catch (error) { if (!this.disposed && generation === this.generation) this.error = registrationErrorMessage(error, 'No se pudieron cargar las series. Puede continuar sin serie.'); }
       finally { if (generation === this.generation) this.loading = false; }

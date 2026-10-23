@@ -35,8 +35,10 @@ def canonical_hash(values):
     return hashlib.sha256(json.dumps(values, ensure_ascii=False, separators=(',', ':'), allow_nan=False).encode('utf-8')).hexdigest()
 
 
-def import_keys(dataset, namespace, external_id, case_number, basename, image_hash, mask_hash):
+def import_keys(dataset, namespace, external_id, case_number, basename, image_hash, mask_hash, *, institution=None):
     identity = [KEY_NAMESPACE, dataset, namespace, external_id, case_number]
+    if institution is not None:
+        identity = ['sicam.imagej.tenant.v1', institution, *identity]
     sample = canonical_hash(['sample', *identity, image_hash])
     return {
         'sample_key': sample,

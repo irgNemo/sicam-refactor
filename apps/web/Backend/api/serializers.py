@@ -1,3 +1,4 @@
+from .access import ScopedSerializerMixin
 from collections.abc import Mapping
 
 from rest_framework import serializers
@@ -22,13 +23,14 @@ from .services.segmentation.revisions import (
     validate_revision_snapshot,
 )
 
-class PacienteSerializer(serializers.ModelSerializer):
+class PacienteSerializer(ScopedSerializerMixin, serializers.ModelSerializer):
     display_name = serializers.CharField(read_only=True)
 
     class Meta:
         model = Paciente
         fields = '__all__'
         extra_kwargs = {'identificacion': {'required': False}}
+        validators = []
 
     def to_internal_value(self, data):
         if not isinstance(data, Mapping):
@@ -72,9 +74,14 @@ class PacienteSerializer(serializers.ModelSerializer):
             patient.clean()
         except ModelValidationError as exc:
             raise serializers.ValidationError(exc.messages)
+        duplicate = Paciente.objects.filter(institution=patient.institution, identificacion=patient.identificacion)
+        if self.instance:
+            duplicate = duplicate.exclude(pk=self.instance.pk)
+        if patient.identity_mode == Paciente.IDENTIFIED and duplicate.exists():
+            raise serializers.ValidationError({'identificacion': 'Identificación ya registrada en esta institución.'})
         namespace, external_id = patient.external_id_namespace, patient.external_patient_id
         if namespace and external_id:
-            existing = Paciente.objects.filter(external_id_namespace=namespace, external_patient_id=external_id)
+            existing = Paciente.objects.filter(institution=patient.institution, external_id_namespace=namespace, external_patient_id=external_id)
             if self.instance:
                 existing = existing.exclude(pk=self.instance.pk)
             if existing.exists():
@@ -89,7 +96,7 @@ class PacienteSerializer(serializers.ModelSerializer):
             )
             if changed_authority:
                 identification = pseudonymized_identification(namespace, external_id)
-                collision = Paciente.objects.filter(identificacion=identification)
+                collision = Paciente.objects.filter(institution=patient.institution, identificacion=identification)
                 if self.instance:
                     collision = collision.exclude(pk=self.instance.pk)
                 if collision.exists():
@@ -99,7 +106,7 @@ class PacienteSerializer(serializers.ModelSerializer):
                 attrs['identificacion'] = identification
         return attrs
 
-class CasoSerializer(serializers.ModelSerializer):
+class CasoSerializer(ScopedSerializerMixin, serializers.ModelSerializer):
     class Meta:
         model = Caso
         fields = '__all__'
@@ -147,7 +154,7 @@ class MuestraSangreSerializer(SampleUploadSerializer):
         fields = '__all__'
 
 
-class ResultadoAnalisisSerializer(serializers.ModelSerializer):
+class ResultadoAnalisisSerializer(ScopedSerializerMixin, serializers.ModelSerializer):
     class Meta:
         model = ResultadoAnalisis
         fields = '__all__'
@@ -171,7 +178,7 @@ class SalivaSegmentationRequestSerializer(serializers.Serializer):
     )
 
 
-class ResultadoSegmentacionSerializer(serializers.ModelSerializer):
+class ResultadoSegmentacionSerializer(ScopedSerializerMixin, serializers.ModelSerializer):
     id = serializers.IntegerField(
         source='id_resultado_segmentacion',
         read_only=True
@@ -193,7 +200,7 @@ class ResultadoSegmentacionSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
-class ResultadoCaracterizacionSerializer(serializers.ModelSerializer):
+class ResultadoCaracterizacionSerializer(ScopedSerializerMixin, serializers.ModelSerializer):
     id = serializers.IntegerField(
         source='id_resultado_caracterizacion',
         read_only=True
@@ -212,6 +219,7 @@ class ResultadoCaracterizacionSerializer(serializers.ModelSerializer):
             'resultado_json',
             'created_at',
             'vigente',
+            'created_by', 'updated_by',
         )
         read_only_fields = fields
 
@@ -221,7 +229,7 @@ class ResultadoCaracterizacionSerializer(serializers.ModelSerializer):
         return is_characterization_current(instance)
 
 
-class RevisionSegmentacionSerializer(serializers.ModelSerializer):
+class RevisionSegmentacionSerializer(ScopedSerializerMixin, serializers.ModelSerializer):
     expected_updated_at = serializers.DateTimeField(write_only=True, required=False)
     class Meta:
         model = RevisionSegmentacion
@@ -236,6 +244,7 @@ class RevisionSegmentacionSerializer(serializers.ModelSerializer):
             'creado_en',
             'actualizado_en',
             'validado_en',
+            'created_by', 'updated_by',
         )
         read_only_fields = (
             'id_revision_segmentacion',
@@ -246,6 +255,7 @@ class RevisionSegmentacionSerializer(serializers.ModelSerializer):
             'creado_en',
             'actualizado_en',
             'validado_en',
+            'created_by', 'updated_by',
         )
 
     def validate_resultado_editado(self, value):
@@ -276,7 +286,8 @@ class RevisionSegmentacionSerializer(serializers.ModelSerializer):
                 resultado_editado,
                 sample_type=instance.resultado_segmentacion.tipo_muestra,
             )
-            instance.save(update_fields=[
+            instance.updated_by = self.context['request'].user if self.context.get('request') else instance.updated_by
+            instance.save(update_fields=['updated_by',
                 'resultado_editado',
                 'resumen',
                 'actualizado_en',

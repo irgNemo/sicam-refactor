@@ -1,3 +1,4 @@
+from api.testing import tenant_fixture
 """2.2 numerical/persistence acceptance. All writes use test DB and /tmp media."""
 import copy
 import math
@@ -9,7 +10,7 @@ from unittest.mock import patch
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 from PIL import Image
-from rest_framework.test import APIClient
+from api.testing import PlatformClient as APIClient
 
 from api import test_acquisition as acq
 from api.test_characterization_2_1 import box, object_payload

@@ -1,3 +1,4 @@
+from .access import ScopedViewMixin
 from django.db import transaction
 from django.db.models import OuterRef, Prefetch, Subquery
 from django.shortcuts import render
@@ -188,7 +189,7 @@ def _controlled_segmentation_error(exc):
     return str(exc) or 'Error al solicitar segmentacion'
 
 
-def _get_or_create_revision_draft(resultado_segmentacion_id):
+def _get_or_create_revision_draft(resultado_segmentacion_id, actor=None):
     with transaction.atomic():
         resultado = lock_result(resultado_segmentacion_id)
 
@@ -221,6 +222,7 @@ def _get_or_create_revision_draft(resultado_segmentacion_id):
             sample_type=resultado.tipo_muestra,
         )
         revision = RevisionSegmentacion.objects.create(
+            created_by=actor, updated_by=actor,
             resultado_segmentacion=resultado,
             numero_revision=numero_revision,
             estado=RevisionSegmentacion.ESTADO_BORRADOR,
@@ -230,7 +232,7 @@ def _get_or_create_revision_draft(resultado_segmentacion_id):
         return revision, True
 
 
-class PacienteViewSet(viewsets.ModelViewSet):
+class PacienteViewSet(ScopedViewMixin, viewsets.ModelViewSet):
     queryset = Paciente.objects.all()
     serializer_class = PacienteSerializer
     
@@ -239,10 +241,10 @@ class PacienteViewSet(viewsets.ModelViewSet):
         """Obtener todos los casos de un paciente"""
         paciente = self.get_object()
         casos = paciente.casos.all()
-        serializer = CasoSerializer(casos, many=True)
+        serializer = CasoSerializer(casos, many=True, context=self.get_serializer_context())
         return Response(serializer.data)
 
-class CasoViewSet(viewsets.ModelViewSet):
+class CasoViewSet(ScopedViewMixin, viewsets.ModelViewSet):
     queryset = Caso.objects.all()
     serializer_class = CasoSerializer
 
@@ -270,7 +272,7 @@ class CasoViewSet(viewsets.ModelViewSet):
         """Obtener todos los análisis de un caso"""
         caso = self.get_object()
         analisis = caso.analisis.all()
-        serializer = AnalisisSerializer(analisis, many=True)
+        serializer = AnalisisSerializer(analisis, many=True, context=self.get_serializer_context())
         return Response(serializer.data)
 
     @action(detail=True, methods=['get'], url_path='resumen-segmentacion')
@@ -354,7 +356,7 @@ class CasoViewSet(viewsets.ModelViewSet):
 
         return Response(summary)
 
-class AnalisisViewSet(viewsets.ModelViewSet):
+class AnalisisViewSet(ScopedViewMixin, viewsets.ModelViewSet):
     queryset = AnalisisPred.objects.all()
     serializer_class = AnalisisSerializer
     
@@ -366,6 +368,7 @@ class AnalisisViewSet(viewsets.ModelViewSet):
         
         if nuevo_estado is not None and nuevo_estado in [0, 1, 2]:
             analisis.estado = nuevo_estado
+            analisis.updated_by = request.user
             analisis.save()
             return Response({'mensaje': 'Estado actualizado correctamente'})
         
@@ -384,7 +387,7 @@ def _sample_upload_data(serializer):
     return {**serializer.data, 'physical_compatibility': compatibility}
 
 
-class MuestraSalivaViewSet(viewsets.ModelViewSet):
+class MuestraSalivaViewSet(ScopedViewMixin, viewsets.ModelViewSet):
     queryset = MuestraSaliva.objects.all()
     serializer_class = MuestraSalivaSerializer
     parser_classes = (MultiPartParser, FormParser)
@@ -425,7 +428,7 @@ class MuestraSalivaViewSet(viewsets.ModelViewSet):
                     strategy=strategy, target=selection.validated_data['target'],
                     source_token=selection.validated_data['source_token'],
                     confirm_replacement=selection.validated_data['confirm_replacement'],
-                    read_image=_read_muestra_image, segment=segment_image,
+                    read_image=_read_muestra_image, segment=segment_image, actor=request.user,
                 )
                 return Response({
                     'target': execution.target, 'execution_id': str(execution.pk),
@@ -533,7 +536,7 @@ class MuestraSalivaViewSet(viewsets.ModelViewSet):
         )
 
 
-class MuestraSangreViewSet(viewsets.ModelViewSet):
+class MuestraSangreViewSet(ScopedViewMixin, viewsets.ModelViewSet):
     queryset = MuestraSangre.objects.all()
     serializer_class = MuestraSangreSerializer
     parser_classes = (MultiPartParser, FormParser)
@@ -697,7 +700,7 @@ class MuestraSangreViewSet(viewsets.ModelViewSet):
         )
 
 
-class ResultadoSegmentacionViewSet(viewsets.GenericViewSet):
+class ResultadoSegmentacionViewSet(ScopedViewMixin, viewsets.GenericViewSet):
     queryset = ResultadoSegmentacion.objects.all()
     serializer_class = ResultadoSegmentacionSerializer
 
@@ -744,7 +747,7 @@ class ResultadoSegmentacionViewSet(viewsets.GenericViewSet):
 
         try:
             caracterizacion, created = get_or_create_resultado_caracterizacion(
-                resultado
+                resultado, actor=request.user
             )
         except ValueError as exc:
             return Response(
@@ -773,7 +776,7 @@ class ResultadoSegmentacionViewSet(viewsets.GenericViewSet):
             return Response(serializer.data)
 
         revision, created = _get_or_create_revision_draft(
-            resultado.id_resultado_segmentacion
+            resultado.id_resultado_segmentacion, actor=request.user
         )
         serializer = RevisionSegmentacionSerializer(revision)
         return Response(
@@ -783,6 +786,7 @@ class ResultadoSegmentacionViewSet(viewsets.GenericViewSet):
 
 
 class RevisionSegmentacionViewSet(
+    ScopedViewMixin,
     viewsets.GenericViewSet,
     mixins.RetrieveModelMixin,
 ):
@@ -856,9 +860,11 @@ class RevisionSegmentacionViewSet(
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
+            revision.updated_by = request.user
             revision.estado = RevisionSegmentacion.ESTADO_VALIDADA
             revision.validado_en = timezone.now()
             revision.save(update_fields=[
+                'updated_by',
                 'estado',
                 'validado_en',
                 'resumen',

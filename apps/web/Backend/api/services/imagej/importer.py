@@ -9,7 +9,7 @@ from django.core.exceptions import ValidationError
 from django.core.files import File
 from django.db import IntegrityError, OperationalError, transaction
 
-from api.models import AnalisisPred, Caso, ImageJImportRecord, MuestraSaliva, Paciente, ResultadoSegmentacion
+from api.models import Institution, AnalisisPred, Caso, ImageJImportRecord, MuestraSaliva, Paciente, ResultadoSegmentacion
 from api.services.patient_identity import pseudonymized_identification
 from .contracts import (CONTRACT_VERSION, CONVERTER_VERSION, ImportProblem,
                         import_keys, patient_key, sha256_file, sha256_path)
@@ -70,8 +70,8 @@ def discover(source, layout):
     return directories, pairs
 
 
-def resolve_domain(row, namespace, *, lock=False):
-    patients = Paciente.objects
+def resolve_domain(row, namespace, *, institution, lock=False):
+    patients = Paciente.objects.filter(institution=institution)
     if lock:
         patients = patients.select_for_update()
     patient = patients.filter(external_id_namespace=namespace, external_patient_id=row.external_id).first()
@@ -79,7 +79,7 @@ def resolve_domain(row, namespace, *, lock=False):
         if patient_key(patient.initials) != patient_key(row.initials) or patient.fecha_nacimiento != row.birth_date:
             raise ImportProblem('PATIENT_DATA_CONFLICT')
     else:
-        patient = Paciente(identity_mode=Paciente.PSEUDONYMIZED, external_id_namespace=namespace,
+        patient = Paciente(institution=institution, identity_mode=Paciente.PSEUDONYMIZED, external_id_namespace=namespace,
                            external_patient_id=row.external_id, initials=row.initials,
                            fecha_nacimiento=row.birth_date,
                            identificacion=pseudonymized_identification(namespace, row.external_id))
@@ -106,13 +106,15 @@ def resolve_domain(row, namespace, *, lock=False):
     return patient, case, analysis
 
 
-def check_existing(keys, row, namespace, dataset, image_hash, mask_hash, basename):
+def check_existing(keys, row, namespace, dataset, image_hash, mask_hash, basename, institution):
+    records = ImageJImportRecord.objects.filter(paciente__institution=institution)
+    legacy = import_keys(dataset, namespace, row.external_id, 1, basename, image_hash, mask_hash)
     # Mapping is durable by external ID, not initials/folder. Renamed initials do
     # not create new patients; changed data is a conflict in resolve_domain.
-    record = ImageJImportRecord.objects.filter(logical_key=keys['logical_key']).first()
+    record = records.filter(logical_key__in=[keys['logical_key'], legacy['logical_key']]).first()
     if record and record.image_sha256 != image_hash:
         raise ImportProblem('IMAGE_CHANGED_CONFLICT')
-    record = record or ImageJImportRecord.objects.filter(sample_key=keys['sample_key']).first()
+    record = record or records.filter(sample_key__in=[keys['sample_key'], legacy['sample_key']]).first()
     if record:
         if patient_key(record.paciente.initials) != patient_key(row.initials) or record.paciente.fecha_nacimiento != row.birth_date:
             raise ImportProblem('PATIENT_DATA_CONFLICT')
@@ -122,7 +124,7 @@ def check_existing(keys, row, namespace, dataset, image_hash, mask_hash, basenam
             raise ImportProblem('CONVERTER_VERSION_CONFLICT')
         if record.logical_basename != basename:
             raise ImportProblem('SAME_IMAGE_NEW_NAME')
-        if record.annotation_key != keys['annotation_key'] or record.status != 'READY':
+        if record.annotation_key not in (keys['annotation_key'], legacy['annotation_key']) or record.status != 'READY':
             raise ImportProblem('IMPORT_INTEGRITY_CONFLICT')
         if (record.paciente.external_id_namespace != namespace or record.paciente.external_patient_id != row.external_id
                 or record.caso.paciente_id != record.paciente_id or record.caso.case_number != 1
@@ -140,9 +142,9 @@ def check_existing(keys, row, namespace, dataset, image_hash, mask_hash, basenam
             raise ImportProblem('IMPORT_INTEGRITY_CONFLICT') from None
         return record
     # A folder rebound to a different hospital ID is not a new subject silently.
-    if ImageJImportRecord.objects.filter(dataset_key=dataset, patient_namespace=namespace, patient_key=patient_key(row.key)).exclude(external_patient_id=row.external_id).exists():
+    if records.filter(dataset_key=dataset, patient_namespace=namespace, patient_key=patient_key(row.key)).exclude(external_patient_id=row.external_id).exists():
         raise ImportProblem('PATIENT_DATA_CONFLICT')
-    if ImageJImportRecord.objects.filter(image_sha256=image_hash).exists():
+    if records.filter(image_sha256=image_hash).exists():
         raise ImportProblem('DUPLICATE_IMAGE_CONFLICT')
     return None
 
@@ -166,14 +168,14 @@ def save_copy(field, source, expected_hash, created):
             raise ImportProblem('STORAGE_HASH_MISMATCH')
 
 
-def persist_pair(pair, row, namespace, dataset, image_hash, mask_hash, keys, raw, normalized, metadata):
+def persist_pair(pair, row, namespace, dataset, image_hash, mask_hash, keys, raw, normalized, metadata, institution):
     created = []
     try:
         with transaction.atomic():
-            existing = check_existing(keys, row, namespace, dataset, image_hash, mask_hash, pair.image.stem)
+            existing = check_existing(keys, row, namespace, dataset, image_hash, mask_hash, pair.image.stem, institution)
             if existing:
                 return 'ALREADY_IMPORTED'
-            patient, case, analysis = resolve_domain(row, namespace, lock=True)
+            patient, case, analysis = resolve_domain(row, namespace, institution=institution, lock=True)
             # Detect source edits between preflight/conversion and persistence.
             if sha256_path(pair.image) != image_hash or sha256_path(pair.mask) != mask_hash:
                 raise ImportProblem('SOURCE_CHANGED_DURING_IMPORT')
@@ -216,9 +218,11 @@ def persist_pair(pair, row, namespace, dataset, image_hash, mask_hash, keys, raw
         raise
 
 
-def run_import(*, source, patients_file, dataset_key, patient_namespace, case_number=1,
+def run_import(*, institution, source, patients_file, dataset_key, patient_namespace, case_number=1,
                dry_run=False, patient=None, limit=None, strict=False,
                layout='official', patients_format='standard'):
+    if not isinstance(institution, Institution) or not institution.pk or not institution.active:
+        raise ImportProblem('ACTIVE_INSTITUTION_REQUIRED')
     if case_number != 1:
         raise ImportProblem('ONLY_CASE_1_SUPPORTED')
     if not re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,63}', patient_namespace):
@@ -257,12 +261,12 @@ def run_import(*, source, patients_file, dataset_key, patient_namespace, case_nu
             if pair.status != 'EXACT_MATCH':
                 raise ImportProblem(pair.status)
             image_hash, mask_hash = sha256_path(pair.image), sha256_path(pair.mask)
-            keys = import_keys(dataset_key, patient_namespace, row.external_id, 1, pair.image.stem, image_hash, mask_hash)
-            existing = check_existing(keys, row, patient_namespace, dataset_key, image_hash, mask_hash, pair.image.stem)
+            keys = import_keys(dataset_key, patient_namespace, row.external_id, 1, pair.image.stem, image_hash, mask_hash, institution=institution.pk)
+            existing = check_existing(keys, row, patient_namespace, dataset_key, image_hash, mask_hash, pair.image.stem, institution)
             if existing:
                 patient_obj, case = existing.paciente, existing.caso
             else:
-                patient_obj, case, _analysis = resolve_domain(row, patient_namespace)
+                patient_obj, case, _analysis = resolve_domain(row, patient_namespace, institution=institution)
             if image_hash in batch_hashes:
                 raise ImportProblem('DUPLICATE_IMAGE_CONFLICT')
             batch_hashes.add(image_hash)
@@ -280,7 +284,7 @@ def run_import(*, source, patients_file, dataset_key, patient_namespace, case_nu
                     summary['patients_would_reuse' if patient_obj.pk else 'patients_would_create'] += 1
                     summary['cases_would_reuse' if case else 'cases_would_create'] += 1
                     domain_seen.add(row.external_id)
-                report['status'] = 'WOULD_IMPORT' if dry_run else persist_pair(pair, row, patient_namespace, dataset_key, image_hash, mask_hash, keys, raw, normalized, metadata)
+                report['status'] = 'WOULD_IMPORT' if dry_run else persist_pair(pair, row, patient_namespace, dataset_key, image_hash, mask_hash, keys, raw, normalized, metadata, institution)
                 summary['ready'] += 1
             report['counts'] = normalized['summary']['counts_by_label']
             for label, count in report['counts'].items():

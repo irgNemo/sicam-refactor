@@ -1,3 +1,4 @@
+from api.management.tenant import require_institution
 from pathlib import Path
 
 from django.core.files.base import ContentFile
@@ -25,6 +26,7 @@ class Command(BaseCommand):
     help = 'Crea datos demo minimos para validar el flujo local SICAM.'
 
     def add_arguments(self, parser):
+        parser.add_argument("--institution", required=True, help="Código de institución operativa existente.")
         parser.add_argument(
             '--image',
             dest='image_path',
@@ -43,11 +45,12 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        institution = require_institution(options["institution"])
         image_path = self._validate_image_path(options.get('image_path'))
         image_dir = self._validate_image_dir(options.get('image_dir'))
 
         paciente, paciente_created = Paciente.objects.get_or_create(
-            identificacion=DEMO_IDENTIFICACION,
+            institution=institution, identificacion=DEMO_IDENTIFICACION,
             defaults={
                 'nombre': 'Demo',
                 'apellido': 'SICAM',

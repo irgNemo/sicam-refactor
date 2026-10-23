@@ -21,7 +21,7 @@ def profile_snapshot(profile):
     return {field: getattr(profile, field) for field in profile.physical_fields}
 
 
-def automatic_calibration(profile, references, *, label='', expected_token=None, persist=False):
+def automatic_calibration(profile, references, *, label='', expected_token=None, persist=False, actor=None):
     snapshot = profile_snapshot(profile)
     if not profile.objective_magnification:
         raise ValidationError({'acquisition_profile': 'Indique el objetivo del perfil antes de medir.'})
@@ -91,7 +91,7 @@ def automatic_calibration(profile, references, *, label='', expected_token=None,
                 locked = AcquisitionProfile.objects.select_for_update().get(pk=profile.pk)
                 if profile_snapshot(locked) != snapshot:
                     raise ValidationError({'detail': 'El perfil cambió durante la medición.'})
-                calibration = Calibration.objects.create(
+                calibration = Calibration.objects.create(created_by=actor, updated_by=actor,
                     acquisition_profile=locked, label=label, status=Calibration.PROVISIONAL,
                     scale_x_um_per_px=decimal_scale(sx), scale_y_um_per_px=decimal_scale(sy),
                     source_width_px=locked.image_width_px, source_height_px=locked.image_height_px,
@@ -100,6 +100,7 @@ def automatic_calibration(profile, references, *, label='', expected_token=None,
                 )
                 for entry, result, path in zip(references, results, paths):
                     reference = CalibrationReference(
+                        created_by=actor, updated_by=actor,
                         calibration=calibration, pattern_type=entry['pattern_type'],
                         source_filename=Path(entry['file'].name).name, source_sha256=result['sha256'],
                         source_width_px=result['source_width_px'], source_height_px=result['source_height_px'],

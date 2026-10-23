@@ -1,3 +1,4 @@
+from api.testing import tenant_fixture
 import hashlib
 import json
 from decimal import Decimal
@@ -136,8 +137,8 @@ class AcquisitionOperationsTests(TestCase):
 
     def test_seed_first_second_exact_values_and_references(self):
         count = Calibration.objects.count()
-        output = StringIO(); call_command('seed_optika_40x_calibration', stdout=output)
-        first = json.loads(output.getvalue()); second = seed_optika()
+        output = StringIO(); call_command('seed_optika_40x_calibration', institution=tenant_fixture().code, stdout=output)
+        first = json.loads(output.getvalue()); second = seed_optika(institution=tenant_fixture())
         self.assertEqual(first['status'], 'CREATED'); self.assertEqual(second['status'], 'ALREADY_PRESENT')
         calibration = Calibration.objects.get(pk=first['calibration_id'])
         self.assertEqual((calibration.scale_x_um_per_px, calibration.scale_y_um_per_px), (SX,SY))
@@ -153,16 +154,16 @@ class AcquisitionOperationsTests(TestCase):
         with TemporaryDirectory() as source:
             (Path(source)/REFERENCES[0][0]).write_bytes(b'not the approved file')
             with self.assertRaisesMessage(CommandError, 'SOURCE_HASH_MISMATCH'):
-                seed_optika(source)
+                seed_optika(source, institution=tenant_fixture())
         self.assertEqual(AcquisitionProfile.objects.count(), count)
         self.assertFalse(CalibrationReference.objects.exists())
 
     def test_seed_conflicting_label_not_overwritten(self):
-        first = seed_optika()
+        first = seed_optika(institution=tenant_fixture())
         calibration = Calibration.objects.get(pk=first['calibration_id'])
         calibration.status = 'RETIRED'; calibration.save()
         with self.assertRaisesMessage(CommandError, 'EXISTING_CALIBRATION_CONFLICT'):
-            seed_optika()
+            seed_optika(institution=tenant_fixture())
         calibration.refresh_from_db(); self.assertEqual(calibration.status, 'RETIRED')
 
     def test_series_patient_filter_and_authentication(self):
@@ -175,13 +176,12 @@ class AcquisitionOperationsTests(TestCase):
         self.assertIn(self.client.get('/api/acquisition-operator/').status_code, (401,403))
         self.assertIn(self.client.post('/api/calibrations/automatic-preview/', self.payload(self.automatic_profile()), format='multipart').status_code, (401,403))
 
-    def test_anonymous_legacy_upload_gets_backend_physical_status(self):
+    def test_anonymous_upload_no_longer_admitted(self):
         from api.test_acquisition import upload
         self.client.force_authenticate(None)
         for route in ('muestras', 'muestras-sangre'):
             response = self.client.post(f'/api/{route}/', {'analisis': self.analysis.pk, 'imagen': upload()}, format='multipart')
-            self.assertEqual(response.status_code, 201, response.data)
-            self.assertEqual(response.data['physical_compatibility']['status'], 'NO_ACQUISITION_SERIES')
+            self.assertEqual(response.status_code, 403, response.data)
 
     def test_uploaded_resolution_mismatch_preserves_success_and_pixel_processing(self):
         from api.test_acquisition import upload, image_bytes

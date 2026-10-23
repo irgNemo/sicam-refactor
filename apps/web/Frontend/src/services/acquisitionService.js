@@ -1,19 +1,6 @@
-import { reactive } from 'vue';
-import api from './apiClient';
-
-// Session-only memory. Never localStorage/sessionStorage or a persisted token/password.
-export const operator = reactive({ ready: false });
-export async function connectOperator(username, password) {
-  const target = new URL(api.defaults.baseURL || '/', window.location.href);
-  if (target.protocol !== 'https:' && !['127.0.0.1', 'localhost', '[::1]'].includes(target.hostname)) {
-    throw new Error('El acceso de operador requiere HTTPS fuera de localhost.');
-  }
-  const auth = { username, password };
-  await api.get('/api/acquisition-operator/', { auth });
-  api.defaults.auth = auth;
-  operator.ready = true;
-}
-export function disconnectOperator() { delete api.defaults.auth; operator.ready = false; }
+import { auth } from './auth';
+// The existing acquisition components now share the operational session.
+export const operator = { get ready() { return Boolean(auth.user && !auth.user.must_change_password); } };
 export function automaticPayload(profile, label, references, token = '') {
   const form = new FormData();
   form.append('acquisition_profile', profile);

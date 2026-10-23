@@ -2,6 +2,7 @@
   <TopBar
     :seccion="seccion"
     @change-section="requestSectionChange"
+    @logout="requestLogout"
   />
 
   <div class="app">
@@ -42,12 +43,15 @@
       @segmentation-result-selected="onSegmentationResultSelected"
     />
 
+    <AdministrationView v-if="seccion === 'administracion' && can('administer')" ref="administracion" />
     <AdquisicionView v-if="seccion === 'adquisicion'" ref="adquisicion" />
     <RegistroView v-if="seccion === 'registro'" ref="registro" />
   </div>
 </template>
 
 <script>
+import { auth, can, logout } from "./services/auth";
+import AdministrationView from "./views/AdministrationView.vue";
 import TopBar from "./components/TopBar.vue";
 import SideBar from "./components/SideBar.vue";
 import MainContent from "./components/MainContent.vue";
@@ -58,7 +62,7 @@ import { SAMPLE_TYPES } from "./domain/segmentationTypes";
 
 const UI_CONTEXT_STORAGE_KEY = "sicam.uiContext.v1";
 const UI_CONTEXT_VERSION = 1;
-const VALID_SECTIONS = ["segmentacion", "caracterizacion", "registro", "adquisicion"];
+const VALID_SECTIONS = ["segmentacion", "caracterizacion", "registro", "adquisicion", "administracion"];
 const VALID_SAMPLE_TYPES = Object.values(SAMPLE_TYPES);
 
 function normalizeOptionalId(value) {
@@ -106,6 +110,7 @@ export default {
 
   components: {
     TopBar,
+    AdministrationView,
     SideBar,
     MainContent,
     RegistroView,
@@ -117,7 +122,7 @@ export default {
     const storedContext = readStoredUiContext();
 
     return {
-      seccion: storedContext?.activeTab || "segmentacion",
+      seccion: storedContext?.activeTab === "administracion" && !can("administer") ? "segmentacion" : storedContext?.activeTab || "segmentacion",
       selectedPatientId: storedContext?.patientId || null,
       selectedCaseId: storedContext?.caseId || null,
       activeSampleType: storedContext?.sampleType || SAMPLE_TYPES.SALIVA,
@@ -159,6 +164,14 @@ export default {
   },
 
   methods: {
+    can,
+    async requestLogout() {
+      if (!this.confirmPendingDraftNavigation()) return;
+      for (const ref of ['registro', 'adquisicion', 'administracion']) {
+        if (this.$refs[ref]?.confirmLeave() === false) return;
+      }
+      try { await logout(); } catch { window.alert('No se pudo cerrar la sesión. Reintente.'); }
+    },
     confirmPendingDraftNavigation() {
       if (
         this.seccion === "segmentacion" &&
@@ -172,6 +185,7 @@ export default {
     },
 
     requestSectionChange(nextSection) {
+      if (nextSection === "administracion" && !can("administer")) return;
       if (nextSection === this.seccion) return;
       if (!VALID_SECTIONS.includes(nextSection)) return;
 
@@ -179,6 +193,7 @@ export default {
       if (this.seccion === "registro" && this.$refs.registro?.confirmLeave() === false) return;
 
       if (this.seccion === "adquisicion" && this.$refs.adquisicion?.confirmLeave() === false) return;
+      if (this.seccion === "administracion" && this.$refs.administracion?.confirmLeave() === false) return;
       this.seccion = nextSection;
     },
 

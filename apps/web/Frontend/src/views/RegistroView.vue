@@ -5,19 +5,22 @@
         <h2 id="registration-title">Registro de datos</h2>
         <p>Gestión de pacientes, casos e imágenes.</p>
       </header>
-      <nav class="registration-nav" aria-label="Secciones de Registro">
+      <p v-if="!can('register')">Acceso de consulta. Puede consultar pacientes y casos desde Segmentación y Caracterización.</p>
+      <section v-if="!can('register')" aria-label="Pacientes de la institución"><h3>Pacientes</h3><ul><li v-for="patient in pacientes" :key="patient.id_paciente">{{ patientRegistrationLabel(patient) }}</li></ul></section>
+      <nav v-if="can('register')" class="registration-nav" aria-label="Secciones de Registro">
         <button v-for="tab in [{ key: 'paciente', label: 'Paciente' }, { key: 'caso', label: 'Caso' }, { key: 'imagenes', label: 'Imágenes' }]"
           :key="tab.key" type="button" :class="{ active: vistaActiva === tab.key }"
           :aria-current="vistaActiva === tab.key ? 'page' : undefined" :disabled="isBusy"
           @click="requestTabChange(tab.key)">{{ tab.label }}</button>
       </nav>
 
-      <section v-if="vistaActiva === 'paciente'" class="registration-card" aria-labelledby="patient-title">
+      <section v-if="can('register') && vistaActiva === 'paciente'" class="registration-card" aria-labelledby="patient-title">
         <header class="card-header">
           <h3 id="patient-title">Nuevo paciente</h3>
           <p>Los campos con * son obligatorios.</p>
         </header>
         <form @submit.prevent="crearPaciente">
+          <InstitutionSelect v-model="patientInstitution" />
           <fieldset class="registration-fields" :disabled="isCreatingPatient" :aria-busy="isCreatingPatient">
             <legend class="sr-only">Datos del paciente</legend>
             <div class="card-body">
@@ -116,7 +119,7 @@
         </form>
       </section>
 
-      <section v-if="vistaActiva === 'caso'" class="registration-card" aria-labelledby="case-title">
+      <section v-if="can('register') && vistaActiva === 'caso'" class="registration-card" aria-labelledby="case-title">
         <header class="card-header"><h3 id="case-title">Nuevo caso</h3><p>Asocie el caso a un paciente existente. Los campos con * son obligatorios.</p></header>
         <form @submit.prevent="crearCaso">
           <fieldset class="registration-fields" :disabled="isCreatingCase" :aria-busy="isCreatingCase">
@@ -163,7 +166,7 @@
         </form>
       </section>
 
-      <section v-if="vistaActiva === 'imagenes'" class="registration-card" aria-labelledby="images-title">
+      <section v-if="can('register') && vistaActiva === 'imagenes'" class="registration-card" aria-labelledby="images-title">
         <header class="card-header"><h3 id="images-title">Agregar imágenes</h3><p>Seleccione el destino y revise los archivos antes de subirlos.</p></header>
         <form @submit.prevent="subirImagenes">
           <fieldset class="registration-fields" :disabled="isUploading || isCreatingAnalysis || isCreatingSeries" :aria-busy="isUploading || isCreatingAnalysis || isCreatingSeries">
@@ -280,6 +283,8 @@
 </template>
 
 <script>
+import { auth, can } from '../services/auth';
+import InstitutionSelect from '../components/InstitutionSelect.vue';
 import { patientRegistrationLabel } from "../domain/patientPresentation";
 import apiClient from '../services/apiClient';
 import AcquisitionSeriesSelector from '../components/acquisition/AcquisitionSeriesSelector.vue';
@@ -292,11 +297,12 @@ import {
 
 export default {
   name: 'RegistroView',
-  components: { AcquisitionSeriesSelector },
+  components: { AcquisitionSeriesSelector, InstitutionSelect },
 
   data() {
     return {
       vistaActiva: 'paciente',
+      patientInstitution: null,
       selectedAcquisition: { series: null, profile: null, calibration: null },
       seriesDirty: false, isCreatingSeries: false,
       patientIdentityMode: 'IDENTIFIED',
@@ -428,6 +434,7 @@ export default {
   },
 
   methods: {
+    can,
     patientRegistrationLabel,
     compatibilityText,
     resolutionFeedback,
@@ -463,6 +470,7 @@ export default {
         ? ['initials', 'external_id_namespace', 'external_patient_id', 'fecha_nacimiento']
         : ['nombre', 'apellido', 'identificacion', 'fecha_nacimiento', 'email', 'telefono'];
       const payload = Object.fromEntries(fields.map(field => [field, this.formPaciente[field]]));
+      if (auth.user?.is_superuser) payload.institution = this.patientInstitution;
       if (this.patientIdentityMode === 'PSEUDONYMIZED') payload.identity_mode = 'PSEUDONYMIZED';
       return payload;
     },

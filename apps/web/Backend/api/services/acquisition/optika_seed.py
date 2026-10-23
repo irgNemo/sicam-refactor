@@ -50,7 +50,9 @@ def reference_values(spec):
                              'used_for_consensus': status == 'MEASURED'})
 
 
-def seed_optika(source_dir=None):
+def seed_optika(source_dir=None, *, institution):
+    if not institution.pk or not institution.active:
+        raise CommandError("ACTIVE_INSTITUTION_REQUIRED")
     paths = {}
     if source_dir is not None:
         for spec in REFERENCES:
@@ -63,17 +65,17 @@ def seed_optika(source_dir=None):
     try:
         with transaction.atomic():
             physical = {key: value for key, value in PROFILE.items() if key != 'name'}
-            matches = list(AcquisitionProfile.objects.select_for_update().filter(**physical))
+            matches = list(AcquisitionProfile.objects.select_for_update().filter(institution=institution, **physical))
             if len(matches) > 1:
                 raise CommandError('AMBIGUOUS_EXISTING_PROFILE')
-            if not matches and AcquisitionProfile.objects.filter(name=PROFILE['name']).exists():
+            if not matches and AcquisitionProfile.objects.filter(institution=institution, name=PROFILE['name']).exists():
                 raise CommandError('EXISTING_PROFILE_CONFLICT')
-            profile = matches[0] if matches else AcquisitionProfile.objects.create(**PROFILE)
+            profile = matches[0] if matches else AcquisitionProfile.objects.create(institution=institution, **PROFILE)
             values = dict(acquisition_profile=profile, label=LABEL, status='PROVISIONAL',
                           scale_x_um_per_px=SX, scale_y_um_per_px=SY, source_width_px=4928, source_height_px=4928,
                           method='AUTOMATIC_MULTI_REFERENCE', algorithm_version='calibration-provisional-v1/18S-A.1',
                           provenance=PROVENANCE)
-            existing = list(Calibration.objects.filter(label=LABEL))
+            existing = list(Calibration.objects.filter(acquisition_profile__institution=institution, label=LABEL))
             same_provenance = list(Calibration.objects.filter(acquisition_profile=profile, provenance=PROVENANCE))
             candidates = {c.pk:c for c in existing + same_provenance}
             if candidates:

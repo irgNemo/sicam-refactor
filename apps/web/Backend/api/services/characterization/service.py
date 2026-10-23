@@ -29,7 +29,7 @@ def characterize_resultado_segmentacion(resultado_or_id):
     return caracterizacion
 
 
-def get_or_create_resultado_caracterizacion(resultado_or_id):
+def get_or_create_resultado_caracterizacion(resultado_or_id, *, actor=None):
     from api.models import ResultadoCaracterizacion, ResultadoSegmentacion
 
     if isinstance(resultado_or_id, ResultadoSegmentacion):
@@ -79,6 +79,7 @@ def get_or_create_resultado_caracterizacion(resultado_or_id):
             )
 
         caracterizacion = ResultadoCaracterizacion(
+            created_by=actor, updated_by=actor,
             resultado_segmentacion=resultado,
             revision_segmentacion_id=revision_id,
             source_type=effective['fuente'],

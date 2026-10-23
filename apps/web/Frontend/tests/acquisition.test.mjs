@@ -8,6 +8,9 @@ import { renderToString } from '@vue/server-renderer';
 const server = await createServer({ root: fileURLToPath(new URL('../', import.meta.url)), configFile:false,
   plugins:[vuePlugin()], optimizeDeps:{ noDiscovery:true, include:[] },
   server:{middlewareMode:true,hmr:false,ws:false,watch:null},appType:'custom' });
+const { auth } = await server.ssrLoadModule('/src/services/auth.js');
+const sessionFixture = () => ({ id: 1, username: 'fixture', role: 'ADMIN', institution: { id: 1, code: 'TEST' }, must_change_password: false });
+auth.user = sessionFixture();
 const keepAlive = setInterval(()=>{},1000);
 after(async()=>{clearInterval(keepAlive);await server.close();});
 const {default:View}=await server.ssrLoadModule('/src/views/AdquisicionView.vue');
@@ -22,7 +25,7 @@ const profile={id:1,name:'Synthetic',image_width_px:4928,image_height_px:4928};
 const calibration={id:2,acquisition_profile:1,label:'Synthetic calibration',status:'PROVISIONAL',scale_x_um_per_px:'0.055233934048',scale_y_um_per_px:'0.055010060892',created_at:'2026-10-21'};
 const series={id:3,patient:1,acquisition_profile:1,calibration:2,label:'Synthetic series'};
 const originalWindow=globalThis.window;
-afterEach(()=>{service.disconnectOperator();globalThis.window=originalWindow;});
+afterEach(()=>{auth.user=sessionFixture();globalThis.window=originalWindow;});
 function context(component,props={}) {
   const ctx=reactive({...component.data(),...props,events:[],$refs:{fileInput:{value:''}},$emit(name,value){this.events.push([name,value]);}});
   for(const [name,method] of Object.entries(component.methods))ctx[name]=method.bind(ctx);
@@ -39,17 +42,13 @@ test('main navigation includes working Adquisición and preserves leave guard',a
   ctx.$refs.registro.confirmLeave=()=>true;App.methods.requestSectionChange.call(ctx,'adquisicion');assert.equal(ctx.seccion,'adquisicion');
   ctx.$refs.adquisicion={confirmLeave:()=>false};App.methods.requestSectionChange.call(ctx,'registro');assert.equal(ctx.seccion,'adquisicion');
 });
-test('operator credentials are memory-only and require safe transport',async()=>{
-  globalThis.window={location:{href:'https://sic am.test/'.replace(' ','')},get localStorage(){throw Error('No storage');},get sessionStorage(){throw Error('No storage');}};
-  api.defaults.baseURL='https://backend.test';let auth;
-  api.defaults.adapter=async config=>{auth=config.auth;return ok(config,{authenticated:true});};
-  await service.connectOperator('synthetic','test-only');assert.equal(auth.username,'synthetic');assert.equal(service.operator.ready,true);
-  service.disconnectOperator();assert.equal(api.defaults.auth,undefined);
-  api.defaults.baseURL='http://remote.test';await assert.rejects(service.connectOperator('synthetic','test-only'),/HTTPS/);
-  api.defaults.baseURL=undefined;
+test('acquisition shares operational session without Basic credentials',()=>{
+  assert.equal(service.operator.ready,true); assert.equal(api.defaults.auth,undefined);
+  auth.user=null; assert.equal(service.operator.ready,false);
+  auth.user={...sessionFixture(),must_change_password:true}; assert.equal(service.operator.ready,false);
 });
 test('profile list and editable metadata render; unknown fields remain optional',async()=>{
-  service.operator.ready=true;
+  auth.user=sessionFixture();
   const ctx=context(View);ctx.editProfile(null);
   const html=await render(View,{profiles:[profile],profileForm:ctx.profileForm});
   assert.match(html,/Synthetic/);assert.match(html,/Nueva configuración/);assert.match(html,/Fabricante de cámara/);
@@ -59,7 +58,7 @@ test('profile list and editable metadata render; unknown fields remain optional'
   assert.equal(payload.objective_magnification,null);assert.equal(payload.binning_x,null);assert.equal(ctx.profileForm,null);
 });
 test('calibration list shows sx/sy, provisional text, date and references without validate action',async()=>{
-  service.operator.ready=true;const html=await render(View,{tab:'Calibraciones',profiles:[profile],calibrations:[calibration]});
+  auth.user=sessionFixture();const html=await render(View,{tab:'Calibraciones',profiles:[profile],calibrations:[calibration]});
   for(const text of ['0.055233934048','0.055010060892','Provisional','validación experimental','Ver referencias','Nueva calibración automática','Diámetro conocido'])assert.ok(html.includes(text));
   assert.doesNotMatch(html,/>Validar</);
 });
@@ -81,19 +80,19 @@ test('measure displays diagnostics; create uses reviewed token and becomes clean
   assert.equal(createToken,'abc');assert.equal(ctx.created,true);assert.equal(ctx.hasUnsavedWork,false);
 });
 test('unusable calibration cannot be created and displays no-record message',async()=>{
-  service.operator.ready=true;const ctx=context(View);ctx.review={usable:false};let calls=0;api.defaults.adapter=async c=>{calls++;return ok(c,{});};await ctx.createCalibration();assert.equal(calls,0);
+  auth.user=sessionFixture();const ctx=context(View);ctx.review={usable:false};let calls=0;api.defaults.adapter=async c=>{calls++;return ok(c,{});};await ctx.createCalibration();assert.equal(calls,0);
   const html=await render(View,{tab:'Calibraciones',review:{usable:false,results:[],warnings:[]}});assert.match(html,/no se creó una calibración/);
 });
 test('patient without series can create or continue in pixels',async()=>{
-  service.operator.ready=true;const ctx=context(Series,{patientId:1,disabled:false});listAdapter([]);await ctx.load();assert.equal(ctx.selectedId,'');
+  auth.user=sessionFixture();const ctx=context(Series,{patientId:1,disabled:false});listAdapter([]);await ctx.load();assert.equal(ctx.selectedId,'');
   const html=await render(Series,{series:[]},{patientId:1});assert.match(html,/No hay una serie/);assert.match(html,/Crear serie/);assert.match(html,/procesamiento en píxeles/);
 });
 test('one series auto-selects; several require choice; other patient excluded',async()=>{
-  service.operator.ready=true;const ctx=context(Series,{patientId:1,disabled:false});listAdapter([series,{...series,id:9,patient:2}]);await ctx.load();assert.equal(ctx.selectedId,3);
+  auth.user=sessionFixture();const ctx=context(Series,{patientId:1,disabled:false});listAdapter([series,{...series,id:9,patient:2}]);await ctx.load();assert.equal(ctx.selectedId,3);
   listAdapter([series,{...series,id:4}]);await ctx.load();assert.equal(ctx.selectedId,'');ctx.choose(9);assert.equal(ctx.selectedId,'');ctx.choose(4);assert.equal(ctx.selectedId,4);
 });
 test('patient switch discards stale series response',async()=>{
-  service.operator.ready=true;const ctx=context(Series,{patientId:1,disabled:false});let resolve;
+  auth.user=sessionFixture();const ctx=context(Series,{patientId:1,disabled:false});let resolve;
   api.defaults.adapter=config=>config.url.includes('acquisition-series')?new Promise(r=>{resolve=data=>r(ok(config,data));}):Promise.resolve(ok(config,[]));
   const first=ctx.load();await new Promise(r=>setImmediate(r));const oldResolve=resolve;
   ctx.patientId=2;listAdapter([{...series,patient:2,id:7}]);await ctx.load();oldResolve([series]);await first;assert.equal(ctx.selectedId,7);
@@ -104,7 +103,7 @@ test('series creation sends patient, nullable calibration and resets dirty basel
   assert.equal(sent.patient,1);assert.equal(sent.calibration,null);assert.equal(ctx.selectedId,3);assert.equal(ctx.dirty,false);
 });
 test('series without calibration, provisional and retired are explicit; retired excluded from new choices',async()=>{
-  service.operator.ready=true;
+  auth.user=sessionFixture();
   for(const [status,text] of [['PROVISIONAL','calibración provisional'],['RETIRED','Calibración retirada']]) {
     const html=await render(Series,{selectedId:3,series:[series],profiles:[profile],calibrations:[{...calibration,status}]},{patientId:1});assert.ok(html.includes(text));
   }

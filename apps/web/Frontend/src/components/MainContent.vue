@@ -465,7 +465,7 @@
                   {{ validateRevisionBlockReason }}
                 </div>
                 <button
-                  v-if="showRevisionActions && activeRevision?.estado === 'BORRADOR'"
+                  v-if="can('validate') && showRevisionActions && activeRevision?.estado === 'BORRADOR'"
                   class="btn-segment success full-width"
                   :disabled="!canValidateRevision"
                   @click="confirmAndValidateRevision"
@@ -518,6 +518,7 @@
 </template>
 
 <script>
+import { can } from '../services/auth';
 import { replacementWarning } from '../domain/segmentationTargets';
 import { getSelectiveContext, reserveEditorialObjectId } from '../services/segmentationService';
 import apiClient from "../services/apiClient";
@@ -1343,6 +1344,7 @@ export default {
   },
 
   methods: {
+    can,
     sampleKey(muestra) {
       return `${this.activeSampleType}-${muestra?.id_muestra || "sin-id"}`;
     },

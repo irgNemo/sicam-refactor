@@ -19,6 +19,9 @@ const server = await createServer({
 });
 // Vite/esbuild use unref'ed handles in middleware mode. Keep async module
 // compilation alive until the Node test runner has completed every assertion.
+const { auth } = await server.ssrLoadModule('/src/services/auth.js');
+const sessionFixture = () => ({ id: 1, username: 'fixture', role: 'OPERATOR', institution: { id: 1, code: 'TEST' }, must_change_password: false });
+auth.user = sessionFixture();
 const keepAlive = setInterval(() => {}, 1000);
 after(async () => { clearInterval(keepAlive); await server.close(); });
 const load = path => server.ssrLoadModule(`/src/${path}`);
@@ -739,7 +742,7 @@ test('18Q-B real navigation retains pending-edit guard and rejects removed secti
 test('18Q-B TopBar shows only real sections; removed controls have no orphan handlers', async () => {
   for (const seccion of ['segmentacion', 'caracterizacion', 'registro', 'adquisicion']) {
     const html = await renderToString(createSSRApp(TopBar, { seccion }));
-    assert.equal((html.match(/<button/g) || []).length, 4);
+    assert.equal((html.match(/<button/g) || []).length, 5); // Four sections + authenticated logout.
     for (const title of ['Segmentación', 'Caracterización', 'Registro']) assert.ok(html.includes(title));
     for (const removed of ['Análisis', 'Notificaciones', 'Configuración', 'notification-dot', '🔔', '⚙']) assert.ok(!html.includes(removed));
   }
@@ -917,7 +920,7 @@ for (const fail of [false, true]) {
       saveDraft: () => Main.methods.saveDraft.call(ctx), confirmAndValidateRevision() {},
     });
     const root = hostNode('root');
-    renderer.render(h({ setup: () => ctx, render: compile(workflowTemplate) }), root);
+    renderer.render(h({ setup: () => Object.assign(ctx, {can: () => true}), render: compile(workflowTemplate) }), root);
     const saveButton = () => findAll(root, 'button').find(node => node.props.class.includes('save-draft-btn'));
     assert.equal(saveButton().props.disabled, false);
     assert.equal(saveButton().props['aria-busy'], false);

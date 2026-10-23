@@ -1,3 +1,4 @@
+from .access import ScopedViewMixin, OperationalPermission, scoped
 import json
 
 from django.core.exceptions import ValidationError as ModelValidationError
@@ -16,9 +17,9 @@ from .acquisition_serializers import (AcquisitionProfileSerializer, CalibrationS
 from .services.acquisition import physical_compatibility
 
 
-class MetadataViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
+class MetadataViewSet(ScopedViewMixin, mixins.ListModelMixin, mixins.RetrieveModelMixin,
                       mixins.CreateModelMixin, mixins.UpdateModelMixin, viewsets.GenericViewSet):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [OperationalPermission]
     # No destroy action. Referenced metadata additionally uses database PROTECT.
 
 
@@ -46,7 +47,7 @@ class CalibrationViewSet(MetadataViewSet):
             'label': request.data.get('label', ''), 'source_token': request.data.get('source_token', ''),
             'references': [{**item, 'file': request.FILES.get(f'reference_{index}')} for index, item in enumerate(metadata)],
         }
-        serializer = AutomaticCalibrationSerializer(data=data)
+        serializer = AutomaticCalibrationSerializer(data=data, context={'request': request})
         serializer.is_valid(raise_exception=True)
         values = serializer.validated_data
         if persist and not values['label']:
@@ -54,7 +55,7 @@ class CalibrationViewSet(MetadataViewSet):
         from .services.acquisition.automatic import automatic_calibration
         try:
             output = automatic_calibration(values['acquisition_profile'], values['references'],
-                label=values['label'], expected_token=values.get('source_token'), persist=persist)
+                label=values['label'], expected_token=values.get('source_token'), persist=persist, actor=request.user)
         except ModelValidationError as exc:
             raise ValidationError(getattr(exc, 'message_dict', exc.messages))
         if persist:
@@ -90,19 +91,19 @@ class AcquisitionSeriesViewSet(MetadataViewSet):
 
 
 class AcquisitionCompatibilityView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [OperationalPermission]
 
     def get(self, request, sample_type, pk):
         models = {'SALIVA': MuestraSaliva, 'SANGRE': MuestraSangre}
         if sample_type not in models:
             from rest_framework.exceptions import NotFound
             raise NotFound('Tipo de muestra desconocido.')
-        sample = get_object_or_404(models[sample_type], pk=pk)
+        sample = get_object_or_404(scoped(models[sample_type].objects.all(), request.user), pk=pk)
         return Response(physical_compatibility(sample))
 
 
 class AcquisitionOperatorView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [OperationalPermission]
 
     def get(self, request):
         return Response({'authenticated': True})

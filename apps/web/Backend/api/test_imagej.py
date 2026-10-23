@@ -1,3 +1,4 @@
+from api.testing import tenant_fixture
 """Synthetic ImageJ fixtures only; all files live in temporary directories."""
 import copy
 from datetime import date
@@ -14,7 +15,7 @@ from django.core.exceptions import ValidationError
 from django.core.management import call_command, CommandError
 from django.db import IntegrityError, transaction
 from django.test import TestCase, override_settings
-from rest_framework.test import APIClient
+from api.testing import PlatformClient as APIClient
 
 from api.models import (Paciente, Caso, AnalisisPred, MuestraSaliva, ResultadoSegmentacion,
                         RevisionSegmentacion, ResultadoCaracterizacion, ImageJImportRecord)
@@ -67,7 +68,7 @@ class ImageJImportTests(TestCase):
         self.pixels[4:12, 4:12] = 255
         self.pixels[20:24, 20:24] = 85
         Image.fromarray(self.pixels).save(self.mask)
-        self.options = dict(source=self.dataset, patients_file=self.excel, dataset_key='test-case1', patient_namespace='test')
+        self.options = dict(institution=tenant_fixture(), source=self.dataset, patients_file=self.excel, dataset_key='test-case1', patient_namespace='test')
         self.client = APIClient()
 
     def run_import(self, **overrides):
@@ -274,10 +275,10 @@ class ImageJImportTests(TestCase):
         self.assertEqual(self.client.patch(url,{'resultado_editado':snapshot},format='json').status_code,409)
 
     def test_cli_privacy_limit_strict_and_errors(self):
-        out=StringIO();call_command('import_imagej_dataset',**self.options,dry_run=True,limit=1,patient=[' acl '],stdout=out)
+        out=StringIO();call_command('import_imagej_dataset', **{**self.options, "institution": tenant_fixture().code},dry_run=True,limit=1,patient=[' acl '],stdout=out)
         self.assertIn('WOULD_IMPORT',out.getvalue());self.assertNotIn('2000-01-01',out.getvalue());self.assertNotIn('ACL',out.getvalue())
         self.mask.unlink()
-        with self.assertRaises(CommandError):call_command('import_imagej_dataset',**self.options,dry_run=True,stdout=StringIO())
+        with self.assertRaises(CommandError):call_command('import_imagej_dataset', **{**self.options, "institution": tenant_fixture().code},dry_run=True,stdout=StringIO())
         self.assertEqual(Paciente.objects.count(),0)
 
     def test_multiple_exteriors_and_degenerate_polygon(self):
@@ -302,7 +303,7 @@ class ImageJImportTests(TestCase):
     def test_existing_case_adoption_and_patient_reuse_dry_run(self):
         from api.services.imagej.importer import resolve_domain
         row=read_patients(self.excel)['acl'][0]
-        p,_,_=resolve_domain(row,'test');p.save()
+        p,_,_=resolve_domain(row,'test', institution=tenant_fixture());p.save()
         case=Caso.objects.create(paciente=p,titulo='Caso 1')
         report=self.run_import(dry_run=True)
         self.assertEqual(report['cases_would_reuse'],1)
@@ -383,7 +384,7 @@ class ImageJImportTests(TestCase):
         from api import serializers as api_serializers
         self.assertIs(importer.pseudonymized_identification, pseudonymized_identification)
         self.assertIs(api_serializers.pseudonymized_identification, pseudonymized_identification)
-        prospective, _, _ = importer.resolve_domain(read_patients(self.excel)['acl'][0], 'test')
+        prospective, _, _ = importer.resolve_domain(read_patients(self.excel)['acl'][0], 'test', institution=tenant_fixture())
         self.assertEqual(prospective.identificacion, 'ext:e8c598b817db5cd4a9c49cc752763a9e')
         self.assertEqual(Paciente.objects.count(), 0)
         response = self.client.post('/api/pacientes/', {
@@ -402,3 +403,36 @@ class ImageJImportTests(TestCase):
         self.assertEqual(again['errors'], 0, again)
         self.assertEqual(Paciente.objects.count(), 1)
         self.assertEqual(ImageJImportRecord.objects.count(), 1)
+
+    def test_18t_import_requires_explicit_active_institution(self):
+        options = {key: value for key, value in self.options.items() if key != 'institution'}
+        with self.assertRaises(TypeError):
+            run_import(**options)
+        with self.assertRaises(ImportProblem):
+            run_import(**options, institution=None)
+        tenant = self.options['institution']; tenant.active = False; tenant.save()
+        with self.assertRaises(ImportProblem):
+            run_import(**self.options)
+
+    def test_18t_tenant_keys_and_patient_identities_are_independent(self):
+        from api.models import Institution
+        first = self.imported()
+        second_tenant = Institution.objects.create(code='SECOND', name='Synthetic second')
+        report = self.run_import(institution=second_tenant)
+        self.assertEqual(report['errors'], 0, report)
+        second = ImageJImportRecord.objects.exclude(pk=first.pk).get()
+        self.assertNotEqual(first.sample_key, second.sample_key)
+        self.assertNotEqual(first.paciente_id, second.paciente_id)
+        self.assertEqual(first.paciente.identificacion, second.paciente.identificacion)
+        self.assertEqual(self.run_import(institution=second_tenant)['already_imported'], 1)
+
+    def test_18t_assigned_legacy_record_retains_idempotence_without_rekey(self):
+        from api.services.imagej.contracts import import_keys
+        record = self.imported()
+        legacy = import_keys(record.dataset_key, record.patient_namespace, record.external_patient_id, 1,
+                             record.logical_basename, record.image_sha256, record.mask_sha256)
+        ImageJImportRecord.objects.filter(pk=record.pk).update(**legacy)
+        report = self.run_import()
+        self.assertEqual(report['already_imported'], 1, report)
+        record.refresh_from_db()
+        self.assertEqual(record.annotation_key, legacy['annotation_key'])

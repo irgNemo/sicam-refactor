@@ -35,14 +35,19 @@
       <button class="nav-btn" :class="{ active: seccion === 'adquisicion' }" @click="$emit('change-section', 'adquisicion')">
         <span class="nav-icon">🔬</span> Adquisición
       </button>
+      <button v-if="can('administer')" class="nav-btn" :class="{ active: seccion === 'administracion' }" @click="$emit('change-section', 'administracion')">Administración</button>
     </div>
-
+    <div v-if="auth.user" class="session-context"><small>{{ auth.user.first_name || auth.user.username }} · {{ auth.user.institution?.code || 'Plataforma' }} · {{ auth.user.is_superuser ? 'Superuser' : auth.user.role }}</small><button class="nav-btn" @click="$emit('logout')">Cerrar sesión</button></div>
   </nav>
 </template>
 
 <script>
+import { auth, can } from "../services/auth";
 export default {
   name: "TopBar",
+  data: () => ({ auth }),
+  methods: { can },
+  emits: ["change-section", "logout"],
   props: {
     seccion: {
       type: String,

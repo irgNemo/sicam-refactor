@@ -1,3 +1,4 @@
+from .access_models import AuthoredModel
 """Acquisition metadata. No physical conversion and no calibration engine calls."""
 from decimal import Decimal
 import uuid
@@ -37,7 +38,7 @@ def unchanged(instance, old, fields):
             raise ValidationError(errors)
 
 
-class ValidatedAcquisitionModel(models.Model):
+class ValidatedAcquisitionModel(AuthoredModel):
     """Normal ORM saves validate; bulk SQL/update is not a supported domain write."""
     id = models.AutoField(primary_key=True)
 
@@ -57,6 +58,8 @@ class ValidatedAcquisitionModel(models.Model):
 
 
 class AcquisitionProfile(ValidatedAcquisitionModel):
+    institution = models.ForeignKey('api.Institution', null=True, blank=True, on_delete=models.PROTECT)
+    active = models.BooleanField(default=True)
     name = models.CharField(max_length=150)
     microscope_manufacturer = models.CharField(max_length=100, blank=True, default='')
     microscope_model = models.CharField(max_length=100, blank=True, default='')
@@ -224,6 +227,11 @@ class AcquisitionSeries(ValidatedAcquisitionModel):
     def clean(self):
         super().clean()
         old = previous(self)
+        if self.patient_id and self.acquisition_profile_id:
+            if self.patient.institution_id != self.acquisition_profile.institution_id:
+                raise ValidationError({'acquisition_profile': 'INSTITUTION_MISMATCH'})
+            if not self.pk and not self.acquisition_profile.active:
+                raise ValidationError({'acquisition_profile': 'PROFILE_INACTIVE'})
         # Series identify an acquisition, not a mutable pointer to another patient/profile.
         unchanged(self, old, ('patient_id','acquisition_profile_id'))
         if old and old.calibration_id:
@@ -236,7 +244,7 @@ class AcquisitionSeries(ValidatedAcquisitionModel):
                 raise ValidationError({'calibration': 'CALIBRATION_RETIRED'})
 
 
-class AcquisitionSampleMixin(models.Model):
+class AcquisitionSampleMixin(AuthoredModel):
     acquisition_series = models.ForeignKey(AcquisitionSeries, on_delete=models.PROTECT, null=True, blank=True,
                                            related_name='%(class)s_samples')
 

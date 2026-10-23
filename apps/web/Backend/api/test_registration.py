@@ -1,3 +1,4 @@
+from api.testing import tenant_fixture
 from unittest.mock import patch
 from datetime import timedelta
 from io import BytesIO
@@ -9,7 +10,7 @@ from django.test import TestCase
 from django.utils import timezone
 from PIL import Image
 from rest_framework import serializers
-from rest_framework.test import APIClient
+from api.testing import PlatformClient as APIClient
 
 from api.models import Paciente, Caso, AnalisisPred, MuestraSaliva, MuestraSangre
 from api.serializers import AnalisisSerializer
@@ -305,7 +306,7 @@ class PseudonymizedRegistrationTests(TestCase):
 
     def test_generated_identifier_collision_rejected_without_writing(self):
         from api.services.patient_identity import pseudonymized_identification
-        Paciente.objects.create(nombre='Synthetic', apellido='Collision', fecha_nacimiento='2000-01-01',
+        Paciente.objects.create(institution=tenant_fixture(), nombre='Synthetic', apellido='Collision', fecha_nacimiento='2000-01-01',
                                 identificacion=pseudonymized_identification('test', '007'))
         response = self.client.post('/api/pacientes/', self.payload, format='json')
         self.assertEqual(response.status_code, 400)

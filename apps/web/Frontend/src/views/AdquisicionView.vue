@@ -11,15 +11,17 @@
         </nav>
         <p v-if="loading" role="status">Cargando…</p>
         <section v-if="tab === 'Configuraciones'" class="card">
-          <div class="heading"><h3>Configuraciones</h3><button :disabled="busy" @click="editProfile(null)">Nueva configuración</button></div>
+          <div class="heading"><h3>Configuraciones</h3><button v-if="can('infrastructure')" :disabled="busy" @click="editProfile(null)">Nueva configuración</button></div>
           <p v-if="!profiles.length && !loading">No hay configuraciones registradas.</p>
           <ul class="cards"><li v-for="profile in profiles" :key="profile.id">
             <strong>{{ profile.name }}</strong><p>{{ profile.image_width_px }} × {{ profile.image_height_px }} px · {{ profile.objective_magnification || 'Objetivo no indicado' }}{{ profile.objective_magnification ? '×' : '' }}</p>
             <p>{{ [profile.microscope_manufacturer, profile.microscope_model, profile.camera_model, profile.adapter_model].filter(Boolean).join(' · ') }}</p>
-            <button :disabled="busy" @click="editProfile(profile)">Ver / editar metadata</button>
+            <button v-if="can('infrastructure')" :disabled="busy" @click="editProfile(profile)">Ver / editar metadata</button>
           </li></ul>
           <form v-if="profileForm" @submit.prevent="saveProfile">
+            <InstitutionSelect v-if="!profileForm.id" v-model="profileForm.institution" />
             <h3>{{ profileForm.id ? 'Detalle de configuración' : 'Nueva configuración' }}</h3>
+            <p v-if="profileForm.created_by || profileForm.updated_by" class="author">Creado por: {{ profileForm.created_by?.display_name || 'Sin autor histórico' }} · Actualizado por: {{ profileForm.updated_by?.display_name || '—' }}</p>
             <p v-if="profileForm.physical_fields_locked">Puede editar nombre y notas. Para otro montaje o resolución cree una configuración.</p>
             <fieldset :disabled="busy"><div class="field-grid">
               <label v-for="field in profileFields" :key="field.key">{{ field.label }}{{ field.required ? ' *' : '' }}
@@ -41,7 +43,7 @@
             <button :disabled="busy" @click="showReferences(calibration)">Ver referencias</button>
             <div v-if="selectedCalibration === calibration.id"><ul><li v-for="ref in shownReferences" :key="ref.id">{{ ref.source_filename }} · {{ ref.measurement_status }} · {{ ref.known_dimension_um }} µm</li></ul></div>
           </li></ul>
-          <form @submit.prevent="measure" @input="review = null; created = false">
+          <form v-if="can('infrastructure')" @submit.prevent="measure" @input="review = null; created = false">
             <h3>Nueva calibración automática</h3>
             <fieldset :disabled="busy"><div class="field-grid">
               <label>Configuración *<select v-model="automaticProfile" required @change="review = null"><option value="">Seleccione</option><option v-for="profile in profiles" :key="profile.id" :value="profile.id">{{ profile.name }}</option></select></label>
@@ -75,6 +77,8 @@
   </main>
 </template>
 <script>
+import { auth, can } from '../services/auth';
+import InstitutionSelect from '../components/InstitutionSelect.vue';
 import api from '../services/apiClient';
 import { operator, automaticPayload } from '../services/acquisitionService';
 import { registrationErrorMessage } from '../services/registrationErrors';
@@ -86,7 +90,7 @@ const fields = [
   ['image_mode', 'Modo de imagen (p. ej. RGB)'], ['binning_x', 'Binning X', false, 'number'], ['binning_y', 'Binning Y', false, 'number'],
 ].map(([key, label, required = false, type, step]) => ({ key, label, required, type, step }));
 export default {
-  components: { OperatorAccess },
+  components: { OperatorAccess, InstitutionSelect },
   data: () => ({ operator, tab: 'Configuraciones', profiles: [], calibrations: [], loading: false, busy: false,
     error: '', notice: '', profileFields: fields, profileForm: null, profileBaseline: '', automaticProfile: '', automaticLabel: '',
     references: [{ key: 0, file: null, pattern_type: 'CIRCLE', known_dimension_um: '', uniform: false }], nextKey: 1,
@@ -98,6 +102,7 @@ export default {
   mounted() { if (operator.ready) this.load(); window.addEventListener('beforeunload', this.beforeUnload); },
   beforeUnmount() { this.disposed = true; this.generation++; window.removeEventListener('beforeunload', this.beforeUnload); },
   methods: {
+    can,
     statusLabel: status => ({ PROVISIONAL: 'Provisional', VALIDATED: 'Validada', RETIRED: 'Retirada' }[status] || status),
     formatDate: value => new Date(value).toLocaleDateString(),
     profileName(id) { return this.profiles.find(profile => profile.id === id)?.name || `#${id}`; },
@@ -120,6 +125,7 @@ export default {
         const payload = this.profileForm.physical_fields_locked
           ? { name: this.profileForm.name, notes: this.profileForm.notes }
           : { ...Object.fromEntries(fields.map(field => [field.key, this.profileForm[field.key]])), notes: this.profileForm.notes };
+        if (auth.user?.is_superuser && !this.profileForm.id) payload.institution = this.profileForm.institution;
         for (const key of ['objective_magnification', 'binning_x', 'binning_y']) if (payload[key] === '') payload[key] = null;
         if (this.profileForm.id) await api.patch(`/api/acquisition-profiles/${this.profileForm.id}/`, payload);
         else await api.post('/api/acquisition-profiles/', payload);

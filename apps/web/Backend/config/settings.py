@@ -207,3 +207,14 @@ SALIVA_ALT_SEGMENTATION_SERVICE = {
     'url': env('SALIVA_ALT_SEGMENTATION_SERVICE_URL', default='http://127.0.0.1:8003'),
     'timeout': env.int('SALIVA_ALT_SERVICE_TIMEOUT', default=240),
 }
+
+# Operational session authentication. CSRF remains enforced by Django/DRF.
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': ['rest_framework.authentication.SessionAuthentication'],
+    'DEFAULT_PERMISSION_CLASSES': ['api.access.OperationalPermission'],
+}
+CORS_ALLOW_CREDENTIALS = True
+CSRF_TRUSTED_ORIGINS = CORS_ALLOWED_ORIGINS
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG

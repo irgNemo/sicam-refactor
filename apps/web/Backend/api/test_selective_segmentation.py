@@ -11,7 +11,7 @@ from django.db.migrations.executor import MigrationExecutor
 from django.test import override_settings
 from django.utils import timezone
 from PIL import Image
-from rest_framework.test import APITestCase, APITransactionTestCase
+from api.testing import PlatformAPITestCase as APITestCase, PlatformAPITransactionTestCase as APITransactionTestCase
 
 from api.models import (Paciente, Caso, AnalisisPred, MuestraSaliva, MuestraSangre,
                         ResultadoSegmentacion, RevisionSegmentacion, SegmentationExecution)

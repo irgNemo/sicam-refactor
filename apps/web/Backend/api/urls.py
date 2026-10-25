@@ -1,3 +1,4 @@
+from .lifecycle_views import LifecycleView
 from .auth_views import AuthContext, LoginView, LogoutView, PasswordView, UserViewSet, InstitutionViewSet, PrivateMediaView
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
@@ -44,6 +45,7 @@ router.register(
 )
 
 urlpatterns = [
+    path('lifecycle/<str:resource>/<int:pk>/', LifecycleView.as_view()),
     path('auth/me/', AuthContext.as_view()),
     path('auth/login/', LoginView.as_view()),
     path('auth/logout/', LogoutView.as_view()),

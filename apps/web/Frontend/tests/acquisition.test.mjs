@@ -144,3 +144,12 @@ test('upload uses compatibility returned by backend without another lookup',asyn
   api.defaults.adapter=async config=>{calls++;assert.equal(config.method,'post');return ok(config,{id_muestra:99,physical_compatibility:{status:'NO_ACQUISITION_SERIES'}});};
   await ctx.subirImagenes();assert.equal(calls,1);assert.equal(ctx.imagenesPreview[0].compatibility.status,'NO_ACQUISITION_SERIES');
 });
+
+test('series upload choices exclude archived profiles, series and retired calibrations',async()=>{
+  auth.user=sessionFixture();const ctx=context(Series,{patientId:1,disabled:false});
+  api.defaults.adapter=async config=>ok(config,config.url.includes('acquisition-series')
+    ? [series,{...series,id:4,archived_at:'now'},{...series,id:5,acquisition_profile:9},{...series,id:6,calibration:9}]
+    : config.url.includes('profiles') ? [profile,{...profile,id:9,archived_at:'now'}]
+    : [calibration,{...calibration,id:9,status:'RETIRED'}]);
+  await ctx.load();assert.deepEqual(ctx.series.map(item=>item.id),[series.id]);assert.deepEqual(ctx.profiles.map(item=>item.id),[profile.id]);
+});

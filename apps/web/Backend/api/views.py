@@ -1,3 +1,4 @@
+from .services.lifecycle import lock_operational, LifecycleConflict
 from .access import ScopedViewMixin
 from django.db import transaction
 from django.db.models import OuterRef, Prefetch, Subquery
@@ -148,6 +149,7 @@ def _read_muestra_image(muestra):
     return image_bytes
 
 
+@transaction.atomic
 def _create_segmentation_result(
     *,
     muestra=None,
@@ -159,6 +161,7 @@ def _create_segmentation_result(
     error=None,
     segmentation_strategy=None,
 ):
+    lock_operational(muestra if muestra is not None else muestra_sangre)
     return ResultadoSegmentacion.objects.create(
         muestra=muestra,
         muestra_sangre=muestra_sangre,
@@ -240,7 +243,7 @@ class PacienteViewSet(ScopedViewMixin, viewsets.ModelViewSet):
     def casos(self, request, pk=None):
         """Obtener todos los casos de un paciente"""
         paciente = self.get_object()
-        casos = paciente.casos.all()
+        casos = self.lifecycle_queryset(paciente.casos.all())
         serializer = CasoSerializer(casos, many=True, context=self.get_serializer_context())
         return Response(serializer.data)
 
@@ -271,7 +274,7 @@ class CasoViewSet(ScopedViewMixin, viewsets.ModelViewSet):
     def analisis(self, request, pk=None):
         """Obtener todos los análisis de un caso"""
         caso = self.get_object()
-        analisis = caso.analisis.all()
+        analisis = self.lifecycle_queryset(caso.analisis.all())
         serializer = AnalisisSerializer(analisis, many=True, context=self.get_serializer_context())
         return Response(serializer.data)
 
@@ -285,9 +288,9 @@ class CasoViewSet(ScopedViewMixin, viewsets.ModelViewSet):
         ).order_by('-creado_en', '-id_resultado_segmentacion')
 
         muestras = list(
-            MuestraSaliva.objects.filter(
+            self.lifecycle_queryset(MuestraSaliva.objects.filter(
                 analisis__id_caso_fk=caso
-            ).annotate(
+            )).annotate(
                 latest_result_id=Subquery(
                     latest_completed.values('id_resultado_segmentacion')[:1]
                 )
@@ -448,9 +451,11 @@ class MuestraSalivaViewSet(ScopedViewMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        execution = SegmentationExecution.objects.create(
-            strategy=strategy, target='ALL', request_metadata={'sample_id': muestra.pk},
-        )
+        with transaction.atomic():
+            lock_operational(muestra)
+            execution = SegmentationExecution.objects.create(
+                strategy=strategy, target='ALL', request_metadata={'sample_id': muestra.pk},
+            )
 
         try:
             result = segment_image(
@@ -523,6 +528,9 @@ class MuestraSalivaViewSet(ScopedViewMixin, viewsets.ModelViewSet):
                 execution.completed_at = timezone.now()
                 # ALL payload is already durable on the new base; avoid a duplicate.
                 execution.save(update_fields=['resultado_segmentacion', 'status', 'counts', 'completed_at'])
+        except LifecycleConflict as exc:
+            fail_execution(execution, 'RESOURCE_ARCHIVED', cancelled=True)
+            return Response(exc.detail, status=409)
         except Exception:
             fail_execution(execution, 'SEGMENTATION_FAILED')
             return Response(
@@ -688,6 +696,8 @@ class MuestraSangreViewSet(ScopedViewMixin, viewsets.ModelViewSet):
                 raw_result=result,
                 normalized_result=normalized_result,
             )
+        except LifecycleConflict as exc:
+            return Response(exc.detail, status=409)
         except Exception:
             return Response(
                 {'error': 'Error al persistir resultado de segmentacion'},

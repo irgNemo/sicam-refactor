@@ -44,7 +44,7 @@ class AcquisitionProfileSerializer(ValidatedSerializer):
     physical_fields_locked = serializers.SerializerMethodField()
 
     def get_physical_fields_locked(self, instance):
-        return instance.calibrations.exists() or instance.series.exists()
+        return instance.is_used()
 
     class Meta:
         model = AcquisitionProfile
@@ -52,6 +52,13 @@ class AcquisitionProfileSerializer(ValidatedSerializer):
 
 
 class CalibrationSerializer(ValidatedSerializer):
+    def validate(self, attrs):
+        requested = attrs.get('status')
+        previous = self.instance.status if self.instance else Calibration.PROVISIONAL
+        if requested is not None and requested != previous:
+            raise serializers.ValidationError({'status': 'Use lifecycle para RETIRE; VALIDATED requiere proceso científico.'})
+        return super().validate(attrs)
+
     class Meta:
         model = Calibration
         fields = '__all__'

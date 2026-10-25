@@ -5,6 +5,7 @@
         <h2 id="registration-title">Registro de datos</h2>
         <p>Gestión de pacientes, casos e imágenes.</p>
       </header>
+      <LifecycleBrowser :disabled="hasUnsavedWork" @busy="lifecycleBusy = $event" @changed="lifecycleChanged" />
       <p v-if="!can('register')">Acceso de consulta. Puede consultar pacientes y casos desde Segmentación y Caracterización.</p>
       <section v-if="!can('register')" aria-label="Pacientes de la institución"><h3>Pacientes</h3><ul><li v-for="patient in pacientes" :key="patient.id_paciente">{{ patientRegistrationLabel(patient) }}</li></ul></section>
       <nav v-if="can('register')" class="registration-nav" aria-label="Secciones de Registro">
@@ -284,6 +285,7 @@
 
 <script>
 import { auth, can } from '../services/auth';
+import LifecycleBrowser from '../components/lifecycle/LifecycleBrowser.vue';
 import InstitutionSelect from '../components/InstitutionSelect.vue';
 import { patientRegistrationLabel } from "../domain/patientPresentation";
 import apiClient from '../services/apiClient';
@@ -297,11 +299,12 @@ import {
 
 export default {
   name: 'RegistroView',
-  components: { AcquisitionSeriesSelector, InstitutionSelect },
+  components: { AcquisitionSeriesSelector, InstitutionSelect, LifecycleBrowser },
 
   data() {
     return {
       vistaActiva: 'paciente',
+      lifecycleBusy: false,
       patientInstitution: null,
       selectedAcquisition: { series: null, profile: null, calibration: null },
       seriesDirty: false, isCreatingSeries: false,
@@ -395,7 +398,7 @@ export default {
         ? 'Reintentar fallidos' : 'Subir imágenes';
     },
     isBusy() {
-      return this.isCreatingPatient || this.isCreatingCase || this.isCreatingAnalysis || this.isUploading || this.isCreatingSeries;
+      return this.lifecycleBusy || this.isCreatingPatient || this.isCreatingCase || this.isCreatingAnalysis || this.isUploading || this.isCreatingSeries;
     },
     pendingUploads() {
       return this.imagenesPreview.filter(item => ['PENDING', 'ERROR'].includes(item.status));
@@ -434,6 +437,11 @@ export default {
   },
 
   methods: {
+    async lifecycleChanged() {
+      this.formImagenes.paciente = '';
+      await this.cargarCasosPaciente();
+      await this.cargarPacientes();
+    },
     can,
     patientRegistrationLabel,
     compatibilityText,

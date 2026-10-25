@@ -40,7 +40,10 @@ async function saveUser() { if (busy.value) return; busy.value = true; error.val
   try { const {id, ...payload} = draft; if (id) await api.patch(`/api/users/${id}/`, payload); else await api.post('/api/users/', payload); form.value = null; notice.value = id ? 'Usuario actualizado.' : 'El usuario deberá cambiar su contraseña al iniciar sesión.'; await refreshSession(); await load(); }
   catch(e) { error.value = message(e); } finally { if (draft) { delete draft.temporary_password; delete draft.confirmation; } busy.value = false; }
 }
-async function saveInstitution() { if (busy.value) return; busy.value = true; error.value = ''; try { const {id, code, name, notes, active} = institutionForm.value; if(id) await api.patch(`/api/institutions/${id}/`, {code,name,notes,active}); else await api.post('/api/institutions/', {code,name,notes,active}); institutionForm.value = null; await load(); } catch(e) { error.value=message(e); } finally { busy.value=false; } }
+async function saveInstitution() { if (busy.value) return;
+  const deactivating = institutionForm.value.id && !institutionForm.value.active && institutions.value.find(item => item.id === institutionForm.value.id)?.active;
+  if (deactivating && !window.confirm(`Desactivar ${institutionForm.value.name} impedirá operar a todos sus usuarios, incluidas las sesiones abiertas. ¿Desactivar esta institución?`)) return;
+  busy.value = true; error.value = ''; try { const {id, code, name, notes, active} = institutionForm.value; if(id) await api.patch(`/api/institutions/${id}/`, {code,name,notes,active,confirm_deactivation:Boolean(deactivating)}); else await api.post('/api/institutions/', {code,name,notes,active}); institutionForm.value = null; await load(); } catch(e) { error.value=message(e); } finally { busy.value=false; } }
 function confirmLeave() { return !busy.value && (!(form.value || institutionForm.value) || window.confirm('¿Salir sin guardar el formulario administrativo?')); }
 defineExpose({ confirmLeave });
 </script>

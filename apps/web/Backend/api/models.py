@@ -1,3 +1,4 @@
+from .lifecycle_models import ArchivableModel, LifecycleEvent
 from .access_models import Institution, SicamUserProfile, AuthoredModel
 import uuid
 
@@ -8,7 +9,7 @@ from .acquisition_models import (AcquisitionProfile, Calibration, CalibrationRef
                                  AcquisitionSeries, AcquisitionSampleMixin)
 
 # Modelo de Paciente
-class Paciente(AuthoredModel):
+class Paciente(ArchivableModel, AuthoredModel):
     institution = models.ForeignKey(Institution, null=True, blank=True, on_delete=models.PROTECT)
     IDENTIFIED = 'IDENTIFIED'
     PSEUDONYMIZED = 'PSEUDONYMIZED'
@@ -78,7 +79,7 @@ class Paciente(AuthoredModel):
         return f"{self.display_name} - {self.identificacion}"
 
 # Modelo de Caso
-class Caso(AuthoredModel):
+class Caso(ArchivableModel, AuthoredModel):
     id_caso = models.AutoField(primary_key=True)
     case_number = models.PositiveIntegerField(null=True, blank=True)
     paciente = models.ForeignKey(
@@ -107,7 +108,7 @@ class Caso(AuthoredModel):
         return f"Caso {self.id_caso} - {self.titulo}"
 
 # Modelo de Análisis
-class AnalisisPred(AuthoredModel):
+class AnalisisPred(ArchivableModel, AuthoredModel):
     ESTADO_CHOICES = [
         (0, 'Abierto'),
         (1, 'En Proceso'),

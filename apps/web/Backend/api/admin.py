@@ -7,8 +7,13 @@ from .models import (
 )
 
 
+class HistoricalAdmin(admin.ModelAdmin):
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
 @admin.register(ResultadoSegmentacion)
-class ResultadoSegmentacionAdmin(admin.ModelAdmin):
+class ResultadoSegmentacionAdmin(HistoricalAdmin):
     list_display = (
         'id_resultado_segmentacion',
         'muestra',
@@ -26,7 +31,7 @@ class ResultadoSegmentacionAdmin(admin.ModelAdmin):
 
 
 @admin.register(RevisionSegmentacion)
-class RevisionSegmentacionAdmin(admin.ModelAdmin):
+class RevisionSegmentacionAdmin(HistoricalAdmin):
     list_display = (
         'id_revision_segmentacion',
         'resultado_segmentacion',
@@ -52,7 +57,7 @@ class RevisionSegmentacionAdmin(admin.ModelAdmin):
 
 
 @admin.register(ResultadoCaracterizacion)
-class ResultadoCaracterizacionAdmin(admin.ModelAdmin):
+class ResultadoCaracterizacionAdmin(HistoricalAdmin):
     list_display = (
         'id_resultado_caracterizacion',
         'resultado_segmentacion',
@@ -90,6 +95,11 @@ admin.site.has_permission = lambda request: bool(request.user.is_superuser and o
 from .models import Institution, SicamUserProfile
 @admin.register(Institution)
 class InstitutionAdmin(admin.ModelAdmin):
+    def formfield_for_dbfield(self, db_field, request, **kwargs):
+        if db_field.name == 'active':
+            kwargs['help_text'] = 'Desactivar la institución impide operar a todos sus usuarios, incluidas las sesiones abiertas.'
+        return super().formfield_for_dbfield(db_field, request, **kwargs)
+
     def has_delete_permission(self, request, obj=None):
         return False
 

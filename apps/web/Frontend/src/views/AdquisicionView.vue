@@ -6,6 +6,7 @@
       <p v-if="error" role="alert" class="error">{{ error }}</p>
       <p v-if="notice" role="status">{{ notice }}</p>
       <div v-if="operator.ready">
+        <label v-if="can('administer')"><span><input v-model="includeArchived" type="checkbox" :disabled="busy" @change="load" /> Incluir archivados</span></label>
         <nav class="tabs" aria-label="Adquisición">
           <button v-for="item in ['Configuraciones', 'Calibraciones']" :key="item" :aria-pressed="tab === item" @click="tab = item">{{ item }}</button>
         </nav>
@@ -14,9 +15,10 @@
           <div class="heading"><h3>Configuraciones</h3><button v-if="can('infrastructure')" :disabled="busy" @click="editProfile(null)">Nueva configuración</button></div>
           <p v-if="!profiles.length && !loading">No hay configuraciones registradas.</p>
           <ul class="cards"><li v-for="profile in profiles" :key="profile.id">
-            <strong>{{ profile.name }}</strong><p>{{ profile.image_width_px }} × {{ profile.image_height_px }} px · {{ profile.objective_magnification || 'Objetivo no indicado' }}{{ profile.objective_magnification ? '×' : '' }}</p>
+            <strong>{{ profile.name }}</strong> <span v-if="profile.archived_at" class="badge">Archivada</span><p>{{ profile.image_width_px }} × {{ profile.image_height_px }} px · {{ profile.objective_magnification || 'Objetivo no indicado' }}{{ profile.objective_magnification ? '×' : '' }}</p>
             <p>{{ [profile.microscope_manufacturer, profile.microscope_model, profile.camera_model, profile.adapter_model].filter(Boolean).join(' · ') }}</p>
-            <button v-if="can('infrastructure')" :disabled="busy" @click="editProfile(profile)">Ver / editar metadata</button>
+            <button v-if="can('infrastructure')" :disabled="busy || Boolean(profile.archived_at)" @click="editProfile(profile)">Ver / editar metadata</button>
+            <LifecycleActions resource="acquisition-profiles" :id="profile.id" :label="profile.name" :disabled="hasUnsavedWork" @busy="busy = $event" @changed="lifecycleChanged" />
           </li></ul>
           <form v-if="profileForm" @submit.prevent="saveProfile">
             <InstitutionSelect v-if="!profileForm.id" v-model="profileForm.institution" />
@@ -41,12 +43,13 @@
             <p>{{ profileName(calibration.acquisition_profile) }} · {{ formatDate(calibration.created_at) }}</p>
             <p>sx {{ calibration.scale_x_um_per_px }} µm/px · sy {{ calibration.scale_y_um_per_px }} µm/px</p>
             <button :disabled="busy" @click="showReferences(calibration)">Ver referencias</button>
+            <LifecycleActions resource="calibrations" :id="calibration.id" :label="calibration.label" :disabled="hasUnsavedWork" @busy="busy = $event" @changed="lifecycleChanged" />
             <div v-if="selectedCalibration === calibration.id"><ul><li v-for="ref in shownReferences" :key="ref.id">{{ ref.source_filename }} · {{ ref.measurement_status }} · {{ ref.known_dimension_um }} µm</li></ul></div>
           </li></ul>
           <form v-if="can('infrastructure')" @submit.prevent="measure" @input="review = null; created = false">
             <h3>Nueva calibración automática</h3>
             <fieldset :disabled="busy"><div class="field-grid">
-              <label>Configuración *<select v-model="automaticProfile" required @change="review = null"><option value="">Seleccione</option><option v-for="profile in profiles" :key="profile.id" :value="profile.id">{{ profile.name }}</option></select></label>
+              <label>Configuración *<select v-model="automaticProfile" required @change="review = null"><option value="">Seleccione</option><option v-for="profile in profiles.filter(item => !item.archived_at && item.active)" :key="profile.id" :value="profile.id">{{ profile.name }}</option></select></label>
               <label>Nombre de calibración *<input v-model="automaticLabel" required maxlength="150" /></label>
             </div>
             <div v-for="(reference, index) in references" :key="reference.key" class="reference">
@@ -78,6 +81,8 @@
 </template>
 <script>
 import { auth, can } from '../services/auth';
+import LifecycleActions from '../components/lifecycle/LifecycleActions.vue';
+import { archivedParams } from '../services/lifecycle';
 import InstitutionSelect from '../components/InstitutionSelect.vue';
 import api from '../services/apiClient';
 import { operator, automaticPayload } from '../services/acquisitionService';
@@ -90,8 +95,8 @@ const fields = [
   ['image_mode', 'Modo de imagen (p. ej. RGB)'], ['binning_x', 'Binning X', false, 'number'], ['binning_y', 'Binning Y', false, 'number'],
 ].map(([key, label, required = false, type, step]) => ({ key, label, required, type, step }));
 export default {
-  components: { OperatorAccess, InstitutionSelect },
-  data: () => ({ operator, tab: 'Configuraciones', profiles: [], calibrations: [], loading: false, busy: false,
+  components: { OperatorAccess, InstitutionSelect, LifecycleActions },
+  data: () => ({ operator, includeArchived: false, tab: 'Configuraciones', profiles: [], calibrations: [], loading: false, busy: false,
     error: '', notice: '', profileFields: fields, profileForm: null, profileBaseline: '', automaticProfile: '', automaticLabel: '',
     references: [{ key: 0, file: null, pattern_type: 'CIRCLE', known_dimension_um: '', uniform: false }], nextKey: 1,
     review: null, created: false, selectedCalibration: null, shownReferences: [], disposed: false, generation: 0 }),
@@ -103,13 +108,17 @@ export default {
   beforeUnmount() { this.disposed = true; this.generation++; window.removeEventListener('beforeunload', this.beforeUnload); },
   methods: {
     can,
+    async lifecycleChanged() {
+      this.profileForm = null; this.profileBaseline = ''; this.selectedCalibration = null; this.shownReferences = [];
+      await this.load();
+    },
     statusLabel: status => ({ PROVISIONAL: 'Provisional', VALIDATED: 'Validada', RETIRED: 'Retirada' }[status] || status),
     formatDate: value => new Date(value).toLocaleDateString(),
     profileName(id) { return this.profiles.find(profile => profile.id === id)?.name || `#${id}`; },
     accessChanged(ready) { this.generation++; if (ready) this.load(); else { this.profiles = []; this.calibrations = []; } },
     async load() {
       const generation = ++this.generation; this.loading = true; this.error = '';
-      try { const [profiles, calibrations] = await Promise.all([api.get('/api/acquisition-profiles/'), api.get('/api/calibrations/')]);
+      try { const [profiles, calibrations] = await Promise.all([api.get('/api/acquisition-profiles/', { params: archivedParams(auth.user, this.includeArchived) }), api.get('/api/calibrations/', { params: archivedParams(auth.user, this.includeArchived) })]);
         if (!this.disposed && generation === this.generation) { this.profiles = profiles.data; this.calibrations = calibrations.data; }
       } catch (error) { if (!this.disposed && generation === this.generation) this.error = registrationErrorMessage(error, 'No se pudo cargar adquisición.'); }
       finally { if (generation === this.generation) this.loading = false; }
@@ -136,7 +145,7 @@ export default {
     addReference() { this.references.push({ key: this.nextKey++, file: null, pattern_type: 'CIRCLE', known_dimension_um: '', uniform: false }); this.review = null; this.created = false; },
     async showReferences(calibration) {
       this.selectedCalibration = calibration.id; this.shownReferences = []; this.error = '';
-      try { const response = await api.get('/api/calibration-references/');
+      try { const response = await api.get('/api/calibration-references/', { params: archivedParams(auth.user, this.includeArchived) });
         if (!this.disposed && this.selectedCalibration === calibration.id) this.shownReferences = response.data.filter(ref => ref.calibration === calibration.id);
       } catch (error) { this.error = registrationErrorMessage(error, 'No se pudieron cargar las referencias.'); }
     },

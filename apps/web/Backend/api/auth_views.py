@@ -110,6 +110,11 @@ class InstitutionSerializer(serializers.ModelSerializer):
         fields = ['id', 'code', 'name', 'active', 'notes', 'created_at', 'updated_at']
         read_only_fields = ['id', 'created_at', 'updated_at']
 
+    def validate(self, attrs):
+        if self.instance and self.instance.active and attrs.get('active') is False and self.initial_data.get('confirm_deactivation') is not True:
+            raise ValidationError({'active': 'Desactivar impide operar a todos los usuarios de esta institución, incluidas sesiones abiertas. Confirme con confirm_deactivation=true.'})
+        return attrs
+
     def validate_code(self, value):
         if self.instance and self.instance.code != value:
             raise ValidationError('El código institucional es estable.')

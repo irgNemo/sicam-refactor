@@ -96,9 +96,18 @@ def fail_execution(execution, code, cancelled=False):
     )
 
 
+def require_active_sample(sample):
+    from api.services.lifecycle import lock_operational, LifecycleConflict
+    try:
+        lock_operational(sample)
+    except (LifecycleConflict, type(sample).DoesNotExist) as exc:
+        raise SelectiveError('RESOURCE_ARCHIVED', 'La muestra ya no está disponible para operaciones.') from exc
+
+
 def perform_partial(*, sample, result_id, strategy, target, source_token,
                     confirm_replacement, read_image, segment, actor=None):
     with transaction.atomic():
+        require_active_sample(sample)
         try:
             result = lock_result(result_id)
         except ResultadoSegmentacion.DoesNotExist:
@@ -144,6 +153,7 @@ def perform_partial(*, sample, result_id, strategy, target, source_token,
             normalized_response=normalized, counts=normalized['summary'],
         )
         with transaction.atomic():
+            require_active_sample(sample)
             result = lock_result(result_id)
             current = source_state(result)
             if current['source_token'] != source_token:

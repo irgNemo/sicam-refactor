@@ -1,3 +1,4 @@
+from .lifecycle_models import ArchivableModel
 from .access_models import AuthoredModel
 """Acquisition metadata. No physical conversion and no calibration engine calls."""
 from decimal import Decimal
@@ -57,7 +58,7 @@ class ValidatedAcquisitionModel(AuthoredModel):
         pass
 
 
-class AcquisitionProfile(ValidatedAcquisitionModel):
+class AcquisitionProfile(ArchivableModel, ValidatedAcquisitionModel):
     institution = models.ForeignKey('api.Institution', null=True, blank=True, on_delete=models.PROTECT)
     active = models.BooleanField(default=True)
     name = models.CharField(max_length=150)
@@ -87,9 +88,16 @@ class AcquisitionProfile(ValidatedAcquisitionModel):
                        models.CheckConstraint(check=models.Q(binning_x__isnull=True) | models.Q(binning_x__gt=0), name='acq_profile_binning_x_positive'),
                        models.CheckConstraint(check=models.Q(binning_y__isnull=True) | models.Q(binning_y__gt=0), name='acq_profile_binning_y_positive')]
 
+    def is_used(self):
+        if not self.pk:
+            return False
+        from .models import ResultadoCaracterizacion
+        return (self.calibrations.exists() or self.series.exists() or
+                ResultadoCaracterizacion.objects.filter(resultado_json__calibration__acquisition_profile_id=self.pk).exists())
+
     def clean(self):
         super().clean()
-        if self.pk and (self.calibrations.exists() or self.series.exists()):
+        if self.is_used():
             unchanged(self, previous(self), self.physical_fields)
 
 
@@ -126,6 +134,8 @@ class Calibration(ValidatedAcquisitionModel):
         if profile and (self.source_width_px, self.source_height_px) != (profile.image_width_px, profile.image_height_px):
             raise ValidationError({'source_width_px': 'RESOLUTION_MISMATCH: la calibración debe coincidir con el perfil.'})
         old = previous(self)
+        if not old and profile and (profile.archived_at or not profile.active):
+            raise ValidationError({'acquisition_profile': 'PROFILE_UNAVAILABLE'})
         unchanged(self, old, self.immutable_fields)
         if old and self.status != old.status:
             allowed = {self.PROVISIONAL: {self.VALIDATED,self.RETIRED}, self.VALIDATED: {self.RETIRED}, self.RETIRED: set()}
@@ -210,7 +220,7 @@ class CalibrationReference(ValidatedAcquisitionModel):
             raise
 
 
-class AcquisitionSeries(ValidatedAcquisitionModel):
+class AcquisitionSeries(ArchivableModel, ValidatedAcquisitionModel):
     patient = models.ForeignKey('api.Paciente', on_delete=models.PROTECT, related_name='acquisition_series')
     acquisition_profile = models.ForeignKey(AcquisitionProfile, on_delete=models.PROTECT, related_name='series')
     calibration = models.ForeignKey(Calibration, on_delete=models.PROTECT, related_name='series', null=True, blank=True)
@@ -230,6 +240,8 @@ class AcquisitionSeries(ValidatedAcquisitionModel):
         if self.patient_id and self.acquisition_profile_id:
             if self.patient.institution_id != self.acquisition_profile.institution_id:
                 raise ValidationError({'acquisition_profile': 'INSTITUTION_MISMATCH'})
+            if not self.pk and (self.patient.archived_at or self.acquisition_profile.archived_at):
+                raise ValidationError({'patient': 'RESOURCE_ARCHIVED'})
             if not self.pk and not self.acquisition_profile.active:
                 raise ValidationError({'acquisition_profile': 'PROFILE_INACTIVE'})
         # Series identify an acquisition, not a mutable pointer to another patient/profile.
@@ -244,7 +256,7 @@ class AcquisitionSeries(ValidatedAcquisitionModel):
                 raise ValidationError({'calibration': 'CALIBRATION_RETIRED'})
 
 
-class AcquisitionSampleMixin(AuthoredModel):
+class AcquisitionSampleMixin(ArchivableModel, AuthoredModel):
     acquisition_series = models.ForeignKey(AcquisitionSeries, on_delete=models.PROTECT, null=True, blank=True,
                                            related_name='%(class)s_samples')
 
@@ -258,6 +270,18 @@ class AcquisitionSampleMixin(AuthoredModel):
             if self.imagen and not self.imagen._committed:
                 raise ValidationError({'imagen': 'IMMUTABLE_ACQUISITION_DATA'})
             unchanged(self, old, ('acquisition_series_id','analisis_id','imagen'))
+        if not old or old.acquisition_series_id != self.acquisition_series_id or old.analisis_id != self.analisis_id:
+            from .services.lifecycle import is_operationally_active
+            from .models import AnalisisPred
+            analysis = AnalisisPred.objects.filter(pk=self.analisis_id).first()
+            if analysis and not is_operationally_active(analysis):
+                raise ValidationError({'analisis': 'RESOURCE_ARCHIVED'})
+            if self.acquisition_series_id:
+                series = AcquisitionSeries.objects.get(pk=self.acquisition_series_id)
+                if not is_operationally_active(series) or series.acquisition_profile.archived_at or not series.acquisition_profile.active:
+                    raise ValidationError({'acquisition_series': 'RESOURCE_ARCHIVED'})
+                if series.calibration_id and series.calibration.status == Calibration.RETIRED:
+                    raise ValidationError({'acquisition_series': 'CALIBRATION_RETIRED'})
         if self.acquisition_series_id and self.analisis_id:
             series = AcquisitionSeries.objects.filter(pk=self.acquisition_series_id).first()
             from .models import AnalisisPred

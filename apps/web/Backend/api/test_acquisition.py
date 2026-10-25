@@ -259,7 +259,8 @@ class AcquisitionTests(TestCase):
         response = self.client.post('/api/calibrations/', data, format='json')
         self.assertEqual(response.status_code, 201, response.data)
         route = f"/api/calibrations/{response.data['id']}/"
-        self.assertEqual(self.client.patch(route, {'notes': 'Reviewed', 'status': 'VALIDATED'}, format='json').status_code, 200)
+        self.assertEqual(self.client.patch(route, {'notes': 'Reviewed', 'status': 'VALIDATED'}, format='json').status_code, 400)
+        self.assertEqual(self.client.patch(route, {'notes': 'Reviewed'}, format='json').status_code, 200)
         self.assertEqual(self.client.patch(route, {'scale_x_um_per_px': '0.1'}, format='json').status_code, 400)
         self.assertEqual(self.client.delete(route).status_code, 405)
         self.assertEqual(self.client.get(route).status_code, 200)

@@ -1,6 +1,7 @@
 """Single operational policy, tenant scopes and serializer admission boundary."""
 from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Q
+from django.db import transaction
 from rest_framework import permissions, serializers
 
 ROLES = {'ADMIN', 'OPERATOR', 'REVIEWER'}
@@ -68,9 +69,8 @@ class OperationalPermission(permissions.BasePermission):
             return False
         if request.user.is_superuser:
             return True
-        # Institutional destructive operations require the lifecycle policy in 18T-B.
         if request.method == 'DELETE':
-            return False
+            return False  # Destructive writes use the central lifecycle endpoint.
         role = request.user.sicam_profile.role
         model = getattr(getattr(view, 'queryset', None), 'model', None)
         name = model._meta.model_name if model else ''
@@ -87,8 +87,32 @@ class OperationalPermission(permissions.BasePermission):
 class ScopedViewMixin:
     permission_classes = [OperationalPermission]
 
+    def dispatch(self, request, *args, **kwargs):
+        from django.db import transaction
+        if request.method in ('GET', 'HEAD', 'OPTIONS') or getattr(self, 'action_map', {}).get(request.method.lower()) == 'segmentar':
+            return super().dispatch(request, *args, **kwargs)
+        with transaction.atomic():
+            response = super().dispatch(request, *args, **kwargs)
+            return response
+
+    def lifecycle_queryset(self, queryset):
+        from .services.lifecycle import request_queryset
+        return request_queryset(scoped(queryset, self.request.user), self.request)
+
     def get_queryset(self):
-        return scoped(super().get_queryset(), self.request.user)
+        return self.lifecycle_queryset(super().get_queryset())
+
+    def get_object(self):
+        obj = super().get_object()
+        if self.request.method not in ('GET', 'HEAD', 'OPTIONS', 'DELETE'):
+            from .services.lifecycle import lock_operational
+            with transaction.atomic():
+                obj = lock_operational(obj)
+        return obj
+
+    def destroy(self, request, *args, **kwargs):
+        from rest_framework.exceptions import MethodNotAllowed
+        raise MethodNotAllowed('DELETE', 'Use la inspección y confirmación del endpoint lifecycle.')
 
 
 class ScopedSerializerMixin:
@@ -96,11 +120,12 @@ class ScopedSerializerMixin:
         fields = super().get_fields()
         request = self.context.get('request')
         for name, field in fields.items():
-            if name in ('created_by', 'updated_by'):
+            if name in ('created_by', 'updated_by', 'archived_at', 'archived_by', 'archive_reason'):
                 field.read_only = True
                 field.required = False
             elif request and getattr(field, 'queryset', None) is not None:
-                field.queryset = scoped(field.queryset.all(), request.user)
+                from .services.lifecycle import active_queryset
+                field.queryset = active_queryset(scoped(field.queryset.all(), request.user))
         return fields
 
     def to_internal_value(self, data):
@@ -123,13 +148,26 @@ class ScopedSerializerMixin:
             attrs['institution'] = institution
         return attrs
 
+    def validate_lifecycle_bindings(self, validated_data):
+        from django.db.models import Model
+        from .services.lifecycle import validate_binding, lock_operational
+        if self.instance:
+            lock_operational(self.instance)
+        for value in validated_data.values():
+            if isinstance(value, Model):
+                validate_binding(value)
+
+    @transaction.atomic
     def create(self, validated_data):
+        self.validate_lifecycle_bindings(validated_data)
         request = self.context.get('request')
         if request and hasattr(self.Meta.model, 'created_by'):
             validated_data.update(created_by=request.user, updated_by=request.user)
         return super().create(validated_data)
 
+    @transaction.atomic
     def update(self, instance, validated_data):
+        self.validate_lifecycle_bindings(validated_data)
         request = self.context.get('request')
         if request and hasattr(instance, 'updated_by'):
             validated_data['updated_by'] = request.user
@@ -142,6 +180,9 @@ class ScopedSerializerMixin:
                 author = getattr(instance, name, None)
                 result[name] = ({'id': author.pk, 'username': author.username,
                                  'display_name': author.get_full_name() or author.username} if author else None)
+        from .services.lifecycle import is_operationally_active
+        if hasattr(instance, 'archived_at'):
+            result['operationally_active'] = is_operationally_active(instance)
         model = instance._meta.model_name
         field, kind = {'muestrasaliva': ('imagen', 'saliva'), 'muestrasangre': ('imagen', 'sangre'),
                        'calibrationreference': ('source_image', 'calibration')}.get(model, (None, None))

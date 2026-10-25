@@ -103,6 +103,9 @@ def resolve_domain(row, namespace, *, institution, lock=False):
             if len(analyses) > 1 or any(a.id_paciente_fk_id != patient.pk or a.estado == 2 for a in analyses):
                 raise ImportProblem('ANALYSIS_AMBIGUOUS')
             analysis = analyses[0] if analyses else None
+    from api.services.lifecycle import is_operationally_active
+    if any(obj and obj.pk and not is_operationally_active(obj) for obj in (patient, case, analysis)):
+        raise ImportProblem('RESOURCE_ARCHIVED')
     return patient, case, analysis
 
 

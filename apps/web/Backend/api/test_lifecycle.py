@@ -199,6 +199,22 @@ class LifecycleTests(TestCase):
         self.assertEqual(self.run_action('pacientes',p,'HARD_DELETE').status_code,409)
         self.assertTrue(Caso.objects.filter(pk=case.pk).exists());self.assertEqual(LifecycleEvent.objects.count(),0)
 
+    def test_validated_revision_has_no_lifecycle_delete(self):
+        revision = self.da['revisiones-segmentacion']
+        before = copy.deepcopy(revision.resultado_editado)
+        self.as_user('REVIEWER_A')
+        response = self.client.post(f'/api/revisiones-segmentacion/{revision.pk}/validar/')
+        self.assertEqual(response.status_code, 200, response.data)
+        revision.refresh_from_db()
+        self.assertEqual(revision.estado, 'VALIDADA')
+        self.as_user('ADMIN_A')
+        self.assertEqual(self.preview('revisiones-segmentacion', revision).data['allowed_actions'], [])
+        self.assertEqual(self.run_action('revisiones-segmentacion', revision, 'HARD_DELETE').status_code, 409)
+        revision.refresh_from_db()
+        self.assertEqual(revision.estado, 'VALIDADA')
+        self.assertEqual(revision.resultado_editado, before)
+        self.assertEqual(LifecycleEvent.objects.count(), 0)
+
     def test_event_failure_rolls_back_archive(self):
         with patch('api.models.LifecycleEvent.objects.create',side_effect=RuntimeError('synthetic')):
             with self.assertRaises(RuntimeError):self.run_action('pacientes',self.da['pacientes'],'ARCHIVE')

@@ -34,7 +34,7 @@ test('preview and execution use server contract, reason and explicit confirmatio
     assert.deepEqual(JSON.parse(calls.at(-1).data),{action,reason:'Synthetic reason',confirm:true});
   }
   assert.equal(calls[0].url,'/api/lifecycle/muestras/1/');
-  for(const args of [['ARCHIVE','',true],['ARCHIVE','reason',false],['PURGE','reason',true]])assert.throws(()=>service.applyLifecycle('muestras',1,...args));
+  for(const args of [['ARCHIVE','',true],['ARCHIVE','   ',true],['ARCHIVE','reason',false],['PURGE','reason',true]])assert.throws(()=>service.applyLifecycle('muestras',1,...args));
 });
 test('dependency dialog shows impact and never invents delete for a used sample',async()=>{
   const html=await renderToString(createSSRApp({...Actions,data:()=>({...Actions.data(),opened:true,preview:preview(),action:'ARCHIVE'})},{resource:'muestras',id:1,label:'Imagen #1'}));
@@ -42,10 +42,23 @@ test('dependency dialog shows impact and never invents delete for a used sample'
   assert.match(html,/Motivo/);assert.match(html,/Confirmo:/);assert.match(html,/históricas/);assert.doesNotMatch(html,/Eliminar permanentemente/);
 });
 test('safe delete, restore and retire each show their explicit consequence',async()=>{
+  assert.equal(service.actionLabels.RETIRE, 'Retirar calibración');
   for(const action of ['HARD_DELETE','RESTORE','RETIRE']) {
     const html=await renderToString(createSSRApp({...Actions,data:()=>({...Actions.data(),opened:true,preview:preview([action]),action})},{resource:'muestras',id:1}));
     assert.ok(html.includes(service.actionLabels[action]));assert.ok(html.includes(service.consequences[action]));
   }
+});
+test('empty patient recommends permanent deletion; used calibration offers only retirement',async()=>{
+  const empty = {...preview(['HARD_DELETE','ARCHIVE']),dependencies:{},media_files:[]};
+  const html=await renderToString(createSSRApp({...Actions,data:()=>({...Actions.data(),opened:true,preview:empty,action:'HARD_DELETE'})},{resource:'pacientes',id:1,label:'TEST_LIFECYCLE_EMPTY_PATIENT'}));
+  assert.match(html,/Sin dependencias registradas/);
+  assert.match(html,/Eliminar permanentemente \(recomendada\)/);
+  assert.match(html,/Motivo/);
+  const used = {...preview(['RETIRE']),dependencies:{AcquisitionSeries:1},media_files:[]};
+  const retired=await renderToString(createSSRApp({...Actions,data:()=>({...Actions.data(),opened:true,preview:used,action:'RETIRE'})},{resource:'calibrations',id:1,label:'TEST_LIFECYCLE_CALIBRATION'}));
+  assert.match(retired,/Retirar calibración \(recomendada\)/);
+  assert.match(retired,/Series/);
+  assert.doesNotMatch(retired,/<option[^>]*value="(?:RESTORE|VALIDATED|UNRETIRE|HARD_DELETE)"/);
 });
 test('reviewer has no lifecycle action button',async()=>{
   auth.user=user('REVIEWER');assert.doesNotMatch(await renderToString(createSSRApp(Actions,{resource:'muestras',id:1})),/Más acciones/);

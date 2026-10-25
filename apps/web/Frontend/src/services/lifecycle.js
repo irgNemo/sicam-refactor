@@ -1,6 +1,6 @@
 import api from './apiClient';
 
-export const actionLabels = { HARD_DELETE: 'Eliminar permanentemente', ARCHIVE: 'Archivar', RESTORE: 'Restaurar', RETIRE: 'Retirar' };
+export const actionLabels = { HARD_DELETE: 'Eliminar permanentemente', ARCHIVE: 'Archivar', RESTORE: 'Restaurar', RETIRE: 'Retirar calibración' };
 export const consequences = {
   HARD_DELETE: 'El registro se eliminará permanentemente. Sus archivos se eliminarán sólo si no están compartidos. Esta acción no se puede deshacer.',
   ARCHIVE: 'Se ocultará de las operaciones normales. Los archivos, resultados y relaciones históricas se conservarán.',

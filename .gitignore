@@ -17,7 +17,7 @@ pip-delete-this-directory.txt
 __pycache__/
 local_settings.py
 /media
-/staticfiles
+staticfiles/
 db.sqlite3
 db.sqlite3-journal
 

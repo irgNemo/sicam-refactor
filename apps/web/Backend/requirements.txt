@@ -1,5 +1,5 @@
 # Django y extensiones core
-Django==5.0.1
+Django==5.2.18
 djangorestframework==3.14.0
 django-cors-headers==4.3.1
 django-environ==0.12.0

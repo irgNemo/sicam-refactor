@@ -287,3 +287,45 @@ class SessionTests(TestCase):
     def test_inactive_user_and_institution_cannot_login(self):
         self.user.is_active=False;self.user.save();self.assertEqual(self.login().status_code,403)
         self.user.is_active=True;self.user.save();self.tenant.active=False;self.tenant.save();self.assertEqual(self.login().status_code,403)
+
+    def test_session_csrf_patch_and_lifecycle_remain_tenant_scoped(self):
+        self.profile.role = 'ADMIN'
+        self.profile.must_change_password = False
+        self.profile.save()
+        response = self.login()
+        self.assertEqual(response.status_code, 200)
+        headers = {'HTTP_X_CSRFTOKEN': response.data['csrf_token']}
+        payload = {
+            'nombre': 'Synthetic', 'apellido': 'Session',
+            'identificacion': 'TEST_CSRF', 'fecha_nacimiento': '2000-01-01',
+        }
+        created = self.client.post('/api/pacientes/', payload, format='json', **headers)
+        self.assertEqual(created.status_code, 201, created.data)
+        patient = Paciente.objects.get(pk=created.data['id_paciente'])
+        self.assertEqual(patient.institution_id, self.tenant.pk)
+        detail = f'/api/pacientes/{patient.pk}/'
+        lifecycle = f'/api/lifecycle/pacientes/{patient.pk}/'
+        action = {'action': 'ARCHIVE', 'reason': 'Synthetic CSRF check', 'confirm': True}
+        for invalid_headers in ({}, {'HTTP_X_CSRFTOKEN': 'invalid'}):
+            self.assertEqual(self.client.patch(detail, {'nombre': 'Blocked'},
+                             format='json', **invalid_headers).status_code, 403)
+            self.assertEqual(self.client.post(lifecycle, action,
+                             format='json', **invalid_headers).status_code, 403)
+        patient.refresh_from_db()
+        self.assertEqual(patient.nombre, 'Synthetic')
+        self.assertIsNone(patient.archived_at)
+        self.assertEqual(self.client.patch(detail, {'nombre': 'Updated'},
+                         format='json', **headers).status_code, 200)
+        self.assertEqual(self.client.post(lifecycle, action,
+                         format='json', **headers).status_code, 200)
+        action['action'] = 'RESTORE'
+        self.assertEqual(self.client.post(lifecycle, action,
+                         format='json', **headers).status_code, 200)
+        other = Institution.objects.create(code='OTHER_CSRF', name='Synthetic other')
+        foreign = Paciente.objects.create(
+            institution=other, nombre='Foreign', apellido='Synthetic',
+            identificacion='OTHER_CSRF', fecha_nacimiento='2000-01-01',
+        )
+        self.assertEqual(self.client.get(f'/api/pacientes/{foreign.pk}/').status_code, 404)
+        self.assertEqual(self.client.post(f'/api/lifecycle/pacientes/{foreign.pk}/',
+                         action, format='json', **headers).status_code, 404)

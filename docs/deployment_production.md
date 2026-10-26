@@ -9,11 +9,11 @@ como servidores de producción.
 1. Elegir servidor, dominio real, certificados HTTPS, almacenamiento, usuario de
    servicio y servidor WSGI. No hay una instalación de Nginx/Gunicorn gestionada
    por este sprint.
-2. Resolver `DJANGO_SUPPORTED_RELEASE_UPGRADE`: el pin y el entorno auditado usan
-   **Django 5.0.1**. Django 5.0 ya no recibe soporte; configurar headers no corrige
-   vulnerabilidades de dependencias. Planificar actualización a una rama
-   soportada, revisar también el resto de dependencias y repetir regresiones.
-   No se cambiaron requirements ni se instalaron paquetes en 18T-C.
+2. El pin y el entorno `sicam` usan **Django 5.2.18 LTS**, actualizado en
+   18T-D.A con pruebas dirigidas. Completar la regresión de **18T-D.B** antes de
+   aceptar el upgrade para producción; revisar por separado las demás
+   dependencias. No se hicieron upgrades generales. Véase
+   [informe de actualización](91_sprint_18t_d_django_lts_upgrade.md).
 3. Validar el despliegue en staging y disponer de un backup restaurable antes de
    exponer acceso real. No se debe publicar una BD con datos clínicos para probar
    la configuración.
@@ -22,10 +22,10 @@ como servidores de producción.
    un prefijo TEST inequívoco; la aplicación no les asigna esa condición ni las
    desactiva automáticamente. Revisar también las cuentas ADMIN/plataforma.
 
-La documentación oficial advierte del fin de soporte de la rama instalada:
-[Django 5.0 deployment checklist](https://docs.djangoproject.com/en/5.0/howto/deployment/checklist/).
-Consultar [versiones soportadas](https://www.djangoproject.com/download/) al elegir
-la actualización, sin asumir que el pin de este documento seguirá siendo actual.
+Referencia del parche instalado:
+[Django 5.2.18](https://docs.djangoproject.com/en/5.2/releases/5.2.18/).
+Consultar [versiones soportadas](https://www.djangoproject.com/download/) antes de
+un despliegue futuro; este pin registra la selección del 26 de octubre de 2026.
 
 ## Entorno y dependencias
 
@@ -34,13 +34,27 @@ Frontend: `apps/web/Frontend`; Node usado para validar: **24.17.0**.
 Microservicios científicos se despliegan separadamente con sus entornos actuales;
 no se cambian por este contrato.
 
-En un entorno aislado de staging/producción, después de resolver la actualización
-y aprobar los pins correspondientes:
+Fuente de dependencias: `apps/web/Backend/requirements.txt`. Python auditado:
+**3.10.20**, sin cambio durante el upgrade. En un entorno aislado de
+staging/producción, después de aprobar la regresión y los pins correspondientes:
 
 ```bash
 python -m pip install -r requirements.txt
 python -m pip check
 ```
+
+Para reproducir únicamente el cambio de framework sobre un entorno `sicam`
+previamente instalado y respaldado, sin actualizar el resto de dependencias:
+
+```bash
+python -m pip install 'Django==5.2.18'
+python -m pip check
+python -m django --version
+```
+
+No usar `pip install -U -r requirements.txt` ni actualizar Python como parte de
+este cambio. Reiniciar los procesos Django al adoptar el entorno actualizado;
+un proceso ya iniciado puede mantener módulos de la versión anterior en memoria.
 
 No ejecutar instalaciones sobre los entornos científicos de trabajo. El entorno
 `sicam` actual no contiene Gunicorn y requirements no lo declara. Se mantiene
@@ -334,6 +348,6 @@ No hay scheduler, purga ni retención automática en este sprint.
 - [ ] Rate limiting del login y límites/timeouts de upload decididos.
 
 Clasificar por separado: aplicación preparada para revisión; documentación de
-despliegue disponible; **seguridad de producción pendiente de actualización de
-Django, infraestructura y aceptación real**. Un check automático limpio no prueba
+despliegue disponible; **seguridad de producción pendiente de regresión completa
+del upgrade, infraestructura y aceptación real**. Un check automático limpio no prueba
 ninguna de las tres por sí solo.

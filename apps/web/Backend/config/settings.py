@@ -16,6 +16,8 @@ NOTA IMPORTANTE SOBRE SEGURIDAD:
 """
 
 from pathlib import Path
+import os
+from .security import security_settings
 import environ
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -23,33 +25,14 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Inicializar django-environ
 env = environ.Env()
-# Leer archivo .env si existe (desarrollo local)
-# En producción, las variables se pasan por sistema operativo
-environ.Env.read_env(BASE_DIR / '.env')
-
-# ============================================================================
-# CONFIGURACIÓN CRÍTICA DE SEGURIDAD (EXTERNALIZADA)
-# ============================================================================
-
-# SECURITY WARNING: keep the secret key used in production secret!
-# En producción, esta DEBE ser una clave larga, aleatoria y única.
-# Generarla con: python -c 'from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())'
-SECRET_KEY = env(
-    'SECRET_KEY',
-    default='django-insecure-validation-default-key-change-in-production'
-)
-
-# SECURITY WARNING: don't run with debug turned on in production!
-# En producción, debe ser False
-DEBUG = env.bool('DEBUG', default=True)
-
-# En producción, especificar los dominios permitidos (separados por coma)
-# Ejemplo: "api.sicam.com,www.sicam.com"
-ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=['localhost', '127.0.0.1', '0.0.0.0'])
+# Production reads only process environment, never the local development .env.
+if os.environ.get('DJANGO_ENV', 'development').lower() == 'development':
+    environ.Env.read_env(BASE_DIR / '.env')
+globals().update(security_settings(os.environ))
 
 # Media files
 MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+MEDIA_ROOT = Path(env('DJANGO_MEDIA_ROOT', default=str(BASE_DIR / 'media')))
 
 
 # Application definition
@@ -78,6 +61,7 @@ MIDDLEWARE = [
     
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'api.operational_logging.OperationalLogMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -159,25 +143,9 @@ USE_I18N = True
 
 USE_TZ = True
 
-# ============================================================================
-# CONFIGURACIÓN DE CORS
-# ============================================================================
-# En desarrollo: permite localhost:5173 (Vue dev server)
-# En producción: especificar orígenes permitidos explícitamente
-CORS_ALLOWED_ORIGINS = env.list(
-    'CORS_ALLOWED_ORIGINS',
-    default=[
-        'http://localhost:5173',    # Vue dev server
-        'http://localhost:3000',     # Alternative Vue port
-        'http://127.0.0.1:5173',
-        'http://127.0.0.1:3000',
-    ]
-)
-
-# Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/5.0/howto/static-files/
-
-STATIC_URL = 'static/'
+# Public assets are separate from private scientific media.
+STATIC_URL = '/static/'
+STATIC_ROOT = Path(env('DJANGO_STATIC_ROOT', default=str(BASE_DIR / 'staticfiles')))
 
 # ============================================================================
 # CONFIGURACIÓN DE MICROSERVICIOS DE SEGMENTACIÓN
@@ -213,8 +181,15 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': ['rest_framework.authentication.SessionAuthentication'],
     'DEFAULT_PERMISSION_CLASSES': ['api.access.OperationalPermission'],
 }
-CORS_ALLOW_CREDENTIALS = True
-CSRF_TRUSTED_ORIGINS = CORS_ALLOWED_ORIGINS
-SESSION_COOKIE_HTTPONLY = True
-SESSION_COOKIE_SECURE = not DEBUG
-CSRF_COOKIE_SECURE = not DEBUG
+
+# Metadata-only operational logging. Production suppresses raw messages and traces.
+LOGGING = {
+    'version': 1, 'disable_existing_loggers': False,
+    'formatters': {'safe': {'()': 'api.operational_logging.SafeJSONFormatter'}},
+    'handlers': {'operational': {'class': 'logging.StreamHandler', 'formatter': 'safe'}},
+    'loggers': {'sicam.operations': {'handlers': ['operational'], 'level': 'INFO', 'propagate': False}},
+}
+if DJANGO_ENV == 'production':
+    LOGGING['root'] = {'handlers': ['operational'], 'level': 'WARNING'}
+    for name in ('django', 'django.request', 'django.security', 'django.server'):
+        LOGGING['loggers'][name] = {'handlers': ['operational'], 'level': 'WARNING', 'propagate': False}

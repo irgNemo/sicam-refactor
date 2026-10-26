@@ -1,13 +1,14 @@
 <template>
   <main v-if="can('administer')" class="administration">
     <h2>Administración</h2>
-    <nav><button @click="tab = 'users'">Usuarios</button><button @click="tab = 'institutions'">{{ auth.user.is_superuser ? 'Instituciones' : 'Institución' }}</button></nav>
+    <nav><button @click="changeTab('users')">Usuarios</button><button @click="changeTab('institutions')">{{ auth.user.is_superuser ? 'Instituciones' : 'Institución' }}</button><button @click="changeTab('events')">Auditoría</button><button @click="changeTab('archived')">Archivados</button><button @click="changeTab('health')">Diagnóstico</button></nav>
     <p v-if="error" role="alert">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p>
     <section v-if="tab === 'users'">
       <h3>Usuarios</h3><button @click="editUser()">Crear usuario</button>
-      <table><thead><tr><th>Nombre</th><th>Usuario</th><th>Correo</th><th>Rol</th><th>Institución</th><th>Estado</th><th>Acciones</th></tr></thead>
-        <tbody><tr v-for="user in users" :key="user.id"><td>{{ `${user.first_name} ${user.last_name}`.trim() || user.username }}</td><td>{{ user.username }}</td><td>{{ user.email }}</td><td>{{ user.is_superuser ? 'Plataforma' : user.role }}</td><td>{{ user.institution?.code || '—' }}</td><td>{{ user.is_active ? 'Activo' : 'Inactivo' }}</td><td><button v-if="!user.is_superuser" @click="editUser(user)">Editar</button></td></tr></tbody>
+      <table><thead><tr><th>Nombre</th><th>Usuario</th><th>Correo</th><th>Rol</th><th>Institución</th><th>Estado</th><th>Último login</th><th>Creación</th><th>Contraseña pendiente</th><th>Acciones</th></tr></thead>
+        <tbody><tr v-for="user in users" :key="user.id"><td>{{ `${user.first_name} ${user.last_name}`.trim() || user.username }}</td><td>{{ user.username }}</td><td>{{ user.email }}</td><td>{{ user.is_superuser ? 'Plataforma' : user.role }}</td><td>{{ user.institution?.code || '—' }}</td><td>{{ user.is_active ? 'Activo' : 'Inactivo' }}</td><td>{{ displayDate(user.last_login) }}</td><td>{{ displayDate(user.date_joined) }}</td><td>{{ user.must_change_password ? 'Sí' : 'No' }}</td><td><button v-if="!user.is_superuser" @click="editUser(user)">Editar</button></td></tr></tbody>
       </table>
+      <p>No se permite desactivar ni degradar al último ADMIN activo de la institución.</p>
       <form v-if="form" @submit.prevent="saveUser">
         <h3>{{ form.id ? 'Editar usuario' : 'Crear usuario' }}</h3>
         <label>Usuario<input v-model="form.username" required autocomplete="off" /></label>
@@ -20,17 +21,22 @@
         <button :disabled="busy">Guardar</button><button type="button" @click="form = null">Cancelar</button>
       </form>
     </section>
-    <section v-else><h3>{{ auth.user.is_superuser ? 'Instituciones' : 'Institución' }}</h3>
+    <section v-else-if="tab === 'institutions'"><h3>{{ auth.user.is_superuser ? 'Instituciones' : 'Institución' }}</h3>
       <button v-if="auth.user.is_superuser" @click="institutionForm = { code: '', name: '', notes: '', active: true }">Crear institución</button>
-      <article v-for="institution in institutions" :key="institution.id"><h4>{{ institution.name }} ({{ institution.code }})</h4><p>{{ institution.active ? 'Activa' : 'Inactiva' }} · {{ institution.notes }}</p><button v-if="auth.user.is_superuser" @click="institutionForm = {...institution}">Editar</button></article>
+      <article v-for="institution in institutions" :key="institution.id"><h4>{{ institution.name }} ({{ institution.code }})</h4><p>{{ institution.active ? 'Activa' : 'Inactiva' }} · {{ institution.notes }}</p><dl v-if="institution.operational_summary"><template v-for="(value, key) in institution.operational_summary" :key="key"><dt>{{ summaryLabels[key] || key }}</dt><dd>{{ value }}</dd></template></dl><button v-if="auth.user.is_superuser" @click="institutionForm = {...institution}">Editar</button></article>
       <form v-if="institutionForm && auth.user.is_superuser" @submit.prevent="saveInstitution"><label>Código<input v-model="institutionForm.code" required :disabled="Boolean(institutionForm.id)" /></label><label>Nombre<input v-model="institutionForm.name" required /></label><label>Notas<textarea v-model="institutionForm.notes" /></label><label><input v-model="institutionForm.active" type="checkbox" /> Activa</label><button :disabled="busy">Guardar</button><button type="button" @click="institutionForm = null">Cancelar</button></form>
     </section>
+    <AdminAuditPanel v-else :mode="tab" :institutions="institutions" @busy="auditBusy = $event" />
   </main><p v-else role="alert">No tiene acceso a Administración.</p>
 </template>
 <script setup>
 import { ref, onMounted } from 'vue';
+import AdminAuditPanel from '../components/administration/AdminAuditPanel.vue';
+import { displayDate } from '../services/adminAudit';
 import api from '../services/apiClient';
 import { auth, can, refreshSession } from '../services/auth';
+const auditBusy = ref(false);
+const summaryLabels = { active_admins:'Admins activos',active_users:'Usuarios activos',patients:'Pacientes',archived_patients:'Pacientes archivados',profiles:'Configuraciones',calibrations:'Calibraciones',series:'Series' };
 const tab = ref('users'), users = ref([]), institutions = ref([]), form = ref(null), institutionForm = ref(null), busy = ref(false), error = ref(''), notice = ref('');
 const message = e => e.response?.data ? Object.values(e.response.data).flat().join(' ') : 'No se pudo completar la operación.';
 async function load() { if (!can('administer')) return; const [u, i] = await Promise.all([api.get('/api/users/'), api.get('/api/institutions/')]); users.value = u.data; institutions.value = i.data; }
@@ -44,7 +50,8 @@ async function saveInstitution() { if (busy.value) return;
   const deactivating = institutionForm.value.id && !institutionForm.value.active && institutions.value.find(item => item.id === institutionForm.value.id)?.active;
   if (deactivating && !window.confirm(`Desactivar ${institutionForm.value.name} impedirá operar a todos sus usuarios, incluidas las sesiones abiertas. ¿Desactivar esta institución?`)) return;
   busy.value = true; error.value = ''; try { const {id, code, name, notes, active} = institutionForm.value; if(id) await api.patch(`/api/institutions/${id}/`, {code,name,notes,active,confirm_deactivation:Boolean(deactivating)}); else await api.post('/api/institutions/', {code,name,notes,active}); institutionForm.value = null; await load(); } catch(e) { error.value=message(e); } finally { busy.value=false; } }
-function confirmLeave() { return !busy.value && (!(form.value || institutionForm.value) || window.confirm('¿Salir sin guardar el formulario administrativo?')); }
+function changeTab(value) { if (value === tab.value || !confirmLeave()) return; form.value = null; institutionForm.value = null; tab.value=value; }
+function confirmLeave() { return !auditBusy.value && !busy.value && (!(form.value || institutionForm.value) || window.confirm('¿Salir sin guardar el formulario administrativo?')); }
 defineExpose({ confirmLeave });
 </script>
 <style scoped>

@@ -118,3 +118,20 @@ class SicamPlatformUserAdmin(UserAdmin):
 
 admin.site.unregister(get_user_model())
 admin.site.register(get_user_model(), SicamPlatformUserAdmin)
+
+
+from .models import LifecycleEvent
+
+@admin.register(LifecycleEvent)
+class LifecycleEventAdmin(admin.ModelAdmin):
+    list_display = ('id', 'created_at', 'institution', 'actor', 'action', 'target_type', 'target_id')
+    list_filter = ('institution', 'action', 'target_type')
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False

@@ -28,7 +28,8 @@ def user_data(user):
                 email=user.email, is_active=user.is_active, is_superuser=user.is_superuser,
                 institution=InstitutionSerializer(institution).data if institution else None,
                 role=profile.role if profile else None,
-                must_change_password=profile.must_change_password if profile else False)
+                must_change_password=profile.must_change_password if profile else False,
+                last_login=user.last_login, date_joined=user.date_joined)
 
 
 class AuthContext(APIView):
@@ -105,9 +106,26 @@ class PasswordView(APIView):
 
 
 class InstitutionSerializer(serializers.ModelSerializer):
+    operational_summary = serializers.SerializerMethodField()
+
+    def get_operational_summary(self, instance):
+        # Session bootstrap and ordinary operational readers receive no admin metrics.
+        request = self.context.get('request')
+        if not request or not operational(request.user) or not (request.user.is_superuser or profile_for(request.user).role == 'ADMIN'):
+            return None
+        from .models import Paciente, AcquisitionProfile, Calibration, AcquisitionSeries
+        profiles = SicamUserProfile.objects.filter(institution=instance)
+        return dict(active_admins=profiles.filter(role='ADMIN', user__is_active=True).count(),
+                    active_users=profiles.filter(user__is_active=True).count(),
+                    patients=Paciente.objects.filter(institution=instance).count(),
+                    archived_patients=Paciente.objects.filter(institution=instance, archived_at__isnull=False).count(),
+                    profiles=AcquisitionProfile.objects.filter(institution=instance).count(),
+                    calibrations=Calibration.objects.filter(acquisition_profile__institution=instance).count(),
+                    series=AcquisitionSeries.objects.filter(patient__institution=instance).count())
+
     class Meta:
         model = Institution
-        fields = ['id', 'code', 'name', 'active', 'notes', 'created_at', 'updated_at']
+        fields = ['id', 'code', 'name', 'active', 'notes', 'created_at', 'updated_at', 'operational_summary']
         read_only_fields = ['id', 'created_at', 'updated_at']
 
     def validate(self, attrs):
@@ -224,10 +242,29 @@ class PrivateMediaView(APIView):
         file = getattr(obj, field)
         if not file:
             raise Http404
-        try:
-            response = FileResponse(file.open('rb'), as_attachment=False)
-        except OSError:
-            raise Http404
+        from django.conf import settings
+        if settings.PRIVATE_MEDIA_DELIVERY == 'nginx':
+            from pathlib import Path
+            from urllib.parse import quote
+            from django.http import HttpResponse
+            from django.utils.http import content_disposition_header
+            import mimetypes
+            try:
+                root = Path(settings.MEDIA_ROOT).resolve()
+                path = Path(file.path).resolve(strict=True)
+                relative = path.relative_to(root)
+                if not path.is_file():
+                    raise Http404
+            except (OSError, ValueError, NotImplementedError):
+                raise Http404
+            response = HttpResponse(content_type=mimetypes.guess_type(path.name)[0] or 'application/octet-stream')
+            response['X-Accel-Redirect'] = '/_sicam_private_media/' + quote(relative.as_posix(), safe='/')
+            response['Content-Disposition'] = content_disposition_header(False, path.name)
+        else:
+            try:
+                response = FileResponse(file.open('rb'), as_attachment=False)
+            except OSError:
+                raise Http404
         response['Cache-Control'] = 'private, no-store'
         response['Vary'] = 'Cookie'
         response['X-Content-Type-Options'] = 'nosniff'

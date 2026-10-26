@@ -1,3 +1,4 @@
+from .admin_audit import AuditEventViewSet, AuditOptionsView, ArchivedView, OperationalHealthView
 from .lifecycle_views import LifecycleView
 from .auth_views import AuthContext, LoginView, LogoutView, PasswordView, UserViewSet, InstitutionViewSet, PrivateMediaView
 from django.urls import path, include
@@ -18,6 +19,7 @@ from .acquisition_views import (
 )
 
 router = DefaultRouter()
+router.register('admin-audit/events', AuditEventViewSet, basename='audit-event')
 router.register('users', UserViewSet, basename='sicam-user')
 router.register('institutions', InstitutionViewSet, basename='institution')
 router.register('acquisition-profiles', AcquisitionProfileViewSet, basename='acquisition-profile')
@@ -45,6 +47,9 @@ router.register(
 )
 
 urlpatterns = [
+    path('admin-audit/options/', AuditOptionsView.as_view()),
+    path('admin-audit/archived/', ArchivedView.as_view()),
+    path('admin-audit/health/', OperationalHealthView.as_view()),
     path('lifecycle/<str:resource>/<int:pk>/', LifecycleView.as_view()),
     path('auth/me/', AuthContext.as_view()),
     path('auth/login/', LoginView.as_view()),

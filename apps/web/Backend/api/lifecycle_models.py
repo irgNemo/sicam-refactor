@@ -26,3 +26,7 @@ class LifecycleEvent(models.Model):
 
     class Meta:
         ordering = ['-created_at', '-pk']
+        indexes = [models.Index(fields=['institution', '-created_at', '-id'], name='lc_inst_time_idx'),
+                   models.Index(fields=['action', '-created_at'], name='lc_action_time_idx'),
+                   models.Index(fields=['target_type', '-created_at'], name='lc_target_time_idx'),
+                   models.Index(fields=['-created_at', '-id'], name='lc_time_idx')]

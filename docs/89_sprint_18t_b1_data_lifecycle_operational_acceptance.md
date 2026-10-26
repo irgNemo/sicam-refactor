@@ -1,5 +1,9 @@
 # Sprint 18T-B.1 — Aceptación operativa del data lifecycle
 
+> Repetición más reciente: **2026-10-26**, sobre HEAD `77ca825`. Véase
+> «Repetición operativa del 26 de octubre de 2026» al final. Las secciones
+> anteriores conservan la evidencia histórica de la primera aceptación.
+
 Fecha: 2026-10-25, America/Mexico_City.
 Estado: **READY_WITH_MANUAL_VISUAL_REVIEW_PENDING**.
 
@@ -380,5 +384,250 @@ Se conservan los pendientes:
 Recomendación: completar revisión visual y luego 18T-C, para auditoría
 administrativa, consulta de LifecycleEvent, gestión de archivados, hardening de
 despliegue/media/Nginx y refinamiento operativo. No se implementa 18T-C aquí.
+
+SPRINT 18T-B.1 = READY_WITH_MANUAL_VISUAL_REVIEW_PENDING
+
+
+## Repetición operativa del 26 de octubre de 2026
+
+Estado: **READY_WITH_MANUAL_VISUAL_REVIEW_PENDING**.
+
+### Precheck y alcance de esta repetición
+
+- Rama `master`, HEAD `77ca825d9b89cd8f8f561502602104de84c8a2a1`.
+  Working tree limpio al iniciar; 18T-B y la aceptación anterior commiteados.
+- Django check PASS; migraciones API 0001–0013 ya aplicadas, incluida
+  `0013_lifecycle_audit_indexes`. No se aplicó ni creó ninguna migración.
+- 18T-C ya forma parte del baseline actual. No se reimplementó ni se amplió.
+- Sólo se actualiza este documento. No hubo bug nuevo, corrección productiva,
+  staging, commit ni push.
+- Se preservaron también todos los objetos TEST anteriores; se creó un conjunto
+  independiente con prefijo `TEST_LIFECYCLE_R2_20261026T170113`.
+
+La BD inicial contenía **25 Characterizations**, 27 LifecycleEvents y 94 archivos
+media. La primera aceptación documentada arriba tenía 24 Characterizations y
+93 archivos iniciales. Estos valores actuales se midieron **antes** de escribir:
+no se atribuye su diferencia a esta repetición, ni se corrige ningún dato previo.
+
+### Backup y método
+
+BD: `/home/israel/repos/sicam-refactor/apps/web/Backend/db.sqlite3`.
+MEDIA_ROOT: `/home/israel/repos/sicam-refactor/apps/web/Backend/media`.
+
+Backup consistente nuevo, creado y verificado antes de las operaciones:
+`/tmp/sicam18tb1_backup_20261026T165923Z/database/db.sqlite3`.
+SHA-256: `5f37d49eea374a67c47132e03c27c19c24171f4ca69d1664f5601ddf0c33e5cd`.
+SQLite backup desde conexión read-only; `integrity_check=ok`, foreign keys sin
+infracciones. Directorio con `manifest.json`, `hashes.txt`, `RECOVERY.md` y copia
+legible de BD. El manifiesto registra conteos, hashes de filas y de los 94 archivos;
+**no constituye una copia completa de media**.
+
+Se repitió la aceptación por APIClient en proceso, con API normal, BD/storage
+reales, sesiones Django temporales y CSRF habilitado. Usuarios existentes de
+LASAID (institución 1): ADMIN 2, OPERATOR 3, REVIEWER 4. No se crearon cuentas,
+no se pidieron ni modificaron contraseñas y las sesiones temporales terminaron
+por logout. La sesión preexistente quedó intacta. Esta evidencia no sustituye
+una prueba visual del navegador ni prueba nuevamente el formulario de login.
+
+Resultado: **140 peticiones registradas y 65 comprobaciones explícitas PASS**,
+incluidas 36 comprobaciones de listados operativos/históricos por rol y 3 rechazos
+CSRF. Las operaciones inválidas no crearon objetos ni eventos inesperados.
+
+La dependencia de sample 72 es sintética: POST normal de segmentación con
+`api.views.segment_image` sustituido sólo en el proceso de aceptación, bloqueando
+salidas HTTP de `requests`. Se ejercitaron normalizador y persistencia reales,
+sin ejecutar CURRENT/ALT/BLOOD. Resultado 30 conserva `acceptance.synthetic=true`,
+`microservice_executed=false` y el marcador del intento. Su strategy
+`CURRENT_CUSTOM_V1` **no acredita una inferencia CURRENT real**. Ejecución
+`0a177e24-932b-4b84-bbce-62fbba41f07e`, M=1/N=1/MN=0 sintéticos.
+No se ejecutó Characterization ni se creó una revisión.
+
+### Objetos y escenarios reales
+
+Todos los objetos pertenecen a institución 1. La etiqueta de cada fila es el
+prefijo del intento seguido del sufijo indicado. Actor = usuario creador por API.
+
+| Sufijo / propósito | Recurso | ID | Actor | Estado final |
+|---|---|---:|---:|---|
+| `empty_patient` | pacientes | 12 | 2 | Eliminado mediante API |
+| `patient_B` | pacientes | 13 | 2 | Eliminado mediante API |
+| `case_B` | casos | 11 | 2 | Eliminado mediante API |
+| `analysis_B` | analisis | 11 | 2 | Eliminado mediante API |
+| `empty_sample` | muestras | 70 | 3 | Eliminado mediante API |
+| `admin_deleted_sample` | muestras | 71 | 3 | Eliminado mediante API |
+| `unused_profile` | acquisition-profiles | 4 | 2 | Eliminado mediante API |
+| `patient_D` | pacientes | 14 | 2 | Archivado |
+| `case_D` | casos | 12 | 2 | Conservado bajo paciente archivado |
+| `analysis_D` | analisis | 12 | 2 | Conservado bajo paciente archivado |
+| `used_profile` | acquisition-profiles | 5 | 2 | Archivado |
+| `unused_calibration` | calibrations | 4 | 2 | Eliminado mediante API |
+| `empty_series` | acquisition-series | 5 | 3 | Eliminado mediante API |
+| `used_calibration` | calibrations | 5 | 2 | RETIRED |
+| `used_series` | acquisition-series | 6 | 3 | Archivado |
+| `derived_sample` | muestras | 72 | 3 | Archivado |
+
+Resultado 30 y su ejecución no disponen de campo `created_by`; el actor de la
+petición fue OPERATOR 3 y su institución se resuelve por la muestra.
+
+| Escenario | Evidencia de esta repetición | Resultado |
+|---|---|---|
+| A: paciente vacío | Patient 12 sin dependencias, inspector recomienda HARD_DELETE; delete ADMIN y evento 28 persistido | PASS |
+| B: paciente dependiente | Patient 13, Case 11, Analysis 11: delete 409; archive oculta jerarquía; restore conserva hijos; archivo propio de Case sobrevive restauración del padre | PASS |
+| C: muestra vacía | Sample 70 propia de OPERATOR, eliminación real del archivo; sample 71 eliminada por ADMIN | PASS |
+| D: muestra dependiente | Sample 72: inspector científico, delete 409, archivo y resultado intactos al archivar/restaurar | PASS |
+| E/F: series | Series 5 vacía eliminada por creador; Series 6 usada no eliminable, archive/restore y rechazo de nuevo upload | PASS |
+| G/H: profiles | Profile 4 vacío eliminado; Profile 5 usado no eliminable, archive/restore; nuevas Series bloqueadas al estar archivado | PASS |
+| Inmutabilidad profile | Rechazo 400 de objective, width, height, camera, adapter, image mode; nombre/notes administrativos permitidos | PASS |
+| I: calibración vacía | Calibration 4 sin referencias ni uso: HARD_DELETE permitido | PASS |
+| J: calibración usada | Calibration 5: delete 409, RETIRE ADMIN, no RESTORE/UNRETIRE; PATCH PROVISIONAL/VALIDATED rechazado; nuevos enlaces/uploads rechazados | PASS |
+| Motivo/confirmación | Vacío, espacios y confirmación ausente rechazados antes de mutar | PASS |
+| Roles | ADMIN opera; OPERATOR sólo borra sus objetos vacíos; REVIEWER rechazado; archivo/retire no permitido a OPERATOR | PASS |
+| Histórico/media | ADMIN accede a media archivada, anónimo rechazado; listados históricos sólo ADMIN; media conservada | PASS |
+| Conflicto | 409 con `SCIENTIFIC_DEPENDENCIES_EXIST`, `recommended_action`, `dependencies` | PASS |
+
+La matriz cross-institution, acceso a media desde otra institución, operador no
+creador, protección de Characterization y VALIDADA, y dependencia creada entre
+preview/delete se verificaron en tests aislados existentes (`api/test_lifecycle.py`).
+No se creó otra institución en la BD de trabajo. Los tests de componentes verifican
+terminología, motivo, confirmación, roles, acciones permitidas, ausencia de UNRETIRE,
+modal de dependencias y mensajes de conflicto. No se atribuye observación visual.
+
+CalibrationReference cuenta como evidencia según política: no se fuerza su borrado;
+la calibración vacía de este escenario no tenía referencias.
+
+### Conteos e integridad final
+
+| Tabla | Antes | Después |
+|---|---:|---:|
+| `api_institution` | 1 | 1 |
+| `auth_user` | 4 | 4 |
+| `api_sicamuserprofile` | 3 | 3 |
+| `api_paciente` | 9 | 10 |
+| `api_caso` | 9 | 10 |
+| `api_analisispred` | 9 | 10 |
+| `api_muestrasaliva` | 66 | 67 |
+| `api_muestrasangre` | 2 | 2 |
+| `api_acquisitionseries` | 3 | 4 |
+| `api_acquisitionprofile` | 2 | 3 |
+| `api_calibration` | 2 | 3 |
+| `api_calibrationreference` | 3 | 3 |
+| `api_resultadosegmentacion` | 29 | 30 |
+| `api_segmentationexecution` | 28 | 29 |
+| `api_revisionsegmentacion` | 27 | 27 |
+| `api_resultadocaracterizacion` | 25 | 25 |
+| `api_imagejimportrecord` | 23 | 23 |
+| `api_lifecycleevent` | 27 | 53 |
+| `django_session` | 1 | 1 |
+
+- **0 filas preexistentes modificadas/eliminadas**, comparadas por PK y hash de
+  fila completa en todas las tablas. Sólo se agregaron las filas TEST/eventos
+  identificados en el journal. Usuarios, institución y sesiones previas idénticos.
+- **94/94 archivos preexistentes idénticos** por tamaño/SHA-256; final 95 archivos.
+  Se eliminaron las imágenes TEST de samples 70 y 71; sus eventos conservan hash
+  y estado `DELETED`. Sólo permanece la imagen sintética archivada de sample 72:
+  `muestras/saliva/2026/10/TEST_LIFECYCLE_R2_20261026T170113_derived_sample.png`.
+- PNG sintéticos de 32×32 RGB, SHA-256 de la imagen eliminada y de la conservada:
+  `6b1992a6643f5c82b921a8d166aee839ab2adb7932a831b31373a9d9be67f0b3`.
+  Son fixtures idénticos en archivos diferentes; no hay media huérfana nueva.
+- Characterization 24/sample 66 intacta en toda su fila/JSON: versión 2.2,
+  `COMPATIBLE_PROVISIONAL`, snapshot y fingerprint
+  `c80144bf271ed7e977040a69a288a14c44efc4eb93f311a07b95d320c0526b1e`.
+- Calibration 1 real intacta, PROVISIONAL, sx=`0.055233934048000`,
+  sy=`0.055010060892000`, **0 LifecycleEvents** aplicados a ella.
+- Resultado sintético 30 también conserva su hash completo tras archive/restore,
+  retiro de calibración y limpieza; no cambió el contenido científico previo.
+- SQLite `integrity_check=ok`, `foreign_key_check=[]`.
+
+Limpieza mediante lifecycle API exclusivamente, sin purga ni SQL destructivo.
+Permanecen Patient 14, Sample 72, Series 6 y Profile 5 archivados; Case 12 y
+Analysis 12 ocultos por el paciente. Calibration 5 RETIRED, resultado 30 y ejecución
+se conservan por trazabilidad. Todos con marcador TEST. No se borraron eventos.
+Archivados finales: pacientes=3, SALIVA=2, series=2, profiles=2; casos/análisis=0
+individualmente. Incluyen la evidencia previa, preservada íntegramente.
+
+### Eventos de esta repetición
+
+27 iniciales → 53 finales, **26 nuevos (28–53)**. Todos institución 1.
+Actor 2=ADMIN, 3=OPERATOR. Se conserva motivo completo en la tabla y en `events.csv`.
+
+| ID | Acción | Tipo / ID | Actor | Timestamp UTC | Motivo |
+|---:|---|---|---:|---|---|
+| 28 | HARD_DELETE | paciente / 12 | 2 | 2026-10-26 17:01:13.482232+00:00 | Datos de prueba 18T-B.1 (repetición controlada) |
+| 29 | ARCHIVE | paciente / 13 | 2 | 2026-10-26 17:01:13.625713+00:00 | Datos de prueba 18T-B.1 (repetición controlada) |
+| 30 | RESTORE | paciente / 13 | 2 | 2026-10-26 17:01:13.707872+00:00 | Datos de prueba 18T-B.1 (repetición controlada) |
+| 31 | ARCHIVE | caso / 11 | 2 | 2026-10-26 17:01:13.774141+00:00 | Datos de prueba 18T-B.1 (repetición controlada) |
+| 32 | ARCHIVE | paciente / 13 | 2 | 2026-10-26 17:01:13.807326+00:00 | Datos de prueba 18T-B.1 (repetición controlada) |
+| 33 | RESTORE | paciente / 13 | 2 | 2026-10-26 17:01:13.841607+00:00 | Datos de prueba 18T-B.1 (repetición controlada) |
+| 34 | RESTORE | caso / 11 | 2 | 2026-10-26 17:01:13.868812+00:00 | Datos de prueba 18T-B.1 (repetición controlada) |
+| 35 | HARD_DELETE | muestrasaliva / 70 | 3 | 2026-10-26 17:01:15.560734+00:00 | Imagen de prueba subida por error |
+| 36 | HARD_DELETE | muestrasaliva / 71 | 2 | 2026-10-26 17:01:16.534199+00:00 | Datos de prueba 18T-B.1 (repetición controlada) |
+| 37 | HARD_DELETE | acquisitionprofile / 4 | 2 | 2026-10-26 17:01:16.648800+00:00 | Datos de prueba 18T-B.1 (repetición controlada) |
+| 38 | HARD_DELETE | calibration / 4 | 2 | 2026-10-26 17:01:16.832749+00:00 | Datos de prueba 18T-B.1 (repetición controlada) |
+| 39 | HARD_DELETE | acquisitionseries / 5 | 3 | 2026-10-26 17:01:16.887770+00:00 | Datos de prueba 18T-B.1 (repetición controlada) |
+| 40 | ARCHIVE | muestrasaliva / 72 | 2 | 2026-10-26 17:01:17.178318+00:00 | Datos de prueba 18T-B.1 (repetición controlada) |
+| 41 | RESTORE | muestrasaliva / 72 | 2 | 2026-10-26 17:01:17.246178+00:00 | Datos de prueba 18T-B.1 (repetición controlada) |
+| 42 | ARCHIVE | acquisitionseries / 6 | 2 | 2026-10-26 17:01:17.315346+00:00 | Datos de prueba 18T-B.1 (repetición controlada) |
+| 43 | RESTORE | acquisitionseries / 6 | 2 | 2026-10-26 17:01:17.383529+00:00 | Datos de prueba 18T-B.1 (repetición controlada) |
+| 44 | ARCHIVE | acquisitionprofile / 5 | 2 | 2026-10-26 17:01:17.570152+00:00 | Datos de prueba 18T-B.1 (repetición controlada) |
+| 45 | RESTORE | acquisitionprofile / 5 | 2 | 2026-10-26 17:01:17.646002+00:00 | Datos de prueba 18T-B.1 (repetición controlada) |
+| 46 | RETIRE | calibration / 5 | 2 | 2026-10-26 17:01:17.742322+00:00 | Datos de prueba 18T-B.1 (repetición controlada) |
+| 47 | HARD_DELETE | analisispred / 11 | 2 | 2026-10-26 17:01:17.871112+00:00 | Datos de prueba 18T-B.1 (repetición controlada) |
+| 48 | HARD_DELETE | caso / 11 | 2 | 2026-10-26 17:01:17.899671+00:00 | Datos de prueba 18T-B.1 (repetición controlada) |
+| 49 | HARD_DELETE | paciente / 13 | 2 | 2026-10-26 17:01:17.924245+00:00 | Datos de prueba 18T-B.1 (repetición controlada) |
+| 50 | ARCHIVE | muestrasaliva / 72 | 2 | 2026-10-26 17:01:17.957511+00:00 | Datos de prueba 18T-B.1; evidencia sintética conservada, no usar científicamente |
+| 51 | ARCHIVE | acquisitionseries / 6 | 2 | 2026-10-26 17:01:17.984104+00:00 | Datos de prueba 18T-B.1; evidencia sintética conservada, no usar científicamente |
+| 52 | ARCHIVE | acquisitionprofile / 5 | 2 | 2026-10-26 17:01:18.016380+00:00 | Datos de prueba 18T-B.1; evidencia sintética conservada, no usar científicamente |
+| 53 | ARCHIVE | paciente / 14 | 2 | 2026-10-26 17:01:18.046670+00:00 | Datos de prueba 18T-B.1; evidencia sintética conservada, no usar científicamente |
+
+Eventos 28, 35–39 y 47–49 permanecen aunque sus targets fueron eliminados.
+
+### Validaciones de esta repetición
+
+| Validación | Resultado |
+|---|---|
+| Backend completo, pytest sin cacheprovider | **447 passed, 2 skipped** |
+| Frontend: registration/acquisition/segmentationStrategies | 40 / 19 / 59 passed |
+| Frontend: characterization21/characterization22 | 22 / 15 passed |
+| Frontend: auth/lifecycle/adminAudit | 12 / 11 / 9 passed |
+| Frontend total | **187 passed**, 0 failed |
+| `npm run build` | PASS, 128 módulos |
+| `manage.py check` | PASS |
+| `makemigrations --check --dry-run` | No changes detected |
+| `showmigrations api` | 0001–0013 aplicadas, sin intervención |
+| SQLite, hashes baseline y readback de filas nuevas | PASS |
+| `git diff --check` | PASS |
+
+No se inició ningún servicio adicional. Sólo queda modificado este documento;
+sin código, modelos, requirements o migraciones nuevas. HEAD permanece `77ca825`.
+
+### Revisión visual pendiente y siguientes pasos
+
+No se automatizó navegador ni se considera aceptada la UX por estas pruebas.
+Usar sólo datos TEST desechables, nunca los científicos. Los objetos vacíos ya
+fueron eliminados; para repetir acciones destructivas se necesitan fixtures TEST
+nuevos. No reactivar la calibración retirada ni reutilizarla científicamente.
+
+- [ ] A. Patient vacío: Más acciones → Eliminar.
+- [ ] B. Patient con datos: Más acciones → Archivar.
+- [ ] C. Ver archivados: Restaurar.
+- [ ] D. Sample vacía: Eliminar imagen.
+- [ ] E. Sample con datos: Archivar imagen.
+- [ ] F. Profile usado: no editar parámetros científicos.
+- [ ] G. Calibration utilizada: Retirar.
+
+Acceso conocido: `http://127.0.0.1:5173/`; comandos de arranque en el checklist
+histórico anterior. No hacen falta microservicios. Comprobar objeto/dependencias,
+consecuencias, recomendación, motivo y confirmación en los modales.
+
+Evidencia de esta repetición: `/tmp/sicam18tb1_rerun/`, con `baseline.json`,
+`acceptance.json/log/py`, `events.csv`, `readback.json/py`, `integrity_final.json`,
+logs de backend/frontend/build y scripts de snapshot/documentación. Los archivos
+`/tmp` son temporales; las tablas anteriores conservan lo esencial versionable.
+
+Se mantiene la lista de pendientes documentada arriba; ninguno se resuelve
+incidentalmente. La implementación de 18T-C ya está presente en el baseline;
+corresponde completar esta revisión visual y continuar su aceptación/despliegue
+según decisión del investigador. No se implementó nuevo trabajo de 18T-C.
+Sin commit ni push.
 
 SPRINT 18T-B.1 = READY_WITH_MANUAL_VISUAL_REVIEW_PENDING

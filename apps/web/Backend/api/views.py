@@ -1,3 +1,4 @@
+from .patient_lookup import search_patients, patient_identity, PatientLookupPagination
 from .services.lifecycle import lock_operational, LifecycleConflict
 from .access import ScopedViewMixin
 from django.db import transaction
@@ -234,10 +235,16 @@ def _get_or_create_revision_draft(resultado_segmentacion_id, actor=None):
         )
         return revision, True
 
-
 class PacienteViewSet(ScopedViewMixin, viewsets.ModelViewSet):
     queryset = Paciente.objects.all()
     serializer_class = PacienteSerializer
+
+    @action(detail=False, methods=['get'])
+    def lookup(self, request):
+        pagination = PatientLookupPagination()
+        patients = search_patients(self.get_queryset(), request.query_params.get('q', '')).order_by('pk')
+        page = pagination.paginate_queryset(patients, request, view=self)
+        return pagination.get_paginated_response([patient_identity(p) for p in page])
     
     @action(detail=True, methods=['get'])
     def casos(self, request, pk=None):

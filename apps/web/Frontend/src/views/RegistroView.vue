@@ -5,7 +5,12 @@
         <h2 id="registration-title">Registro de datos</h2>
         <p>Gestión de pacientes, casos e imágenes.</p>
       </header>
-      <LifecycleBrowser :disabled="hasUnsavedWork" @busy="lifecycleBusy = $event" @changed="lifecycleChanged" />
+      <nav class="registration-nav mode-selector" aria-label="Modo de Registro">
+        <button type="button" :class="{active:recordMode === 'new'}" :aria-pressed="recordMode === 'new'" :disabled="isBusy" @click="requestMode('new')">Nuevo registro</button>
+        <button type="button" :class="{active:recordMode === 'manage'}" :aria-pressed="recordMode === 'manage'" :disabled="isBusy" @click="requestMode('manage')">Gestionar registros</button>
+      </nav>
+      <RecordManagement v-if="recordMode === 'manage'" @busy="lifecycleBusy = $event" @dirty="managementDirty = $event" @changed="cargarPacientes" />
+      <div v-show="recordMode === 'new'">
       <p v-if="!can('register')">Acceso de consulta. Puede consultar pacientes y casos desde Segmentación y Caracterización.</p>
       <section v-if="!can('register')" aria-label="Pacientes de la institución"><h3>Pacientes</h3><ul><li v-for="patient in pacientes" :key="patient.id_paciente">{{ patientRegistrationLabel(patient) }}</li></ul></section>
       <nav v-if="can('register')" class="registration-nav" aria-label="Secciones de Registro">
@@ -273,6 +278,7 @@
           </fieldset>
         </form>
       </section>
+      </div>
     </div>
     <transition name="notification-slide">
       <div v-if="notificacion.mostrar" class="notification" :class="notificacion.tipo" :role="notificacion.tipo === 'error' ? 'alert' : 'status'">
@@ -285,7 +291,7 @@
 
 <script>
 import { auth, can } from '../services/auth';
-import LifecycleBrowser from '../components/lifecycle/LifecycleBrowser.vue';
+import RecordManagement from '../components/registration/RecordManagement.vue';
 import InstitutionSelect from '../components/InstitutionSelect.vue';
 import { patientRegistrationLabel } from "../domain/patientPresentation";
 import apiClient from '../services/apiClient';
@@ -299,11 +305,12 @@ import {
 
 export default {
   name: 'RegistroView',
-  components: { AcquisitionSeriesSelector, InstitutionSelect, LifecycleBrowser },
+  components: { AcquisitionSeriesSelector, InstitutionSelect, RecordManagement },
 
   data() {
     return {
       vistaActiva: 'paciente',
+      recordMode: 'new', managementDirty: false,
       lifecycleBusy: false,
       patientInstitution: null,
       selectedAcquisition: { series: null, profile: null, calibration: null },
@@ -404,7 +411,7 @@ export default {
       return this.imagenesPreview.filter(item => ['PENDING', 'ERROR'].includes(item.status));
     },
     hasUnsavedWork() {
-      return this.isBusy || this.seriesDirty || this.patientIdentityMode !== this.patientIdentityBaseline || Object.values(this.formPaciente).some(value => String(value).trim())
+      return this.isBusy || this.managementDirty || this.seriesDirty || this.patientIdentityMode !== this.patientIdentityBaseline || Object.values(this.formPaciente).some(value => String(value).trim())
         || Boolean(this.formCaso.paciente || this.formCaso.titulo.trim() || this.formCaso.descripcion.trim()
           || !this.formCaso.crear_analisis) || this.pendingUploads.length > 0;
     },
@@ -437,6 +444,10 @@ export default {
   },
 
   methods: {
+    requestMode(mode) {
+      if (!['new','manage'].includes(mode) || mode === this.recordMode) return;
+      if (this.confirmLeave()) this.recordMode = mode;
+    },
     async lifecycleChanged() {
       this.formImagenes.paciente = '';
       await this.cargarCasosPaciente();
@@ -822,6 +833,10 @@ export default {
 </script>
 
 <style scoped>
+.registration-nav.mode-selector {width:fit-content;padding:5px;gap:4px;background:#e9eff5;border-radius:12px;border:1px solid #d4dee8}
+.registration-nav.mode-selector button {border:0;background:transparent;border-radius:8px}
+.registration-nav.mode-selector button.active {background:#fff;color:#1565c0;box-shadow:0 1px 4px #0002}
+
 .registration-content { flex: 1; width: 100%; min-width: 0; padding: 24px; }
 .registration-shell { width: 100%; max-width: 960px; margin: 0 auto; }
 .page-header { margin-bottom: 24px; }

@@ -2,38 +2,7 @@
   <aside class="sidebar">
     <h2>Búsqueda de Casos</h2>
 
-    <!-- BUSCADOR DE PACIENTE -->
-    <div class="search-section">
-      <label>Buscar Paciente</label>
-      <div class="search-input-wrapper">
-        <input
-          type="text"
-          v-model="busquedaPaciente"
-          placeholder="Nombre, apellido o ID..."
-          @input="filtrarPacientes"
-        />
-        <span class="search-icon">🔍</span>
-      </div>
-
-      <!-- LISTA DE PACIENTES FILTRADOS -->
-      <div v-if="busquedaPaciente && pacientesFiltrados.length > 0" class="pacientes-dropdown">
-        <div 
-          v-for="paciente in pacientesFiltrados.slice(0, 5)" 
-          :key="paciente.id_paciente"
-          class="paciente-item"
-          @click="seleccionarPaciente(paciente)"
-        >
-          <div class="paciente-info">
-            <strong>{{ patientDisplayName(paciente) }}</strong>
-            <span class="paciente-id">ID: {{ paciente.identificacion }}</span>
-          </div>
-        </div>
-      </div>
-
-      <div v-if="busquedaPaciente && pacientesFiltrados.length === 0 && !loading" class="no-results">
-        No se encontraron pacientes
-      </div>
-    </div>
+    <PatientLookup v-if="!pacienteSeleccionado" :model-value="pacienteSeleccionado" :disabled="loading" @update:model-value="seleccionarPaciente" />
 
     <!-- PACIENTE SELECCIONADO -->
     <div v-if="pacienteSeleccionado" class="paciente-card">
@@ -41,7 +10,8 @@
         <div class="paciente-avatar">{{ iniciales }}</div>
         <div class="paciente-datos">
           <h3>{{ patientDisplayName(pacienteSeleccionado) }}</h3>
-          <p>ID: {{ pacienteSeleccionado.identificacion }}</p>
+          <p>ID técnico: <CompactValue :value="pacienteSeleccionado.identificacion" /></p>
+          <p>{{ patientIdentityMode(pacienteSeleccionado) }}</p>
           <p class="edad">{{ calcularEdad(pacienteSeleccionado.fecha_nacimiento) }} años</p>
         </div>
       </div>
@@ -143,13 +113,16 @@
 </template>
 
 <script>
-import { patientDisplayName, patientInitials } from "../domain/patientPresentation";
+import CompactValue from "./registration/CompactValue.vue";
+import PatientLookup from "./registration/PatientLookup.vue";
+import { patientDisplayName, patientInitials, patientIdentityMode } from "../domain/patientPresentation";
 import apiClient from "../services/apiClient";
 import { obtenerResumenSegmentacionCaso } from "../services/segmentationService";
 import { SAMPLE_TYPES } from "../domain/segmentationTypes";
 
 export default {
   name: "SideBar",
+  components: { PatientLookup, CompactValue },
   emits: ["select-patient", "select-case", "context-invalid"],
 
   props: {
@@ -176,8 +149,6 @@ export default {
       loading: true,
 
       // Estado UI
-      busquedaPaciente: "",
-      pacientesFiltrados: [],
       pacienteSeleccionado: null,
       casoSeleccionado: null,
       resumenLoading: false,
@@ -222,7 +193,7 @@ export default {
   },
 
   methods: {
-    patientDisplayName,
+    patientDisplayName, patientIdentityMode,
     async cargarDatos() {
       try {
         const [resPacientes, resCasos, resAnalisis] = await Promise.all([
@@ -242,22 +213,8 @@ export default {
       }
     },
 
-    filtrarPacientes() {
-      if (!this.busquedaPaciente.trim()) {
-        this.pacientesFiltrados = [];
-        return;
-      }
-
-      const busqueda = this.busquedaPaciente.toLowerCase();
-      this.pacientesFiltrados = this.pacientes.filter(p => 
-        patientDisplayName(p).toLowerCase().includes(busqueda) ||
-        (p.external_patient_id || '').toLowerCase().includes(busqueda) ||
-        (p.identificacion || '').toLowerCase().includes(busqueda)
-      );
-    },
-
     seleccionarPaciente(paciente) {
-      this.$emit("select-patient", paciente.id_paciente);
+      this.$emit("select-patient", paciente ? (paciente.id ?? paciente.id_paciente) : null);
     },
 
     cambiarPaciente() {
@@ -369,8 +326,6 @@ export default {
       }
 
       this.pacienteSeleccionado = paciente;
-      this.busquedaPaciente = "";
-      this.pacientesFiltrados = [];
 
       if (!this.selectedCaseId) {
         if (this.casoSeleccionado) {

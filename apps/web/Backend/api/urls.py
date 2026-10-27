@@ -1,3 +1,4 @@
+from .record_management import RecordManagementView, SeriesOptionsView, AssignSeriesView
 from .admin_audit import AuditEventViewSet, AuditOptionsView, ArchivedView, OperationalHealthView
 from .lifecycle_views import LifecycleView
 from .auth_views import AuthContext, LoginView, LogoutView, PasswordView, UserViewSet, InstitutionViewSet, PrivateMediaView
@@ -47,6 +48,9 @@ router.register(
 )
 
 urlpatterns = [
+    path('record-management/series/', SeriesOptionsView.as_view()),
+    path('record-management/series/<str:operation>/', AssignSeriesView.as_view()),
+    path('record-management/<str:resource>/', RecordManagementView.as_view()),
     path('admin-audit/options/', AuditOptionsView.as_view()),
     path('admin-audit/archived/', ArchivedView.as_view()),
     path('admin-audit/health/', OperationalHealthView.as_view()),

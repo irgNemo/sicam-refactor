@@ -198,7 +198,7 @@ const element = (html, tag, id) => html.match(new RegExp(`<${tag}[^>]*id="${id}"
 test('presentation: three freely accessible sections and one current navigation button', async () => {
   for (const [section, title, label] of [['paciente', 'Nuevo paciente', 'Paciente'], ['caso', 'Nuevo caso', 'Caso'], ['imagenes', 'Agregar imágenes', 'Imágenes']]) {
     const html = await render({ vistaActiva: section });
-    const nav = html.match(/<nav[\s\S]*?<\/nav>/)[0];
+    const nav = html.match(/<nav[^>]*aria-label="Secciones de Registro"[\s\S]*?<\/nav>/)[0];
     for (const text of ['Paciente', 'Caso', 'Imágenes']) assert.ok(nav.includes(text));
     assert.equal((nav.match(/aria-current="page"/g) || []).length, 1);
     assert.match(nav, new RegExp(`aria-current="page"[^>]*>${label}</button>`));

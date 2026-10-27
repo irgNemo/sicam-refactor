@@ -10,6 +10,14 @@ export function patientInitials(patient) {
   return ((patient.nombre || '').charAt(0) + (patient.apellido || '').charAt(0)).toUpperCase();
 }
 
+// Minimal operational identity. Never derive unique identity from initials.
+export const patientIdentityLabel = patient => patient?.initials || patient?.identificacion || '';
+export const patientIdentityMode = patient => ({ PSEUDONYMIZED: 'Pseudonimizado', IDENTIFIED: 'Identificado' }[patient?.identity_mode] || '');
+export function patientIdentityContext(patient) {
+  if (!patient) return '';
+  return [...new Set([patientIdentityLabel(patient), patient.identificacion].filter(Boolean))].join(' · ');
+}
+
 // Registration needs the external authority to distinguish equal initials,
 // while other screens retain their existing compact display name.
 export function patientRegistrationLabel(patient) {

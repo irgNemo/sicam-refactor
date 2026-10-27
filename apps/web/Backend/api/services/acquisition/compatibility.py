@@ -6,7 +6,7 @@ from PIL import Image, UnidentifiedImageError
 from api.models import AcquisitionSeries, Calibration
 
 
-def physical_compatibility(sample):
+def physical_compatibility(sample, *, series=None, patient_id=None):
     result = {
         'compatible_for_physical_units': False,
         'status': None,
@@ -25,8 +25,11 @@ def physical_compatibility(sample):
 
     if not sample.acquisition_series_id:
         return finish('NO_ACQUISITION_SERIES')
-    # Read fresh metadata: retirement or patient changes must not use relation caches.
-    series = AcquisitionSeries.objects.select_related('acquisition_profile', 'calibration').get(pk=sample.acquisition_series_id)
+    # Default callers refresh metadata. Paginated read-only lists may supply
+    # context fetched in this request to avoid repeated metadata queries.
+    # Assignment preview/commit deliberately retain the fresh default path.
+    if series is None:
+        series = AcquisitionSeries.objects.select_related('acquisition_profile', 'calibration').get(pk=sample.acquisition_series_id)
     profile, calibration = series.acquisition_profile, series.calibration
     result['profile'] = {
         'id': profile.pk, 'name': profile.name,
@@ -34,7 +37,8 @@ def physical_compatibility(sample):
         'image_mode': profile.image_mode,
     }
     from api.models import AnalisisPred
-    patient_id = AnalisisPred.objects.values_list('id_paciente_fk_id', flat=True).get(pk=sample.analisis_id)
+    if patient_id is None:
+        patient_id = AnalisisPred.objects.values_list('id_paciente_fk_id', flat=True).get(pk=sample.analisis_id)
     if patient_id != series.patient_id:
         return finish('PATIENT_MISMATCH')
     if calibration is None:

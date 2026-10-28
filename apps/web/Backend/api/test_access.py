@@ -288,6 +288,58 @@ class SessionTests(TestCase):
         self.user.is_active=False;self.user.save();self.assertEqual(self.login().status_code,403)
         self.user.is_active=True;self.user.save();self.tenant.active=False;self.tenant.save();self.assertEqual(self.login().status_code,403)
 
+    def test_persistent_session_logout_replay_and_relogin_for_all_roles(self):
+        from django.contrib.sessions.models import Session
+        for role in ('ADMIN', 'OPERATOR', 'REVIEWER'):
+            self.profile.role=role;self.profile.must_change_password=False;self.profile.save()
+            self.client=APIClient(enforce_csrf_checks=True)
+            self.assertIsNone(self.client.get('/api/auth/me/').data['user'])
+            response=self.login();self.assertEqual(response.status_code,200)
+            session_key=self.client.cookies['sessionid'].value
+            cookie=response.cookies['sessionid']
+            self.assertEqual(cookie['domain'],'');self.assertEqual(cookie['path'],'/')
+            self.assertEqual(cookie['samesite'],'Lax');self.assertTrue(cookie['httponly'])
+            self.assertGreater(int(cookie['max-age']),0)
+            # A fresh client represents refresh/reopen with an existing browser cookie.
+            reopened=APIClient(enforce_csrf_checks=True)
+            reopened.cookies.update(self.client.cookies)
+            context=reopened.get('/api/auth/me/')
+            self.assertEqual(context.data['user']['role'],role)
+            logged_out=reopened.post('/api/auth/logout/',{},format='json',HTTP_X_CSRFTOKEN=context.data['csrf_token'])
+            self.assertEqual(logged_out.status_code,200)
+            self.assertEqual(logged_out.cookies['sessionid']['max-age'],0)
+            self.assertFalse(Session.objects.filter(session_key=session_key).exists())
+            self.assertIsNone(reopened.get('/api/auth/me/').data['user'])
+            reopened.cookies['sessionid']=session_key
+            self.assertIsNone(reopened.get('/api/auth/me/').data['user'])
+            self.assertEqual(reopened.get('/api/pacientes/').status_code,403)
+            self.client=reopened
+            self.assertEqual(self.login().status_code,200)
+
+    @override_settings(DEBUG=True, ALLOWED_HOSTS=['127.0.0.1','localhost'],
+        CSRF_TRUSTED_ORIGINS=['http://127.0.0.1:5173','http://localhost:5173'],
+        CORS_ALLOWED_ORIGINS=['http://127.0.0.1:5173','http://localhost:5173'])
+    def test_trusted_origin_does_not_replace_required_csrf_cookie(self):
+        for host in ('127.0.0.1','localhost'):
+            self.client=APIClient(enforce_csrf_checks=True)
+            headers={'HTTP_HOST':'127.0.0.1:8000','HTTP_ORIGIN':f'http://{host}:5173','HTTP_REFERER':f'http://{host}:5173/'}
+            context=self.client.get('/api/auth/me/',**headers)
+            self.assertEqual(context['access-control-allow-origin'],headers['HTTP_ORIGIN'])
+            cookie=context.cookies['csrftoken']
+            self.assertEqual(cookie['domain'],'');self.assertEqual(cookie['samesite'],'Lax')
+            self.assertFalse(cookie['httponly']);self.assertEqual(cookie['path'],'/')
+            payload={'username':'synthetic','password':PASSWORD}
+            valid=self.client.post('/api/auth/login/',payload,format='json',HTTP_X_CSRFTOKEN=context.data['csrf_token'],**headers)
+            self.assertEqual(valid.status_code,200)
+            token=self.client.get('/api/auth/me/',**headers).data['csrf_token']
+            # Browser reproduction proves cross-site Lax cookies are withheld.
+            self.client.cookies.clear()
+            with patch('api.auth_views.authenticate') as authenticate:
+                rejected=self.client.post('/api/auth/login/',payload,format='json',HTTP_X_CSRFTOKEN=token,**headers)
+            self.assertEqual(rejected.status_code,403)
+            self.assertIn('CSRF cookie not set',rejected.content.decode())
+            authenticate.assert_not_called()
+
     def test_session_csrf_patch_and_lifecycle_remain_tenant_scoped(self):
         self.profile.role = 'ADMIN'
         self.profile.must_change_password = False

@@ -84,3 +84,25 @@ test('logout preserves editor and registry unsaved-change guards',async()=>{
   await App.methods.requestLogout.call({confirmPendingDraftNavigation:()=>true,$refs:{registro:{confirmLeave:()=>false}}});assert.equal(requests,0);
   await App.methods.requestLogout.call({confirmPendingDraftNavigation:()=>true,$refs:{}});assert.equal(requests,1);
 });
+
+test('initial bootstrap accepts an existing server session and the gate also shows anonymous login',async()=>{
+ auth.ready=false;auth.user=null;let requests=0;
+ api.defaults.adapter=async config=>{requests++;assert.equal(config.url,'/api/auth/me/');return ok(config,{user:user(),csrf_token:'session-token'});};
+ await service.initializeSession();assert.equal(auth.ready,true);assert.equal(auth.user.id,1);assert.equal(requests,1);
+ const {default:Gate}=await server.ssrLoadModule('/src/AuthGate.vue');
+ let html=await renderToString(createSSRApp(Gate));assert.doesNotMatch(html,/Iniciar sesión/);assert.match(html,/Cerrar sesión/);
+ api.defaults.adapter=async config=>ok(config,{user:null,csrf_token:'anonymous'});
+ await service.refreshSession();html=await renderToString(createSSRApp(Gate));assert.match(html,/Iniciar sesión/);assert.doesNotMatch(html,/Cerrar sesión/);
+});
+test('logout refresh and re-login use server state instead of cached UI identity',async()=>{
+ let active=true;
+ api.defaults.adapter=async config=>{
+  assert.equal(config.withCredentials,true);
+  if(config.url.endsWith('/logout/'))active=false;
+  if(config.url.endsWith('/login/'))active=true;
+  return ok(config,{user:active?user():null,csrf_token:active?'active':'anonymous'});
+ };
+ await service.logout();await service.refreshSession();assert.equal(auth.user,null);
+ await service.login('synthetic','synthetic-test-only');assert.equal(auth.user.id,1);
+ await service.refreshSession();assert.equal(auth.user.id,1);
+});

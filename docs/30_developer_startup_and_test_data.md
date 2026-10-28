@@ -307,3 +307,185 @@ No dejar inferencias o servidores huérfanos. Mantener fuera de Git `.env`,
 SQLite, `media/`, modelos, cachés, `node_modules/`, `dist/` e imágenes reales.
 Actualizar este manual si cambian ambientes, puertos, entrypoints o comandos;
 las instalaciones completas corresponden a la guía WSL.
+
+## Login local: host canónico, cookies y persistencia de sesión
+
+Revisión del 28/10/2026, rama `master`, HEAD inicial
+`ae75308f9f617c7278d8eb7a43ba95a612e92598`. El árbol inicial estaba **limpio**:
+18U-B/B.1 ya estaba incorporado en ese commit. Ningún archivo de autenticación
+estaba modificado y no se alteró Dataset Builder durante esta revisión.
+
+### Causa comprobada y corrección mínima
+
+El frontend configura `VITE_API_BASE_URL=http://127.0.0.1:8000` tanto en `.env`
+local como en `.env.example`; Axios usa URL absoluta, `withCredentials: true`,
+`withXSRFToken: true` y header `X-CSRFToken`. No hay proxy Vite.
+Ambos orígenes están permitidos por CORS y CSRF en desarrollo. Sin embargo,
+`http://localhost:5173` → `http://127.0.0.1:8000` cruza **sitios** distintos.
+Una cookie `SameSite=Lax` no se envía en esas llamadas fetch/XHR, incluso con
+credenciales habilitadas. CORS y trusted origins no sustituyen la cookie CSRF.
+Referencia: [MDN — credenciales y SameSite](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch#including_credentials).
+
+Se reprodujo en Chrome instalado, con perfiles temporales separados y backend
+Django aislado en `127.0.0.1:18001`, SQLite sintético en `/tmp` y un usuario de
+prueba. Se conservaron las mismas políticas de cookies, CORS y CSRF del proceso
+activo (`DEBUG=True`). No se probaron contraseñas reales ni se crearon sesiones
+reales para el experimento. El puerto alternativo evita tocar la base real;
+no cambia la relación de sitios de las peticiones.
+
+| Entrada frontend antes del arreglo | Origin / Referer | API Host de la réplica | Sec-Fetch-Site | Login POST |
+|---|---|---|---|---|
+| `http://127.0.0.1:5173/` | `http://127.0.0.1:5173` / mismo origen con `/` | `127.0.0.1:18001` | `same-site` | 200, usuario autenticado |
+| `http://localhost:5173/` | `http://localhost:5173` / mismo origen con `/` | `127.0.0.1:18001` | `cross-site` | 403, `CSRF cookie not set` |
+
+En ambos casos, `/api/auth/me/` devolvió 200 y token CSRF en el cuerpo, y el
+preflight/CORS permitió la petición. Desde localhost el POST llevaba
+`X-CSRFToken` pero **ninguna cookie**. No era un 401, rechazo de contraseña,
+fallo de red ni fallo de CORS. Una prueba backend confirma que ese rechazo
+ocurre antes de llamar a `authenticate`.
+
+La réplica con `DEBUG=False` y cookies Secure reprodujo la misma diferencia en
+Chrome; no es necesario cambiar Secure para resolver el cruce de sitios.
+Se contrastó el backend real sólo mediante GET anónimo a
+`http://127.0.0.1:8000/api/auth/me/`, con ambos Origin: 200, CORS explícito y
+cookie CSRF. No se leyó el perfil personal del navegador ni se afirma conocer
+la cookie concreta de la sesión previamente observada por Israel.
+
+La corrección está en `Frontend/dev/canonicalOrigin.mjs` y `vite.config.js`:
+Vite de desarrollo responde **307 temporal, Cache-Control: no-store** a GET/HEAD
+entrantes por localhost cuando la API HTTP configurada usa `127.0.0.1`.
+El destino usa `127.0.0.1`, conserva puerto, ruta y query del frontend. No
+redirige POST ni transporta credenciales enviadas. No aplica a producción,
+HTTPS ni configuraciones de API remota/relativa. Tras el arreglo se verificó:
+
+- `http://localhost:5173/` → 307 → `http://127.0.0.1:5173/` → 200.
+- Chrome entrando por localhost terminó en el origen canónico y completó
+  login, `/me` autenticado, logout, `/me` anónimo y segundo login/logout.
+- Se mantiene el acceso directo normal por `127.0.0.1:5173`.
+
+Se evaluó usar `/api` relativo con proxy Vite. Requeriría cambiar el contrato de
+URL absoluta compartido por otros consumidores y la entrega de medios; no hace
+falta para este problema. Se conserva la arquitectura y se establece **un solo
+host canónico**. Localhost funciona como entrada redirigida, no como una segunda
+sesión que comparta cookies por alias.
+
+### Contrato de cookies y autenticación
+
+| Propiedad | `sessionid` | `csrftoken` |
+|---|---|---|
+| Domain | ausente, host-only `127.0.0.1` | ausente, host-only `127.0.0.1` |
+| Path | `/` | `/` |
+| SameSite | `Lax` | `Lax` |
+| HttpOnly | sí | no |
+| Secure del proceso de desarrollo activo (`DEBUG=True`) | no | no |
+| Persistencia observada | 1 209 600 s (14 días) | 31 449 600 s |
+
+Los puertos no separan cookies del mismo host. Localhost e IP son hosts/sitios
+diferentes; sus cookies no se convierten en compartidas por autorizar CORS.
+No se amplió Domain, no se usó SameSite=None, no se desactivó CSRF ni se cambió
+ninguna política backend/producción. Producción continúa exigiendo sus cookies
+Secure, HTTPS y orígenes explícitos.
+
+El servidor activo se inició con `DEBUG=True` heredado; una shell sin esa
+variable carga actualmente `DEBUG=False` y por política habilita cookies Secure.
+Para una reproducción inequívoca de desarrollo HTTP, declarar explícitamente
+el ambiente de desarrollo y DEBUG **en esa terminal**, como abajo. No cambiar
+variables del despliegue de producción para este propósito.
+
+`AuthGate` inicializa la sesión mediante `/api/auth/me/`. Una sesión válida
+persistente hace que devuelva usuario y se abra la aplicación sin pedir otra
+vez credenciales. Reiniciar Vite/Django no borra cookies ni sesiones SQLite.
+`SESSION_EXPIRE_AT_BROWSER_CLOSE=False`, edad de sesión 14 días y
+`SESSION_SAVE_EVERY_REQUEST=False`: no es una autenticación accidental.
+Sin sesión válida, `/me` devuelve **200 con `user: null`**, no 401; AuthGate
+muestra login. Los recursos protegidos devuelven 403 sin acceso operativo.
+
+No se restaura autenticación desde localStorage/sessionStorage. Allí sólo se
+conserva contexto de UI e identificador de contexto; el usuario y token CSRF
+se toman del servidor. Logout ejecuta `django.contrib.auth.logout`, elimina la
+sesión del servidor, expira `sessionid` y limpia usuario/contexto frontend.
+Reutilizar la cookie anterior no restaura acceso. El siguiente login vuelve a
+adquirir CSRF y funciona. Pruebas con ADMIN, OPERATOR y REVIEWER verifican
+reapertura con cookie vigente, logout, replay rechazado y re-login. Usuarios e
+instituciones inactivos y peticiones sin CSRF siguen rechazados.
+
+### Reproducción manual para Israel
+
+1. Detener Django y Vite de sus terminales con Ctrl+C. No es necesario iniciar
+   los servicios de segmentación para probar autenticación.
+2. Iniciar Django en una terminal:
+
+   ```bash
+   cd ~/repos/sicam-refactor/apps/web/Backend
+   conda activate sicam
+   export DJANGO_ENV=development DJANGO_DEBUG=True
+   python manage.py runserver 127.0.0.1:8000
+   ```
+
+3. Iniciar Vite en otra terminal, conservando
+   `VITE_API_BASE_URL=http://127.0.0.1:8000` en su `.env`:
+
+   ```bash
+   cd ~/repos/sicam-refactor/apps/web/Frontend
+   nvm use 24.17.0
+   npm run dev -- --host 127.0.0.1 --port 5173
+   ```
+
+4. Abrir **http://127.0.0.1:5173/**. Con cookie de sesión vigente, se espera
+   entrada directa; sin ella, se espera login. Puede compararse con una ventana
+   privada para obtener un contexto sin cookies previas.
+5. Cerrar sesión. Verificar pantalla de login y `/api/auth/me/` con
+   `user: null`; `sessionid` debe expirar.
+6. Entrar con credenciales existentes. Verificar login POST 200 y `/me` con
+   usuario. No imprimir ni compartir contraseña, cookies ni tokens.
+7. Refrescar: debe persistir la sesión. Cerrar sesión otra vez y refrescar o
+   volver atrás: ninguna petición protegida debe recuperar acceso sin login.
+8. Abrir **http://localhost:5173/**: debe cambiar a **127.0.0.1:5173** antes
+   de cargar la aplicación. Repetir login/logout en ese destino. Reiniciar
+   Vite si aún no recoge la configuración actualizada.
+9. En DevTools comparar URL, Origin, Referer y cookies enviadas. API real:
+   `http://127.0.0.1:8000/api/auth/{me,login,logout}/`. Con host canónico, las
+   llamadas son cross-origin por puerto, pero same-site por esquema/host.
+
+La revisión no ejecuta segmentación, Characterization ni generación de datasets.
+El HTML temporal de diagnóstico y sus servidores aislados se retiraron al
+terminar; los servidores de trabajo del usuario permanecen activos.
+
+### Validación final de la revisión de autenticación
+
+- Backend dirigido: **6 passed** (`api/test_access.py::SessionTests`).
+- Frontend dirigido: **17 passed** (14 auth + 3 host canónico).
+- Backend completo una vez: **491 passed, 2 skipped**, cero fallos;
+  36 avisos existentes de deprecación Django. No cambió código backend de
+  ejecución; se amplió su cobertura de regresión de sesiones/CSRF.
+- Frontend completo una vez: **226 passed**, cero fallos, ejecutando cada uno
+  de los 11 archivos de tests en proceso separado con
+  `node --test --test-isolation=none tests/<archivo>.test.mjs`.
+- `npm run build` una vez: PASS; mismos hashes de assets de aplicación que
+  antes, dado que el arreglo está en el servidor de desarrollo.
+- `manage.py check`: sin incidencias; `makemigrations --check --dry-run`:
+  sin cambios; `pip check`: sin dependencias rotas (sólo aviso de caché no
+  escribible). No hay migración ni dependencias nuevas.
+- Comparación de hashes antes/después de todas las filas de cada tabla real:
+  idénticas; `integrity_check = ok`, `foreign_key_check = []`.
+  LifecycleEvents **53 → 53**, Characterization **27 → 27**, incluida la 24;
+  tablas Dataset/Patient/Sample **2/9/36 → 2/9/36**. Calibraciones y los **95**
+  nombres/hashes de media idénticos. No se restableció ninguna contraseña.
+- Archivos de este arreglo: `Backend/api/test_access.py`,
+  `Frontend/vite.config.js`, `Frontend/dev/canonicalOrigin.mjs`,
+  `Frontend/tests/auth.test.mjs`, `Frontend/tests/devOrigin.test.mjs` y este
+  documento, bajo `apps/web` salvo el documento. Todos los archivos de
+  Dataset Builder y docs/93 se conservan sin cambios.
+- `git diff --check`: PASS; `git status --short`: cuatro modificados y dos
+  entradas nuevas (directorio `dev/` y test). Sin staging, commit ni push.
+
+Evidencia local temporal: `/tmp/sicam_auth_debug_ip.html`,
+`/tmp/sicam_auth_debug_localhost.html`, `/tmp/sicam_auth_fixed_localhost.html`,
+`/tmp/sicam_auth_network_debug.log`, `/tmp/sicam_auth_targeted_backend.log`,
+`/tmp/sicam_auth_targeted_frontend.log`, `/tmp/sicam_auth_full_backend.log`,
+`/tmp/sicam_auth_full_frontend.log` y `/tmp/sicam_auth_build.log`. Las trazas
+resumen nombres/atributos de cookies con valores censurados. La prueba del
+navegador confirma el transporte real de cookies, complementando los tests
+Django, cuyo cliente no aplica por sí mismo las restricciones SameSite.
+
+AUTH REVIEW = ROOT_CAUSE_FIXED

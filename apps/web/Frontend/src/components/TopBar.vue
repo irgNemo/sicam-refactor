@@ -35,6 +35,7 @@
       <button class="nav-btn" :class="{ active: seccion === 'adquisicion' }" @click="$emit('change-section', 'adquisicion')">
         <span class="nav-icon">🔬</span> Adquisición
       </button>
+      <button class="nav-btn" :class="{ active: seccion === 'datasets' }" @click="$emit('change-section', 'datasets')">Conjuntos de datos</button>
       <button v-if="can('administer')" class="nav-btn" :class="{ active: seccion === 'administracion' }" @click="$emit('change-section', 'administracion')">Administración</button>
     </div>
     <div v-if="auth.user" class="session-context"><small>{{ auth.user.first_name || auth.user.username }} · {{ auth.user.institution?.code || 'Plataforma' }} · {{ auth.user.is_superuser ? 'Superuser' : auth.user.role }}</small><button class="nav-btn" @click="$emit('logout')">Cerrar sesión</button></div>
@@ -59,7 +60,8 @@ export default {
 
 <style scoped>
 .topbar {
-  height: 60px;
+  min-height: 60px;
+  flex-wrap: wrap;
   background: linear-gradient(to right, #ffffff 0%, #f8f9fa 100%);
   border-bottom: 2px solid #e0e0e0;
   display: flex;
@@ -95,6 +97,7 @@ export default {
 
 /* NAVEGACIÓN */
 .nav-buttons {
+  flex-wrap: wrap;
   display: flex;
   gap: 6px;
   flex: 1;

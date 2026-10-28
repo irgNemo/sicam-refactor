@@ -45,6 +45,7 @@
 
     <AdministrationView v-if="seccion === 'administracion' && can('administer')" ref="administracion" />
     <AdquisicionView v-if="seccion === 'adquisicion'" ref="adquisicion" />
+    <DatasetsView v-if="seccion === 'datasets'" ref="datasets" />
     <RegistroView v-if="seccion === 'registro'" ref="registro" />
   </div>
 </template>
@@ -56,13 +57,14 @@ import TopBar from "./components/TopBar.vue";
 import SideBar from "./components/SideBar.vue";
 import MainContent from "./components/MainContent.vue";
 import AdquisicionView from "./views/AdquisicionView.vue";
+import DatasetsView from "./views/DatasetsView.vue";
 import RegistroView from "./views/RegistroView.vue";
 import CaracterizacionView from "./views/CaracterizacionView.vue";
 import { SAMPLE_TYPES } from "./domain/segmentationTypes";
 
 const UI_CONTEXT_STORAGE_KEY = "sicam.uiContext.v1";
 const UI_CONTEXT_VERSION = 1;
-const VALID_SECTIONS = ["segmentacion", "caracterizacion", "registro", "adquisicion", "administracion"];
+const VALID_SECTIONS = ["segmentacion", "caracterizacion", "registro", "adquisicion", "administracion", "datasets"];
 const VALID_SAMPLE_TYPES = Object.values(SAMPLE_TYPES);
 
 function normalizeOptionalId(value) {
@@ -114,6 +116,7 @@ export default {
     SideBar,
     MainContent,
     RegistroView,
+    DatasetsView,
     AdquisicionView,
     CaracterizacionView,
   },
@@ -167,7 +170,7 @@ export default {
     can,
     async requestLogout() {
       if (!this.confirmPendingDraftNavigation()) return;
-      for (const ref of ['registro', 'adquisicion', 'administracion']) {
+      for (const ref of ['registro', 'adquisicion', 'administracion', 'datasets']) {
         if (this.$refs[ref]?.confirmLeave() === false) return;
       }
       try { await logout(); } catch { window.alert('No se pudo cerrar la sesión. Reintente.'); }
@@ -194,6 +197,7 @@ export default {
 
       if (this.seccion === "adquisicion" && this.$refs.adquisicion?.confirmLeave() === false) return;
       if (this.seccion === "administracion" && this.$refs.administracion?.confirmLeave() === false) return;
+      if (this.seccion === "datasets" && this.$refs.datasets?.confirmLeave() === false) return;
       this.seccion = nextSection;
     },
 

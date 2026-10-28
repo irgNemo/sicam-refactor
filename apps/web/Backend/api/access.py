@@ -6,6 +6,7 @@ from rest_framework import permissions, serializers
 
 ROLES = {'ADMIN', 'OPERATOR', 'REVIEWER'}
 WRITE_ROLES = {
+    'mldataset': {'ADMIN', 'OPERATOR'},
     'paciente': {'ADMIN', 'OPERATOR'}, 'caso': {'ADMIN', 'OPERATOR'},
     'analisispred': {'ADMIN', 'OPERATOR'}, 'muestrasaliva': {'ADMIN', 'OPERATOR'},
     'muestrasangre': {'ADMIN', 'OPERATOR'}, 'acquisitionseries': {'ADMIN', 'OPERATOR'},
@@ -14,6 +15,7 @@ WRITE_ROLES = {
     'user': {'ADMIN'}, 'institution': set(),
 }
 PATHS = {
+    'mldataset': 'institution_id',
     'institution': 'pk', 'sicamuserprofile': 'institution_id', 'user': 'sicam_profile__institution_id',
     'paciente': 'institution_id', 'caso': 'paciente__institution_id',
     'analisispred': 'id_paciente_fk__institution_id',

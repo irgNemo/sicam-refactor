@@ -478,3 +478,6 @@ class ImageJImportRecord(models.Model):
 
     class Meta:
         constraints = [models.CheckConstraint(check=models.Q(case_number=1, status='READY') & ~models.Q(source_mask_file=''), name='imagej_record_ready')]
+
+# Imported after scientific models; FKs use lazy model names.
+from .dataset_models import MLDataset, MLDatasetPatient, MLDatasetSample

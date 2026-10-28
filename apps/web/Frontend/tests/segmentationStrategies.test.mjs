@@ -740,10 +740,10 @@ test('18Q-B real navigation retains pending-edit guard and rejects removed secti
 });
 
 test('18Q-B TopBar shows only real sections; removed controls have no orphan handlers', async () => {
-  for (const seccion of ['segmentacion', 'caracterizacion', 'registro', 'adquisicion']) {
+  for (const seccion of ['segmentacion', 'caracterizacion', 'registro', 'adquisicion', 'datasets']) {
     const html = await renderToString(createSSRApp(TopBar, { seccion }));
-    assert.equal((html.match(/<button/g) || []).length, 5); // Four sections + authenticated logout.
-    for (const title of ['Segmentación', 'Caracterización', 'Registro']) assert.ok(html.includes(title));
+    assert.equal((html.match(/<button/g) || []).length, 6); // Five sections + authenticated logout.
+    for (const title of ['Segmentación', 'Caracterización', 'Registro', 'Conjuntos de datos']) assert.ok(html.includes(title));
     for (const removed of ['Análisis', 'Notificaciones', 'Configuración', 'notification-dot', '🔔', '⚙']) assert.ok(!html.includes(removed));
   }
   assert.equal(SideBar.props.showAnalysisButton, undefined);

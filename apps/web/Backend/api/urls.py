@@ -1,3 +1,4 @@
+from .dataset_views import DatasetViewSet
 from .record_management import RecordManagementView, SeriesOptionsView, AssignSeriesView
 from .admin_audit import AuditEventViewSet, AuditOptionsView, ArchivedView, OperationalHealthView
 from .lifecycle_views import LifecycleView
@@ -20,6 +21,7 @@ from .acquisition_views import (
 )
 
 router = DefaultRouter()
+router.register('datasets', DatasetViewSet, basename='dataset')
 router.register('admin-audit/events', AuditEventViewSet, basename='audit-event')
 router.register('users', UserViewSet, basename='sicam-user')
 router.register('institutions', InstitutionViewSet, basename='institution')

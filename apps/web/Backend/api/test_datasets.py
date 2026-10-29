@@ -89,6 +89,8 @@ class DatasetTests(TestCase):
         self.c1.resultado_json['physical_units_available']=False;self.c1.save()
         d=self.create({**self.data,'units_mode':'BOTH'});p=self.preview(d).data
         self.assertEqual(p['summary']['rows'],3);self.assertEqual(p['summary']['exclusion_counts']['NO_PHYSICAL_VALUES'],1)
+        self.assertEqual(self.generate(d).status_code,400)  # Only Class B remains effective.
+        self.sample(self.p1,[0])
         generated=self.generate(d);self.assertEqual(generated.status_code,200);self.assertIn('provisional',generated.data['manifest']['provisional_warning'])
 
     def test_versions_are_exact_and_21_physical_rejected(self):
@@ -260,4 +262,91 @@ class DatasetTests(TestCase):
         self.assertEqual(self.preview(d).status_code,200)
         self.assertEqual(self.client.get(f"/api/datasets/{obj.pk}/download/manifest/").json(),historical_manifest)
         self.assertEqual(self.client.post(f"/api/datasets/{obj.pk}/generate/",{'confirm':True,'version':obj.version},format='json').status_code,409)
+        obj.refresh_from_db();self.assertEqual(obj.snapshot,old);self.assertEqual(obj.manifest,historical_manifest)
+
+    def test_two_effective_classes_and_unused_defined_class_metadata(self):
+        d=self.create({**self.data,'classes':['Class A','Class B','Unused']})
+        p=self.preview(d).data['summary']
+        self.assertEqual([p[k] for k in ('defined_class_count','effective_class_count','empty_class_count')],[3,2,1])
+        self.assertEqual(p['class_counts']['Unused']['selected_patients'],0)
+        self.assertEqual(p['class_counts']['Unused']['included_patients'],0)
+        self.assertEqual(p['class_counts']['Unused']['row_count'],0)
+        generated=self.generate(d);self.assertEqual(generated.status_code,200)
+        self.assertEqual(generated.data['manifest']['empty_class_count'],1)
+        self.assertEqual(generated.data['manifest']['effective_class_count'],2)
+        self.assertEqual(generated.data['manifest']['defined_class_count'],3)
+
+    def test_empty_selected_class_blocks_generation_with_distribution_and_rollback(self):
+        self.c2.delete();d=self.create();summary=self.preview(d).data['summary']
+        self.assertEqual(summary['effective_class_count'],1)
+        self.assertEqual(summary['empty_class_count'],1)
+        self.assertEqual(summary['class_counts']['Class B']['selected_patients'],1)
+        response=self.generate(d);self.assertEqual(response.status_code,400)
+        self.assertIn('dos clases con datos elegibles',str(response.data))
+        self.assertIn('Class A: 2 filas',str(response.data));self.assertIn('Class B: 0 filas',str(response.data))
+        obj=MLDataset.objects.get(pk=d['id'])
+        self.assertEqual(obj.status,'DRAFT');self.assertEqual(obj.version,1)
+        self.assertEqual(obj.samples.count(),0);self.assertEqual(obj.patients.count(),2)
+
+    def test_single_defined_class_blocks_even_with_rows(self):
+        data=copy.deepcopy(self.data);data['classes']=['Only']
+        for p in data['patients']:p['class_label']='Only'
+        d=self.create(data);p=self.preview(d).data
+        self.assertEqual(p['summary']['rows'],5)
+        self.assertEqual(p['summary']['defined_class_count'],1)
+        self.assertEqual(p['summary']['effective_class_count'],1)
+        response=self.generate(d);self.assertEqual(response.status_code,400)
+        self.assertIn('al menos dos clases definidas',str(response.data))
+
+    def test_generation_rechecks_class_eligibility_after_preview(self):
+        d=self.create();before=self.preview(d).data
+        self.c2.delete()
+        response=self.client.post(f"/api/datasets/{d['id']}/generate/",{'confirm':True,'version':before['version'],'preview_hash':before['preview_hash']},format='json')
+        self.assertEqual(response.status_code,409)
+        self.assertEqual(self.generate(d).status_code,400)
+        obj=MLDataset.objects.get(pk=d['id']);self.assertEqual(obj.version,1);self.assertEqual(obj.status,'DRAFT')
+
+    def test_filter_effective_sources_validated_automatic_manual_and_draft_only(self):
+        sample,base,char=self.sample(self.p1,[0],validated=False)
+        # AUTOMATICO is effective without being VALIDADA.
+        strict=self.create();relaxed=self.create({**self.data,'validated_only':False})
+        self.assertEqual(self.preview(strict).data['summary']['exclusion_counts'],{'SEGMENTATION_NOT_VALIDATED':1})
+        self.assertEqual(self.preview(relaxed).data['summary']['rows'],6)
+        # A draft must not replace the persisted automatic base.
+        RevisionSegmentacion.objects.create(resultado_segmentacion=base,numero_revision=1,estado='BORRADOR',resultado_editado={'objects':[]},resumen={})
+        self.assertEqual(self.preview(relaxed).data['summary']['rows'],6)
+        # No base and only a draft is not an effective result.
+        base.resultado_normalizado=None;base.save()
+        self.assertEqual(self.preview(relaxed).data['summary']['exclusion_counts'],{'NO_EFFECTIVE_SEGMENTATION':1})
+        # A manual base is effective too, but this workflow has no saved
+        # characterization until manual annotation has been validated.
+        char.delete();base.base_origin='MANUAL';base.segmentation_strategy=None
+        base.resultado_normalizado={'objects':[{'id':1}]};base.save()
+        relaxed_preview=self.preview(relaxed).data
+        self.assertEqual(relaxed_preview['summary']['exclusion_counts'],{'NO_CHARACTERIZATION':1})
+        self.assertEqual(self.preview(strict).data['summary']['exclusion_counts'],{'SEGMENTATION_NOT_VALIDATED':1})
+        # An absent result is distinctly NO_EFFECTIVE_SEGMENTATION as well.
+        base.revisiones.all().delete();base.delete()
+        self.assertEqual(self.preview(relaxed).data['summary']['exclusion_counts'],{'NO_EFFECTIVE_SEGMENTATION':1})
+
+    def test_validated_effective_snapshot_does_not_require_unused_base(self):
+        self.r1.resultado_normalizado=None;self.r1.save()
+        d=self.create();self.assertEqual(self.preview(d).data['summary']['rows'],5)
+        self.assertEqual(self.generate(d).status_code,200)
+
+    def test_historical_one_effective_class_remains_readable_and_immutable(self):
+        d=self.create();self.assertEqual(self.generate(d).status_code,200)
+        obj=MLDataset.objects.get(pk=d['id']);old=copy.deepcopy(obj.snapshot)
+        old['rows']=[r for r in old['rows'] if r[4]=='Class A']
+        for patient in old['patients']:
+            if patient['Clase']=='Class B':patient['rows']=0;patient['samples']=0
+        old['summary']['class_counts']['Class B'].update(rows=0,row_count=0,included_patients=0,samples=0)
+        for key in ('defined_class_count','effective_class_count','empty_class_count'):old['summary'].pop(key)
+        historical_manifest={'content_hash':obj.content_hash,'patients':2}
+        MLDataset.objects.filter(pk=obj.pk).update(snapshot=old,manifest=historical_manifest)
+        before=self.client.get(f"/api/datasets/{obj.pk}/download/csv/").content
+        self.assertEqual(self.preview(d).status_code,200)
+        self.assertEqual(self.client.get(f"/api/datasets/{obj.pk}/").status_code,200)
+        self.assertEqual(self.client.post(f"/api/datasets/{obj.pk}/generate/",{'confirm':True,'version':2},format='json').status_code,409)
+        self.assertEqual(self.client.get(f"/api/datasets/{obj.pk}/download/csv/").content,before)
         obj.refresh_from_db();self.assertEqual(obj.snapshot,old);self.assertEqual(obj.manifest,historical_manifest)

@@ -18,7 +18,7 @@ from .access import OperationalPermission, scoped
 from .models import MLDataset, MLDatasetPatient, MLDatasetSample, Paciente, Institution
 from .patient_lookup import patient_identity
 from .services.datasets.features import FEATURES, UNAVAILABLE, SPLIT_WARNING
-from .services.datasets.builder import build_snapshot, manifest
+from .services.datasets.builder import build_snapshot, manifest, validate_effective_classes
 from .services.datasets.classes import validate_assignments
 from .services.lifecycle import conflict
 
@@ -180,6 +180,7 @@ class DatasetViewSet(viewsets.GenericViewSet):
         if not Institution.objects.filter(pk=obj.institution_id,active=True).exists():raise ValidationError('Institución inactiva.')
         snapshot,key=build_snapshot(obj)
         if request.data.get('preview_hash')!=key:conflict('PREVIEW_CHANGED',detail='Los datos cambiaron. Obtenga una nueva vista previa.')
+        validate_effective_classes(snapshot['summary'])
         if not snapshot['rows']:raise ValidationError('No quedan filas exportables.')
         now=timezone.now();obj.snapshot=snapshot;obj.manifest=manifest(obj,snapshot,key,now)
         obj.content_hash=key;obj.generated_at=now;obj.status='GENERATED'

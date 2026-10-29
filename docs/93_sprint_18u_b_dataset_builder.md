@@ -517,3 +517,169 @@ confirmando la advertencia; después revisar CSV/XLSX/manifiesto. Mantener
 ejecuta automáticamente en este sprint.
 
 SPRINT 18U-B.1 = READY_FOR_FINAL_DATASET_ACCEPTANCE
+
+## 18U-B.2 — EFFECTIVE CLASS VALIDATION AND EXCLUSION SEMANTICS
+
+Refinamiento del 28/10/2026 sobre `master`, HEAD inicial
+`e10fb7dd1ba4f78cf780964853f5c8b68d2c249f`. El árbol inicial estaba **limpio**:
+B/B.1 y la corrección de autenticación ya estaban en los commits anteriores.
+Se preservan esas implementaciones; no se toca ningún archivo de autenticación.
+Sin commit ni push durante B.2.
+
+### Clases definidas y efectivas
+
+La aceptación manual encontró `Prueba 3` con dos clases definidas, pero sólo
+una representada: Clase A, 3 seleccionados / 2 incluidos / 38 filas; Clase B,
+3 seleccionados / 0 incluidos / 0 filas. El aviso individual por pacientes sin
+filas no impedía generar un conjunto con una sola clase efectiva.
+
+**Clase efectiva**: al menos un paciente incluido **y** una fila exportada,
+tras todos los filtros. Se inicializa el balance con **todo** el catálogo del
+borrador, incluso clases todavía sin pacientes asignados. Preview/snapshot y
+manifiestos futuros incluyen `defined_class_count`, `effective_class_count`,
+`empty_class_count`, además de los conteos por clase y paciente de B.1.
+
+La generación supervisada actual exige al menos **dos clases definidas y dos
+efectivas**. Una sola clase definida se bloquea aunque tenga filas. Dos definidas
+con sólo una efectiva también se bloquean. Tres definidas con dos efectivas y
+una vacía pueden generar: la clase vacía permanece visible y documentada.
+No se eliminan clases ni pacientes silenciosamente.
+
+Una clase vacía es una advertencia fuerte en una tabla de preview con clase,
+pacientes seleccionados, pacientes incluidos, filas y estado `OK` / `SIN DATOS
+ELEGIBLES`. Se muestran los tres nuevos contadores. Si faltan clases efectivas,
+se desactiva Generar y se explica por qué. El backend es la autoridad: dentro de
+la transacción de generación reconstruye las fuentes/conteos, compara el hash
+de preview y valida las clases antes de persistir. Una preview obsoleta conserva
+el conflicto 409; un estado actual inválido devuelve 400 con mensaje claro y
+filas por clase. Cualquier fallo revierte versión, muestras y snapshot.
+
+Un **paciente** sin filas sigue siendo advertencia y permanece en la membresía,
+snapshot y hoja Pacientes. No bloquea si quedan al menos dos clases efectivas.
+`ML_ONE_CLASS_DATASET_SUPPORT = FUTURE`; no se añade modo one-class ni se inicia
+18U-C. Se conservan los pendientes previos, incluida normalización de distancia
+física GLCM, splits, entrenamiento y exportaciones futuras fuera de este sprint.
+
+### Auditoría de las tres exclusiones de segmentación (sólo lectura)
+
+Los mismos tres alias aparecen en `prueba2` y `Prueba 3`, ambos con
+`validated_only=false`. Se trazaron desde `snapshot.sources.sample_id` al
+resultado SALIVA más reciente y al resolver efectivo actual, sin ejecutar
+Characterization ni modificar fuentes:
+
+| Alias local | Muestra | Resultado | Base | Estado resultado | Revisión | Efectiva | Caracterizaciones |
+|---|---:|---:|---|---|---|---|---:|
+| P004_IMG003 | 56 | 20 | MANUAL presente | COMPLETADO | 20, nº 1, BORRADOR | MANUAL (base) | 0 |
+| P005_IMG002 | 58 | 22 | MANUAL presente | COMPLETADO | 21, nº 1, BORRADOR | MANUAL (base) | 0 |
+| P005_IMG006 | 62 | 26 | MANUAL presente | COMPLETADO | 25, nº 1, BORRADOR | MANUAL (base) | 0 |
+
+No tienen revisión VALIDADA ni base automática. El BORRADOR no es efectivo;
+lo es la base MANUAL. La condición anterior era:
+`fuente == MANUAL OR (validated_only AND fuente != VALIDADA)`.
+Por ello se aplicaba `SEGMENTATION_NOT_VALIDATED` a MANUAL incondicionalmente,
+aunque la política del dataset no exigiera VALIDADA. Era una condición incorrecta
+del filtro y una explicación engañosa, **sin filas recuperables en estos tres
+casos**, porque tampoco existen caracterizaciones guardadas.
+
+B.2 elimina esa exclusión incondicional. Con `validated_only=false` la base
+MANUAL pasa el filtro de segmentación y se evalúa la caracterización guardada;
+en los tres casos auditados la causa correcta para nuevas previews es
+`NO_CHARACTERIZATION`. No se inventan métricas ni se incorpora el BORRADOR.
+Characterization continúa exigiendo validar una anotación MANUAL antes de
+caracterizarla; su servicio y restricciones de fuentes no se modifican.
+
+### Semántica del filtro y códigos
+
+- `validated_only=true`: exige que la fuente efectiva provenga de una revisión
+  VALIDADA; una base AUTOMATICO o MANUAL efectiva produce
+  `SEGMENTATION_NOT_VALIDATED`.
+- `validated_only=false`: admite la fuente efectiva existente sin exigir esa
+  revisión; se siguen exigiendo caracterización persistida de versión/fuente
+  exactas, provenance y el resto de criterios científicos.
+- El resolver compartido conserva su contrato: última VALIDADA, o base
+  MANUAL/AUTOMATICO; BORRADOR nunca se convierte en efectiva.
+- Se comprueba el resultado **efectivo**, no la presencia de una base que una
+  VALIDADA ya sustituyó. Una VALIDADA con snapshot válido puede usarse aunque
+  la base no esté presente; sólo BORRADOR sin base da
+  `NO_EFFECTIVE_SEGMENTATION`.
+
+No se introduce un código nuevo. Definiciones de los códigos vigentes:
+
+| Código | Condición |
+|---|---|
+| ARCHIVED | Paciente, caso, análisis o muestra archivados. |
+| RELATIONSHIP_MISMATCH | La relación paciente/caso de la muestra es inconsistente. |
+| NO_EFFECTIVE_SEGMENTATION | No hay resultado COMPLETADO o el resolver no proporciona contenido efectivo. Incluye ausencia de resultado y BORRADOR sin base/VALIDADA. |
+| SEGMENTATION_NOT_VALIDATED | Sólo con `validated_only=true`: existe efectiva pero su fuente no es VALIDADA. Mensaje: «La política del conjunto exige una segmentación validada.». |
+| NO_CHARACTERIZATION | No hay caracterización persistida para ese resultado. |
+| CHARACTERIZATION_VERSION_MISMATCH | Hay caracterizaciones, pero ninguna de la versión solicitada. |
+| SOURCE_CHANGED | Hay versión exacta, pero no coincide fuente/revisión/hash efectivo con la caracterización. |
+| SOURCE_UNVERIFIABLE | Caracterización AUTOMATICO antigua sin hash efectivo persistido verificable. |
+| NO_PHYSICAL_VALUES | Faltan valores físicos requeridos; puede excluir una muestra completa o relaciones concretas. |
+| CALIBRATION_INCOMPATIBLE | Estado del snapshot físico fuera de COMPATIBLE / COMPATIBLE_PROVISIONAL. |
+| INVALID_CHARACTERIZATION | Versión/tipo JSON, estructura, relaciones o valores numéricos inválidos. |
+| NO_NUCLEI | La caracterización no aporta núcleos/relaciones exportables. |
+
+`NO_EFFECTIVE_SEGMENTATION` muestra «No existe una segmentación efectiva
+completa.». `NO_CHARACTERIZATION` mantiene «Sin caracterización guardada.».
+Estos mensajes se aplican a nuevas previews/snapshots. Los códigos y textos
+históricos permanecen exactamente como se generaron.
+
+### Preservación y pruebas
+
+Todos los GENERATED anteriores, incluido `Prueba 3` con una sola clase efectiva,
+siguen siendo legibles y descargables. No se valida retrospectivamente su
+aptitud ni se reescriben manifiestos, snapshots, filas, hashes o exclusiones.
+No cambia extracción de variables, cálculos, unidades, calibración, GLCM,
+asociaciones MN, IDs locales ni orden/valores/nulos de CSV/XLSX. El algoritmo de
+hash y los fingerprints permanecen intactos; los nuevos contadores de validación
+forman parte del snapshot de futuras generaciones.
+
+Archivos B.2: `Backend/api/dataset_views.py`,
+`Backend/api/services/datasets/builder.py`, `Backend/api/test_datasets.py`,
+`Frontend/src/views/DatasetsView.vue`, `Frontend/tests/datasets.test.mjs`
+(rutas relativas a `apps/web`) y este documento. Sin migración ni dependencias.
+
+Pruebas dirigidas: **25 backend passed**, **13 frontend passed**. Incluyen los
+casos de clases A–D solicitados; catálogo no asignado; un paciente sin filas con
+dos clases efectivas; rechazo/rollback y preview concurrente; históricos con una
+clase efectiva; VALIDADA, base AUTOMATICO con/sin política estricta, BORRADOR que
+no sustituye a la base, MANUAL sin caracterización, ausencia de resultado,
+BORRADOR sin base y VALIDADA sin base. La prueba existente CSV/XLSX verifica
+paridad científica y privacidad; no se modifica el escritor de exportaciones.
+
+### Resultado final B.2
+
+- Backend completo una vez: **498 passed, 2 skipped**, cero fallos; 36 avisos
+  previos de deprecación Django.
+- Frontend completo una vez: **229 passed**, cero fallos, sobre los 11 archivos
+  de tests, cada uno aislado con `node --test --test-isolation=none`.
+- `npm run build` una vez: PASS.
+- `manage.py check`: sin incidencias. `makemigrations --check --dry-run`: sin
+  cambios. `pip check`: sin dependencias rotas (aviso de caché no escribible).
+- Evaluación adicional de fuentes de `Prueba 3` **sólo en memoria**, sin guardar:
+  2 clases definidas / 1 efectiva / 1 vacía; las tres muestras auditadas producen
+  `NO_CHARACTERIZATION`; columnas y filas científicas idénticas a las históricas.
+  Esto no sustituye el snapshot generado ni sus motivos de exclusión originales.
+- SHA-256 antes/después de todas las filas de cada tabla real: sin cambios.
+  SQLite `integrity_check = ok`, `foreign_key_check = []`. LifecycleEvents
+  **53 → 53**, Dataset/Patient/Sample **3/15/60 → 3/15/60**, Characterization
+  **27 → 27**, incluida la 24; calibraciones intactas. Los **95 archivos media**
+  conservan nombres y hashes. Sin nueva generación real ni procesos científicos.
+- `git diff --check`: PASS; seis archivos modificados B.2, ninguno sin rastrear.
+  Sin staging, commit ni push. Código y configuración de autenticación intactos.
+
+Logs locales: `/tmp/sicam_b2_targeted_backend.log`,
+`/tmp/sicam_b2_targeted_frontend.log`, `/tmp/sicam_b2_full_backend.log`,
+`/tmp/sicam_b2_full_frontend.log`, `/tmp/sicam_b2_build.log`. La comparación de
+integridad usa el baseline de este sprint en `/tmp/sicam_b1_before.json` y el
+script de lectura `/tmp/sicam_b1_integrity.py`.
+
+Sin pendientes de implementación B.2. Para aceptación manual final crear un
+**nuevo borrador**: comprobar bloqueo con una clase definida o una efectiva;
+luego usar al menos dos efectivas, verificar la advertencia individual y/o una
+tercera clase vacía, generar y comparar CSV/XLSX/manifiesto. No reutilizar ni
+alterar los tres históricos para hacer esta validación. Se mantienen los
+pendientes futuros documentados; `ML_ONE_CLASS_DATASET_SUPPORT = FUTURE`.
+
+SPRINT 18U-B.2 = READY_FOR_FINAL_DATASET_ACCEPTANCE

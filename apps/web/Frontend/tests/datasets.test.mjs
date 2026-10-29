@@ -14,8 +14,8 @@ const {default:api}=await server.ssrLoadModule('/src/services/apiClient.js');
 const {auth}=await server.ssrLoadModule('/src/services/auth.js');
 auth.user={id:1,role:'ADMIN',institution:{id:1},must_change_password:false};
 const patient=(id,code)=>({id,initials:'EJT',identificacion:code,identity_mode:'PSEUDONYMIZED'});
-const draft={id:'test-uuid',name:'Synthetic',description:'',status:'DRAFT',institution_id:1,version:1,characterization_version:'2.2',units_mode:'PIXELS',config:{classes:['Class A'],features:['nucleus_area'],validated_only:true},patients:[{patient_id:8,class_label:'Class A',identity:patient(8,'A'),local_id:'P001'}]};
-const summary={selected_patient_count:3,included_patient_count:2,zero_row_patient_count:1,patients:3,samples:2,excluded_samples:1,rows:5,nuclei:3,mn_associations:4,class_counts:{A:{patients:1,samples:1,rows:2},B:{patients:1,samples:1,rows:3}},provisional_count:2,exclusion_counts:{NO_PHYSICAL_VALUES:1}};
+const draft={id:'test-uuid',name:'Synthetic',description:'',status:'DRAFT',institution_id:1,version:1,characterization_version:'2.2',units_mode:'PIXELS',config:{classes:['Class A','Class B'],features:['nucleus_area'],validated_only:true},patients:[{patient_id:8,class_label:'Class A',identity:patient(8,'A'),local_id:'P001'}]};
+const summary={defined_class_count:2,effective_class_count:2,empty_class_count:0,selected_patient_count:3,included_patient_count:2,zero_row_patient_count:1,patients:3,samples:2,excluded_samples:1,rows:5,nuclei:3,mn_associations:4,class_counts:{A:{patients:1,samples:1,rows:2},B:{patients:1,samples:1,rows:3}},provisional_count:2,exclusion_counts:{NO_PHYSICAL_VALUES:1}};
 const preview={version:1,preview_hash:'stable-hash',summary,columns:['ID_paciente','Area_px2'],patients:[],exclusions:[{sample:'P001_IMG001',reason:'NO_PHYSICAL_VALUES',description:'Faltan valores físicos.'}]};
 const generated={...draft,status:'GENERATED',version:2,summary,exclusions:preview.exclusions,manifest:{split_group:'patient',content_hash:'hash'},row_count:5,patient_count:2};
 function ctx(){const c=reactive({...View.data(),$emit:()=>{}});for(const [k,f] of Object.entries(View.methods))c[k]=f.bind(c);for(const [k,f] of Object.entries(View.computed))Object.defineProperty(c,k,{get:()=>f.call(c)});return c;}
@@ -78,4 +78,26 @@ test('patient counts zero-row warning localized units dates and human feature la
  const date='2026-10-28T19:42:17.088644Z';assert.equal(c.formatDate(date),new Date(date).toLocaleString('es-MX',{dateStyle:'short',timeStyle:'short'}));assert.ok(!c.formatDate(date).includes('T19:'));
  assert.equal(c.featureLabel('nucleus_area','BOTH'),'Área núcleo (px² / µm²)');assert.equal(c.featureLabel('mn_eccentricity','PHYSICAL'),'Excentricidad micronúcleo');
  const frozen=await render({current:{...generated,units_mode:'PHYSICAL',config:{features:['nucleus_area','centroid_distance'],validated_only:true}}});assert.match(frozen,/Área núcleo \(µm²\)/);assert.match(frozen,/Distancia entre centroides MN–núcleo \(µm\)/);assert.match(frozen,/Físicas/);assert.doesNotMatch(frozen,/Variables: nucleus_area/);
+});
+
+
+test('preview marks empty classes and blocks generation with clear feedback',async()=>{
+ const c=ctx();c.accept(draft);
+ c.preview={...preview,summary:{...summary,effective_class_count:1,empty_class_count:1,class_counts:{A:{selected_patients:2,included_patients:1,row_count:5},B:{selected_patients:1,included_patients:0,row_count:0}}}};
+ c.confirmed=true;let requests=0;api.defaults.adapter=async config=>{requests++;return ok(config,{});};
+ assert.match(c.classGenerationError,/dos clases con datos elegibles/);await c.generate();assert.equal(requests,0);
+ const html=await render({current:c.current,form:c.form,saved:JSON.stringify(c.form),preview:c.preview,confirmed:true});
+ assert.match(html,/SIN DATOS ELEGIBLES/);assert.match(html,/class-warning/);assert.match(html,/Clases efectivas: 1/);assert.match(html,/<button disabled[^>]*>Generar snapshot/);
+});
+test('two effective classes allow generation despite a zero-row patient or third empty class',async()=>{
+ const c=ctx();c.accept(draft);c.preview={...preview,summary:{...summary,defined_class_count:3,empty_class_count:1,class_counts:{...summary.class_counts,Empty:{selected_patients:0,included_patients:0,row_count:0}}}};
+ c.confirmed=true;assert.equal(c.classGenerationError,'');
+ const html=await render({current:c.current,form:c.form,saved:JSON.stringify(c.form),preview:c.preview,confirmed:true});
+ assert.match(html,/no aporta\(n\) datos elegibles/);assert.match(html,/SIN DATOS ELEGIBLES/);assert.match(html,/<button(?! disabled)[^>]*>Generar snapshot/);
+});
+test('single defined class is blocked while historical generated detail remains readable',async()=>{
+ const c=ctx();c.accept(draft);c.preview={...preview,summary:{...summary,defined_class_count:1,effective_class_count:1,empty_class_count:0}};
+ assert.match(c.classGenerationError,/dos clases definidas/);
+ c.current={...generated,summary:c.preview.summary};assert.equal(c.classGenerationError,'');
+ const html=await render({current:c.current});assert.match(html,/Descargar CSV/);assert.doesNotMatch(html,/No se puede generar/);
 });

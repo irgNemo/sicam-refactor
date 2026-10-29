@@ -14,8 +14,8 @@ REASONS = {
  'ARCHIVED':'Paciente, caso, análisis o muestra archivados.',
  'NO_CHARACTERIZATION':'Sin caracterización guardada.',
  'CHARACTERIZATION_VERSION_MISMATCH':'No existe la versión solicitada.',
- 'SEGMENTATION_NOT_VALIDATED':'La segmentación no cumple la política de validación.',
- 'NO_EFFECTIVE_SEGMENTATION':'No hay resultado efectivo completo.',
+ 'SEGMENTATION_NOT_VALIDATED':'La política del conjunto exige una segmentación validada.',
+ 'NO_EFFECTIVE_SEGMENTATION':'No existe una segmentación efectiva completa.',
  'SOURCE_CHANGED':'La caracterización no corresponde a la segmentación efectiva.',
  'SOURCE_UNVERIFIABLE':'Resultado automático antiguo sin hash de segmentación verificable.',
  'NO_PHYSICAL_VALUES':'Faltan valores físicos almacenados requeridos.',
@@ -94,7 +94,7 @@ def build_snapshot(dataset):
         'analisis__id_caso_fk','analisis__id_paciente_fk').order_by('analisis__id_paciente_fk_id','pk').prefetch_related(
         Prefetch('resultados_segmentacion',queryset=results,to_attr='dataset_results'))
     selected=columns(dataset.config,dataset.units_mode)
-    rows=[];sources=[];exclusions=[];counts=Counter();balance={};patient_summary=[];nuclei_count=0;mn_count=0;provisional=0;sample_ord=Counter()
+    rows=[];sources=[];exclusions=[];counts=Counter();balance={label:{'patients':0,'rows':0,'samples':0} for label in dataset.config['classes']};patient_summary=[];nuclei_count=0;mn_count=0;provisional=0;sample_ord=Counter()
     for m in members:
         balance.setdefault(m.class_label,{'patients':0,'rows':0,'samples':0})['patients']+=1
     for sample in samples:
@@ -105,10 +105,11 @@ def build_snapshot(dataset):
         result=sample.dataset_results[0] if sample.dataset_results else None
         if sample.analisis.id_caso_fk and sample.analisis.id_caso_fk.paciente_id!=member.patient_id:reason='RELATIONSHIP_MISMATCH'
         elif any(getattr(p,'archived_at',None) for p in parents): reason='ARCHIVED'
-        elif not result or result.estado!='COMPLETADO' or not result.resultado_normalizado: reason='NO_EFFECTIVE_SEGMENTATION'
+        elif not result or result.estado!='COMPLETADO': reason='NO_EFFECTIVE_SEGMENTATION'
         else:
             effective=resolve_effective_segmentation(result)
-            if effective['fuente']=='MANUAL' or (dataset.config['validated_only'] and effective['fuente']!='VALIDADA'): reason='SEGMENTATION_NOT_VALIDATED'
+            if not effective['resultado']: reason='NO_EFFECTIVE_SEGMENTATION'
+            elif dataset.config['validated_only'] and effective['fuente']!='VALIDADA': reason='SEGMENTATION_NOT_VALIDATED'
             else:
                 exact=[c for c in result.dataset_characterizations if c.algorithm_version==dataset.characterization_version]
                 if not exact: reason='CHARACTERIZATION_VERSION_MISMATCH' if result.dataset_characterizations else 'NO_CHARACTERIZATION'
@@ -157,7 +158,9 @@ def build_snapshot(dataset):
         counts_by_class['included_patients'] = sum(p['Clase'] == label and p['rows'] > 0 for p in patient_summary)
         counts_by_class['row_count'] = counts_by_class['rows']
     included = sum(p['rows'] > 0 for p in patient_summary)
-    summary={'selected_patient_count':len(members),'included_patient_count':included,
+    effective_classes = sum(c['included_patients'] > 0 and c['row_count'] > 0 for c in balance.values())
+    summary={'defined_class_count':len(balance),'effective_class_count':effective_classes,
+      'empty_class_count':len(balance)-effective_classes,'selected_patient_count':len(members),'included_patient_count':included,
       'zero_row_patient_count':len(members)-included,'patients':len(members),'samples':sum(s['included'] for s in sources),'excluded_samples':sum(not s['included'] for s in sources),
       'rows':len(rows),'nuclei':nuclei_count,'mn_associations':mn_count,'class_counts':balance,'provisional_count':provisional,
       'exclusion_counts':dict(counts),'excluded_rows':sum(e.get('rows',0) for e in exclusions),
@@ -167,6 +170,18 @@ def build_snapshot(dataset):
       'configuration':{'characterization_version':dataset.characterization_version,'units_mode':dataset.units_mode,'config':dataset.config,
                        'membership':[{'patient_id':m.patient_id,'local_id':m.local_id,'class_label':m.class_label} for m in members]}}
     return snapshot,digest(snapshot)
+
+
+def validate_effective_classes(summary):
+    """Generation-only supervised validation; previews remain inspectable."""
+    if summary['defined_class_count'] < 2:
+        message = 'No se puede generar el conjunto: se requieren al menos dos clases definidas.'
+    elif summary['effective_class_count'] < 2:
+        message = 'No se puede generar el conjunto: se requieren al menos dos clases con datos elegibles.'
+    else:
+        return
+    distribution = '; '.join(f"{label}: {counts['row_count']} filas" for label, counts in summary['class_counts'].items())
+    raise ValidationError({'detail': f'{message} {distribution}'})
 
 
 def manifest(dataset,snapshot,key,now):

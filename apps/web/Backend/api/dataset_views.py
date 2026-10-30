@@ -17,10 +17,15 @@ from rest_framework.response import Response
 from .access import OperationalPermission, scoped
 from .models import MLDataset, MLDatasetPatient, MLDatasetSample, Paciente, Institution
 from .patient_lookup import patient_identity
-from .services.datasets.features import FEATURES, UNAVAILABLE, SPLIT_WARNING
+from .services.datasets.features import FEATURES, UNAVAILABLE, SPLIT_WARNING, SCHEMA_VERSION
 from .services.datasets.builder import build_snapshot, manifest, validate_effective_classes
 from .services.datasets.classes import validate_assignments
 from .services.lifecycle import conflict
+
+
+def _parse_version(v):
+    """Parse '2.3' → (2, 3). Safe for '2.10', '3.0', etc."""
+    return tuple(int(part) for part in str(v).split('.'))
 
 
 class MembershipInput(serializers.Serializer):
@@ -32,7 +37,7 @@ class DefinitionInput(serializers.Serializer):
     name = serializers.CharField(max_length=160)
     description = serializers.CharField(max_length=4000,allow_blank=True,default='')
     institution = serializers.IntegerField(min_value=1,required=False)
-    characterization_version = serializers.ChoiceField(choices=['2.1','2.2'])
+    characterization_version = serializers.ChoiceField(choices=['2.1','2.2','2.3'])
     units_mode = serializers.ChoiceField(choices=['PIXELS','PHYSICAL','BOTH'])
     features = serializers.ListField(child=serializers.ChoiceField(choices=[f['key'] for f in FEATURES]),allow_empty=False)
     classes = serializers.ListField(child=serializers.CharField(max_length=100, allow_blank=False), required=True)
@@ -49,6 +54,18 @@ class DefinitionInput(serializers.Serializer):
         ids=[p['patient_id'] for p in data['patients']]
         if len(ids)>500 or len(set(ids))!=len(ids) or len(set(data['features']))!=len(data['features']):
             raise ValidationError('Selección duplicada o límite de 500 pacientes excedido.')
+        # Feature–version cross-validation (authoritative backend check).
+        requested_ver = _parse_version(data['characterization_version'])
+        feature_by_key = {f['key']: f for f in FEATURES}
+        for feature_key in data['features']:
+            feature = feature_by_key.get(feature_key)
+            if feature and 'min_version' in feature:
+                required_ver = _parse_version(feature['min_version'])
+                if requested_ver < required_ver:
+                    raise ValidationError(
+                        f"La característica '{feature_key}' requiere versión "
+                        f"{feature['min_version']} o superior."
+                    )
         data['classes'] = validate_assignments(data['classes'], data['patients'])
         return data
 
@@ -120,7 +137,7 @@ class DatasetViewSet(viewsets.GenericViewSet):
     @action(detail=False,methods=['get'],url_path='options')
     def catalog(self,request):
         institutions=list(Institution.objects.filter(active=True).values('id','code')) if request.user.is_superuser else []
-        return Response({'features':FEATURES,'versions':['2.1','2.2'],'unavailable':UNAVAILABLE,'split_warning':SPLIT_WARNING,'institutions':institutions})
+        return Response({'features':FEATURES,'versions':['2.1','2.2','2.3'],'unavailable':UNAVAILABLE,'split_warning':SPLIT_WARNING,'institutions':institutions,'schema_version':SCHEMA_VERSION})
 
     def definition(self,request,obj=None):
         serializer=DefinitionInput(data=request.data);serializer.is_valid(raise_exception=True);data=serializer.validated_data

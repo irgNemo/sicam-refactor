@@ -1,5 +1,5 @@
 """Explicit export mapping: missing reference metrics are NOT approximated."""
-SCHEMA_VERSION = 'saliva-nuclear-1'
+SCHEMA_VERSION = 'saliva-nuclear-2'
 GRAIN = 'NUCLEUS_MN_RELATION'
 SPLIT_WARNING = 'Las particiones de entrenamiento/validación/prueba deben realizarse por paciente, no por fila, núcleo ni imagen.'
 FEATURES = []
@@ -14,10 +14,30 @@ for entity, prefix in [('nucleus',''),('mn','MN_')]:
         *[(k,'GLCM_'+name,'Textura','texture.'+k,None) for k,name in
           [('contrast','Contraste'),('homogeneity','Homogeneidad'),('energy','Energia'),('correlation','Correlacion')]],
     ]:
-        FEATURES.append(dict(key=entity+'_'+key,entity=entity,label=prefix+label,group=group,pixel=px,physical=um))
-FEATURES += [dict(key='area_ratio',entity='relation',label='Relacion_area_MN_nucleo',group='Relaciones',pixel='area_fraction_to_nucleus',physical=None),
-             dict(key='centroid_distance',entity='relation',label='Distancia_centroides_MN_nucleo',group='Relaciones',pixel='distance_to_nucleus_px',physical='distance_to_nucleus_um')]
-UNAVAILABLE = ['Elipticidad','Solidez','Relacion_Proporcion_perimetro_MN_sobre_nucleo','Relacion_Distancia_borde_MN_nucleo_px']
+        FEATURES.append(dict(key=entity+'_'+key,entity=entity,label=prefix+label,group=group,pixel=px,physical=um,min_version='2.1'))
+FEATURES += [dict(key='area_ratio',entity='relation',label='Relacion_area_MN_nucleo',group='Relaciones',pixel='area_fraction_to_nucleus',physical=None,min_version='2.1'),
+             dict(key='centroid_distance',entity='relation',label='Distancia_centroides_MN_nucleo',group='Relaciones',pixel='distance_to_nucleus_px',physical='distance_to_nucleus_um',min_version='2.1')]
+
+# Sprint 18U-C1 — Characterization 2.3 new features
+FEATURES += [
+    dict(key='nucleus_elongation', entity='nucleus', label='Indice_elongacion',
+         group='Morfología', pixel='elongation_index', physical=None, min_version='2.3'),
+    dict(key='nucleus_solidity', entity='nucleus', label='Solidez_convexa',
+         group='Morfología', pixel='convex_solidity', physical=None, min_version='2.3'),
+    dict(key='mn_elongation', entity='mn', label='MN_Indice_elongacion',
+         group='Morfología', pixel='elongation_index', physical=None, min_version='2.3'),
+    dict(key='mn_solidity', entity='mn', label='MN_Solidez_convexa',
+         group='Morfología', pixel='convex_solidity', physical=None, min_version='2.3'),
+    dict(key='perimeter_ratio', entity='relation', label='Razon_perimetros_MN_nucleo',
+         group='Relaciones', pixel='mn_nucleus_perimeter_ratio_px',
+         physical='mn_nucleus_perimeter_ratio_physical', min_version='2.3'),
+    dict(key='mn_separation', entity='relation', label='Separacion_minima_MN_nucleo',
+         group='Relaciones', pixel='mn_nucleus_min_distance_px',
+         physical='mn_nucleus_min_distance_um', min_version='2.3'),
+]
+
+# UNAVAILABLE is now empty — all four legacy gaps are closed by 2.3 features above.
+UNAVAILABLE = []
 CORE = ['ID_paciente','ID_foto','Nucleo','MN','Clase','Tiene_MN']
 
 

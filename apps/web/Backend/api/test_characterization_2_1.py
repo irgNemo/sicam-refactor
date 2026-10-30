@@ -212,3 +212,45 @@ class RasterMetrics21Tests(SimpleTestCase):
         self.assertEqual(result['counts'], {'membrana': 1, 'micronucleo': 0})
         for key in ('eccentricity', 'std_gray_intensity', 'texture', 'methodology', 'schema_version'):
             self.assertNotIn(key, json.dumps(result))
+
+
+class Regression23Guards21Tests(SimpleTestCase):
+    """Sprint 18U-C1 regression: raster_metrics.py is unchanged after 2.3 code addition."""
+
+    def test_raster_metrics_not_modified_by_23(self):
+        """measure_raster() output unchanged: eccentricity of rectangle fixture unchanged."""
+        from api.services.characterization.raster import ObjectRaster
+        from api.services.characterization.raster_metrics import measure_raster
+        from PIL import Image as _Image
+        image = _Image.new('L', (100, 100), 70)
+        # 11×3 inclusive rectangle: lambda_max=10, lambda_min=2/3
+        # expected eccentricity = sqrt(1 - (2/3)/10) = sqrt(1 - 1/15)
+        import math
+        warnings = []
+        result = _measure_object(object_payload(box(0, 0, 10, 2)), image, warnings)
+        expected = math.sqrt(1 - (2 / 3) / 10)
+        self.assertAlmostEqual(result['metrics']['eccentricity'], expected,
+                               msg='eccentricity must be unchanged after 2.3 code is added')
+
+    def test_2_1_output_has_no_23_keys(self):
+        """characterize_saliva_result() must not emit any 2.3 metric key."""
+        from api.services.characterization.service import characterize_effective_segmentation
+        effective = {
+            'fuente': 'AUTOMATICO', 'resultado_segmentacion_id': 1, 'revision': None,
+            'resultado': {'objects': [
+                object_payload(box(0, 0, 40, 40)),
+                object_payload(box(5, 5, 25, 25), 'nucleo', 2),
+                object_payload(box(30, 30, 35, 35), 'micronucleo', 3),
+            ]},
+        }
+        result = characterize_effective_segmentation(effective)
+        keys_23 = {'elongation_index', 'convex_solidity',
+                   'mn_nucleus_perimeter_ratio_px', 'mn_nucleus_perimeter_ratio_physical',
+                   'mn_nucleus_min_distance_px', 'mn_nucleus_min_distance_um'}
+        for cell in result.get('cells', []):
+            for nuc in cell.get('nuclei', []):
+                self.assertTrue(keys_23.isdisjoint(nuc['metrics']),
+                                f'2.1 nucleus metrics contain 2.3 keys: {keys_23 & set(nuc["metrics"])}')
+            for mn in cell.get('micronuclei', []):
+                self.assertTrue(keys_23.isdisjoint(mn['metrics']),
+                                f'2.1 MN metrics contain 2.3 keys: {keys_23 & set(mn["metrics"])}')

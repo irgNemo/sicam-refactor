@@ -11,7 +11,7 @@ import math
 from PIL import Image
 
 from api.services.acquisition import physical_compatibility
-from .geometry import polygon_perimeter
+from .geometry import polygon_perimeter, polygon_convex_hull_area, minimum_polygon_distance
 
 VERSION = '2.2'
 # All measured object features (including texture diagnostics) and dimensional
@@ -177,4 +177,198 @@ def extend_physical_result(pixel_result, effective, context, version=VERSION):
             for item in items:
                 convert(item['metrics'], item['id'])
     convert(result['summary'], None)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Sprint 18U-C1 — Characterization 2.3 extension
+# ---------------------------------------------------------------------------
+
+VERSION_23 = '2.3'
+
+# Dimensional classification for new 2.3 metrics (informational only).
+FEATURE_DIMENSIONS_23 = {
+    'elongation_index': 'DIMENSIONLESS',
+    'convex_solidity': 'DIMENSIONLESS',
+    'mn_nucleus_perimeter_ratio_px': 'DIMENSIONLESS',
+    'mn_nucleus_perimeter_ratio_physical': 'DIMENSIONLESS',
+    'mn_nucleus_min_distance_px': 'LENGTH',
+}
+
+# 2.3 pixel→physical mapping (for min distance only; ratios are dimensionless).
+PHYSICAL_FIELDS_23 = {
+    'mn_nucleus_min_distance_px': 'mn_nucleus_min_distance_um',
+}
+
+_NUMERICAL_EPSILON_23 = 1e-12
+
+
+def extend_23_metrics(physical_result, effective, context, version=VERSION_23):
+    """Add Characterization 2.3 metrics to an already-complete 2.2 result.
+
+    This function is the **sole producer** of all six 2.3 metrics.  It starts
+    from a deep copy of the 2.2 result and never mutates its input.  It does
+    not recompute raster moments or modify any existing 2.2 field.
+
+    New metrics
+    -----------
+    Per nucleus and MN:
+        elongation_index          1 − sqrt(clamp(1 − ecc², 0, 1))
+        convex_solidity           area_px2 / convex_hull_area_px2
+
+    Per MN (relation to associated nucleus):
+        mn_nucleus_perimeter_ratio_px        perimeter_mn_px / perimeter_nucleus_px
+        mn_nucleus_perimeter_ratio_physical  perimeter_mn_um / perimeter_nucleus_um
+        mn_nucleus_min_distance_px           minimum closed-set polygon distance (px)
+        mn_nucleus_min_distance_um           same after per-coordinate transform (µm)
+    """
+    result = copy.deepcopy(physical_result)
+
+    # Build polygon lookup from effective segmentation (same pattern as 2.2).
+    points_by_id = {
+        item.get('id'): item['geometry'].get('points')
+        for item in (effective['resultado'].get('objects') or [])
+        if isinstance(item, dict) and isinstance(item.get('geometry'), dict)
+    }
+
+    available = context is not None and context.get('physical_units_available', False)
+    if available:
+        cal = context['calibration']
+        sx = float(cal['scale_x_um_per_px'])
+        sy = float(cal['scale_y_um_per_px'])
+    else:
+        sx = sy = None
+
+    # ------------------------------------------------------------------
+    # Per-object metrics: elongation_index and convex_solidity
+    # ------------------------------------------------------------------
+    def add_object_metrics(metrics, object_id):
+        # A. Elongation Index — derived from stored eccentricity (no re-rasterisation)
+        ecc = metrics.get('eccentricity')
+        if ecc is None:
+            metrics['elongation_index'] = None
+        else:
+            ratio = max(0.0, min(1.0, 1.0 - float(ecc) * float(ecc)))
+            metrics['elongation_index'] = 1.0 - math.sqrt(ratio)
+
+        # B. Convex Solidity — uses stored area_px2 + convex hull of polygon
+        area = metrics.get('area_px2')
+        if area is None or area <= 0:
+            metrics['convex_solidity'] = None
+            return
+        points = points_by_id.get(object_id)
+        if not points or len(points) < 3:
+            metrics['convex_solidity'] = None
+            return
+        hull_area = polygon_convex_hull_area(points)
+        if hull_area is None or hull_area <= _NUMERICAL_EPSILON_23:
+            metrics['convex_solidity'] = None
+            return
+        metrics['convex_solidity'] = area / hull_area
+
+    # ------------------------------------------------------------------
+    # Per-MN relation metrics
+    # ------------------------------------------------------------------
+    def _nucleus_metrics_lookup(cell_list):
+        """Return {nucleus_id: metrics_dict} for all cells in the result."""
+        lkp = {}
+        for cell in cell_list:
+            for nuc in cell.get('nuclei', []):
+                lkp[nuc['id']] = nuc['metrics']
+        return lkp
+
+    nucleus_metrics = _nucleus_metrics_lookup(result.get('cells', []))
+
+    def add_relation_metrics(mn, mn_points):
+        nucleus_id = mn.get('nucleus_id')
+        mn_metrics = mn['metrics']
+
+        if nucleus_id is None:
+            mn_metrics['mn_nucleus_perimeter_ratio_px'] = None
+            mn_metrics['mn_nucleus_perimeter_ratio_physical'] = None
+            mn_metrics['mn_nucleus_min_distance_px'] = None
+            mn_metrics['mn_nucleus_min_distance_um'] = None
+            return
+
+        nuc_m = nucleus_metrics.get(nucleus_id)
+        nuc_points = points_by_id.get(nucleus_id)
+
+        # C. Pixel perimeter ratio
+        p_mn = mn_metrics.get('perimeter_px')
+        p_nuc = nuc_m.get('perimeter_px') if nuc_m else None
+        if p_mn is not None and p_nuc and p_nuc > 0:
+            mn_metrics['mn_nucleus_perimeter_ratio_px'] = p_mn / p_nuc
+        else:
+            mn_metrics['mn_nucleus_perimeter_ratio_px'] = None
+
+        # D. Physical perimeter ratio
+        if available:
+            p_mn_um = mn_metrics.get('perimeter_um')
+            p_nuc_um = nuc_m.get('perimeter_um') if nuc_m else None
+            if p_mn_um is not None and p_nuc_um and p_nuc_um > 0:
+                mn_metrics['mn_nucleus_perimeter_ratio_physical'] = p_mn_um / p_nuc_um
+            else:
+                mn_metrics['mn_nucleus_perimeter_ratio_physical'] = None
+        else:
+            mn_metrics['mn_nucleus_perimeter_ratio_physical'] = None
+
+        # E. Pixel minimum separation
+        if mn_points and nuc_points and len(mn_points) >= 3 and len(nuc_points) >= 3:
+            try:
+                mn_metrics['mn_nucleus_min_distance_px'] = minimum_polygon_distance(
+                    mn_points, nuc_points
+                )
+            except (ValueError, TypeError):
+                mn_metrics['mn_nucleus_min_distance_px'] = None
+        else:
+            mn_metrics['mn_nucleus_min_distance_px'] = None
+
+        # F. Physical minimum separation (per-coordinate transform — not average scale)
+        if available and mn_points and nuc_points and len(mn_points) >= 3 and len(nuc_points) >= 3:
+            try:
+                mn_phys = [[x * sx, y * sy] for x, y in mn_points]
+                nuc_phys = [[x * sx, y * sy] for x, y in nuc_points]
+                mn_metrics['mn_nucleus_min_distance_um'] = minimum_polygon_distance(
+                    mn_phys, nuc_phys
+                )
+            except (ValueError, TypeError):
+                mn_metrics['mn_nucleus_min_distance_um'] = None
+        else:
+            mn_metrics['mn_nucleus_min_distance_um'] = None
+
+    # ------------------------------------------------------------------
+    # Walk result structure — mirrors extend_physical_result() traversal
+    # ------------------------------------------------------------------
+    for cell in result.get('cells', []):
+        for nuc in cell.get('nuclei', []):
+            add_object_metrics(nuc['metrics'], nuc['id'])
+        for mn in cell.get('micronuclei', []):
+            add_object_metrics(mn['metrics'], mn['id'])
+            add_relation_metrics(mn, points_by_id.get(mn['id']))
+
+    for group in ('unassociated', 'ambiguous'):
+        for items in result.get(group, {}).values():
+            for item in items:
+                add_object_metrics(item['metrics'], item['id'])
+                # Unassociated/ambiguous MN may still have nucleus_id if
+                # the nucleus is in the group too; relation metrics are set
+                # to null only when nucleus_id is None (handled inside).
+                if item.get('label') == 'micronucleo':
+                    add_relation_metrics(item, points_by_id.get(item['id']))
+
+    # ------------------------------------------------------------------
+    # Reset version fields to 2.3
+    # ------------------------------------------------------------------
+    effective_hash, key = fingerprint(effective, context if context is not None else {}, version)
+    result['version'] = version
+    result['schema_version'] = version
+    result['characterization_version'] = version
+    result['provenance'] = {
+        **result.get('provenance', {}),
+        'fingerprint': key,
+        'effective_segmentation_hash': effective_hash,
+        'pixel_algorithm_version': '2.1',
+        'GLCM_PHYSICAL_DISTANCE_NORMALIZATION': 'PENDING_SCIENTIFIC_DECISION',
+        'IMPORTANT_PENDING_18S_A2': True,
+    }
     return result

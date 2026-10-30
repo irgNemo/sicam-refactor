@@ -191,3 +191,161 @@ def _point_on_segment(point, start, end, epsilon=POINT_BOUNDARY_EPSILON):
         min(start[1], end[1]) - epsilon <= point[1] <=
         max(start[1], end[1]) + epsilon
     )
+
+
+# ---------------------------------------------------------------------------
+# Sprint 18U-C1 — Characterization 2.3 geometry helpers
+# ---------------------------------------------------------------------------
+
+NUMERICAL_EPSILON = 1e-12
+
+
+def polygon_convex_hull(points):
+    """Return the convex hull of *points* using Andrew's Monotonic Chain.
+
+    Parameters
+    ----------
+    points : list[list[float]]
+        Input points in the same ``[x, y]`` format used throughout geometry.py.
+        May contain duplicates.
+
+    Returns
+    -------
+    list[list[float]] | None
+        Counter-clockwise hull vertices, or ``None`` when the hull has fewer
+        than 3 distinct non-collinear points (degenerate line / single point).
+    """
+    if not isinstance(points, list) or len(points) < 3:
+        return None
+
+    # Validate and deduplicate
+    seen = set()
+    valid = []
+    for p in points:
+        try:
+            vp = _validate_point(p)
+        except ValueError:
+            continue
+        key = (vp[0], vp[1])
+        if key not in seen:
+            seen.add(key)
+            valid.append(vp)
+
+    if len(valid) < 3:
+        return None
+
+    # Sort lexicographically (x primary, y secondary)
+    valid.sort(key=lambda p: (p[0], p[1]))
+
+    def cross(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    # Build lower hull
+    lower = []
+    for p in valid:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
+            lower.pop()
+        lower.append(p)
+
+    # Build upper hull
+    upper = []
+    for p in reversed(valid):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
+            upper.pop()
+        upper.append(p)
+
+    # Concatenate without duplicating first/last shared points
+    hull = lower[:-1] + upper[:-1]
+
+    if len(hull) < 3:
+        return None
+
+    return hull
+
+
+def polygon_convex_hull_area(points):
+    """Return the area of the convex hull of *points*, or ``None`` if degenerate."""
+    hull = polygon_convex_hull(points)
+    if hull is None:
+        return None
+    return polygon_area(hull)
+
+
+def minimum_polygon_distance(points_a, points_b):
+    """Return the minimum Euclidean distance between two closed polygonal sets.
+
+    A polygonal *set* is the filled region bounded by the polygon.  The distance
+    between two sets is zero whenever they touch, overlap, intersect, or one is
+    contained in the other.
+
+    Parameters
+    ----------
+    points_a, points_b : list[list[float]]
+        Polygon vertices as ``[x, y]`` lists.  Each polygon must have at least
+        3 valid points.
+
+    Returns
+    -------
+    float
+        Minimum distance >= 0.  Returns 0.0 for touching/overlapping/contained.
+
+    Raises
+    ------
+    ValueError
+        If either polygon has fewer than 3 valid points.
+    """
+    va = _validate_polygon_points(points_a)
+    vb = _validate_polygon_points(points_b)
+
+    segs_a = _polygon_segments(va)
+    segs_b = _polygon_segments(vb)
+
+    # --- Short-circuit: segment intersection check ---
+    for sa in segs_a:
+        for sb in segs_b:
+            if _segments_intersect(sa, sb):
+                return 0.0
+
+    # --- Short-circuit: point containment check ---
+    # If any vertex of A is inside-or-on B, the regions overlap/touch.
+    for p in va:
+        if classify_point_in_polygon(p, vb) in (POINT_INSIDE, POINT_ON_BOUNDARY):
+            return 0.0
+    # If any vertex of B is inside-or-on A, the regions overlap/touch.
+    for p in vb:
+        if classify_point_in_polygon(p, va) in (POINT_INSIDE, POINT_ON_BOUNDARY):
+            return 0.0
+
+    # --- Minimum segment-to-segment distance ---
+    min_dist = math.inf
+    for sa in segs_a:
+        for sb in segs_b:
+            d = _segment_to_segment_distance(sa[0], sa[1], sb[0], sb[1])
+            if d < min_dist:
+                min_dist = d
+
+    return max(0.0, min_dist)
+
+
+def _point_to_segment_distance(p, a, b):
+    """Minimum Euclidean distance from point *p* to segment *ab*."""
+    ax, ay = a
+    bx, by = b
+    dx, dy = bx - ax, by - ay
+    seg_len_sq = dx * dx + dy * dy
+    if seg_len_sq < NUMERICAL_EPSILON:
+        # Degenerate segment — treat as a point
+        return math.dist(p, a)
+    t = max(0.0, min(1.0, ((p[0] - ax) * dx + (p[1] - ay) * dy) / seg_len_sq))
+    proj = [ax + t * dx, ay + t * dy]
+    return math.dist(p, proj)
+
+
+def _segment_to_segment_distance(p1, p2, p3, p4):
+    """Minimum distance between segment *p1-p2* and segment *p3-p4*."""
+    return min(
+        _point_to_segment_distance(p1, p3, p4),
+        _point_to_segment_distance(p2, p3, p4),
+        _point_to_segment_distance(p3, p1, p2),
+        _point_to_segment_distance(p4, p1, p2),
+    )

@@ -28,7 +28,7 @@
     <p v-if="!form.patients.length">Seleccione pacientes y asigne una clase explícita a cada uno. La clase pertenece sólo a este dataset; no se infiere un diagnóstico.</p>
     <div v-for="p in form.patients" :key="p.patient_id" class="member"><div><strong>{{ p.identity.initials }}</strong><small>ID <CompactValue :value="p.identity.identificacion" :peers="form.patients.map(p=>p.identity.identificacion)" /></small></div><label>Clase<select v-model="p.class_label" :disabled="busy || !can('register')"><option value="">Seleccione clase</option><option v-for="label in form.classes" :key="label" :value="label">{{ label }}</option></select></label><button v-if="can('register')" :disabled="busy" @click="removePatient(p.patient_id)">Quitar</button></div>
     <h3>3. Datos y variables</h3>
-    <fieldset :disabled="busy || !can('register')"><div v-for="group in groups" :key="group" class="feature-group"><h4>{{ group }}</h4><label v-for="feature in options.features.filter(f=>f.group===group)" :key="feature.key" class="check"><input type="checkbox" v-model="form.features" :value="feature.key" /> {{ featureLabel(feature.key, form.units_mode) }}<small>{{ feature.entity === 'nucleus' ? 'Núcleo' : feature.entity === 'mn' ? 'MN' : 'Relación' }}</small></label></div></fieldset>
+    <fieldset :disabled="busy || !can('register')"><div v-for="group in groups" :key="group" class="feature-group"><h4>{{ group }}</h4><label v-for="feature in availableFeatures.filter(f=>f.group===group)" :key="feature.key" class="check"><input type="checkbox" v-model="form.features" :value="feature.key" /> {{ featureLabel(feature.key, form.units_mode) }}<small>{{ feature.entity === 'nucleus' ? 'Núcleo' : feature.entity === 'mn' ? 'MN' : 'Relación' }}</small></label></div></fieldset>
     <details><summary>Variables del Excel no disponibles</summary><ul><li v-for="name in options.unavailable" :key="name">{{ name }}</li></ul><p>La distancia exportable es entre centroides, no entre bordes. La textura GLCM conserva su contrato en píxeles.</p></details>
     <div class="bar"><button v-if="can('register')" :disabled="busy" @click="save">Guardar borrador</button><button :disabled="busy || (!can('register') && dirty)" @click="previewDataset">4. Vista previa</button><small v-if="dirty">Cambios sin guardar</small></div>
    </section>
@@ -59,10 +59,12 @@ import api from '../services/apiClient';
 import {auth,can,authErrorMessage} from '../services/auth';
 import PatientLookup from '../components/registration/PatientLookup.vue';
 import CompactValue from '../components/registration/CompactValue.vue';
+function parseVersion(v){return (v||'2.1').split('.').map(Number);}
+function versionGte(a,b){const pa=parseVersion(a),pb=parseVersion(b);for(let i=0;i<Math.max(pa.length,pb.length);i++){const ai=pa[i]??0,bi=pb[i]??0;if(ai!==bi)return ai>bi;}return true;}
 const fresh=()=>({name:'',description:'',characterization_version:'2.2',units_mode:'PIXELS',validated_only:true,classes:[],features:['nucleus_area','nucleus_perimeter','nucleus_eccentricity','area_ratio'],patients:[],institution:''});
 export default {
  components:{PatientLookup,CompactValue},
- data:()=>({auth,options:{features:[],versions:['2.1','2.2'],institutions:[],unavailable:[]},list:{results:[],count:0,next:null},page:1,current:null,form:fresh(),saved:'',busy:false,error:'',newClass:'',preview:null,confirmed:false,splitWarning:'Las particiones de entrenamiento/validación/prueba deben realizarse por paciente, no por fila, núcleo ni imagen.'}),
+ data:()=>({auth,options:{features:[],versions:['2.1','2.2','2.3'],institutions:[],unavailable:[]},list:{results:[],count:0,next:null},page:1,current:null,form:fresh(),saved:'',busy:false,error:'',newClass:'',preview:null,confirmed:false,splitWarning:'Las particiones de entrenamiento/validación/prueba deben realizarse por paciente, no por fila, núcleo ni imagen.'}),
  computed:{classGenerationError(){
   if(this.current?.status!=='DRAFT' || !this.shownSummary)return '';
   const counts=Object.values(this.shownSummary.class_counts);
@@ -71,7 +73,11 @@ export default {
   if(defined<2)return 'No se puede generar el conjunto: se requieren al menos dos clases definidas.';
   if(effective<2)return 'No se puede generar el conjunto: se requieren al menos dos clases con datos elegibles.';
   return '';
- },dirty(){return this.current?.status==='DRAFT' && JSON.stringify(this.form)!==this.saved;},groups(){return [...new Set(this.options.features.map(f=>f.group))];},shownSummary(){return this.current?.status==='GENERATED'?this.current.summary:!this.dirty?this.preview?.summary:null;},shownExclusions(){return this.current?.status==='GENERATED'?this.current.exclusions:this.preview?.exclusions || []; }},
+ },dirty(){return this.current?.status==='DRAFT' && JSON.stringify(this.form)!==this.saved;},groups(){return [...new Set(this.availableFeatures.map(f=>f.group))];},shownSummary(){return this.current?.status==='GENERATED'?this.current.summary:!this.dirty?this.preview?.summary:null;},shownExclusions(){return this.current?.status==='GENERATED'?this.current.exclusions:this.preview?.exclusions || []; },
+ availableFeatures(){
+  // Features whose min_version is satisfied by the current characterization_version.
+  return this.options.features.filter(f=>versionGte(this.form.characterization_version,f.min_version||'2.1'));
+ }},
  watch:{form:{deep:true,handler(){this.confirmed=false;}}},
  async mounted(){window.addEventListener('beforeunload',this.beforeUnload);try{this.options=(await api.get('/api/datasets/options/')).data;await this.loadList();}catch(e){this.error=authErrorMessage(e);}},
  beforeUnmount(){window.removeEventListener('beforeunload',this.beforeUnload);},
@@ -120,7 +126,13 @@ export default {
   async open(id){if(!this.confirmLeave())return;this.busy=true;this.error='';try{this.accept((await api.get(`/api/datasets/${id}/`)).data);}catch(e){this.error=authErrorMessage(e);}finally{this.busy=false;}},
   addPatient(patient){if(!patient||this.busy||!can('register')||this.form.patients.some(p=>p.patient_id===patient.id))return;this.form.patients.push({patient_id:patient.id,identity:patient,class_label:''});this.preview=null;},
   removePatient(id){this.form.patients=this.form.patients.filter(p=>p.patient_id!==id);this.preview=null;},
-  versionChanged(){if(this.form.characterization_version==='2.1')this.form.units_mode='PIXELS';this.preview=null;},
+  versionChanged(){
+   if(this.form.characterization_version==='2.1')this.form.units_mode='PIXELS';
+   // Remove selected features that are not available for the new version.
+   const available=new Set(this.availableFeatures.map(f=>f.key));
+   this.form.features=this.form.features.filter(k=>available.has(k));
+   this.preview=null;
+  },
   payload(){return {...this.form,institution:this.form.institution||auth.user?.institution?.id,patients:this.form.patients.map(p=>({patient_id:p.patient_id,class_label:p.class_label})),version:this.current?.version};},
   async save(){if(this.busy||!can('register')||this.current?.status!=='DRAFT')return false;this.busy=true;this.error='';try{const response=this.current.id?await api.put(`/api/datasets/${this.current.id}/`,this.payload()):await api.post('/api/datasets/',this.payload());this.accept(response.data);await this.loadList(this.page);return true;}catch(e){this.error=authErrorMessage(e);return false;}finally{this.busy=false;}},
   async previewDataset(){if(this.busy)return;if((this.dirty||!this.current.id)&&!await this.save())return;this.busy=true;this.error='';this.confirmed=false;try{this.preview=(await api.get(`/api/datasets/${this.current.id}/preview/`)).data;}catch(e){this.preview=null;this.error=authErrorMessage(e);}finally{this.busy=false;}},

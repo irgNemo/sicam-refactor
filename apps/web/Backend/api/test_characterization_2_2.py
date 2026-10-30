@@ -180,7 +180,7 @@ class PhysicalPersistenceTests(TestCase):
         self.assertEqual(second.status_code,200,second.data)
         self.assertEqual(first.data['id'],second.data['id'])
         data=first.data['resultado_json']
-        self.assertEqual(data['version'],'2.2')
+        self.assertEqual(data['version'],'2.3')
         self.assertTrue(data['physical_units_available'])
         self.assertEqual(data['physical_status'],'COMPATIBLE_PROVISIONAL')
         self.assertEqual(data['calibration']['source_width_px'],4928)
@@ -319,3 +319,36 @@ class PhysicalPersistenceTests(TestCase):
         self.assertEqual(data['cells'][0]['metrics']['area_px2'],900)
         self.assertIsNone(data['cells'][0]['metrics']['mean_gray_intensity'])
         self.assertIn('IMAGE_UNAVAILABLE',[w['code'] for w in data['warnings']])
+
+
+class Regression23Guards22Tests(SimpleTestCase):
+    """Sprint 18U-C1 regression: 2.2 physical outputs unchanged after 2.3 code addition."""
+
+    def test_2_2_output_has_no_23_keys(self):
+        """extend_physical_result() must not emit any 2.3 metric key."""
+        from api.services.characterization.physical import extend_physical_result
+        from api.test_characterization_2_1 import box, object_payload
+        effective = {
+            'fuente': 'AUTOMATICO', 'resultado_segmentacion_id': 1, 'revision': None,
+            'resultado': {'objects': [
+                object_payload(box(0, 0, 40, 40)),
+                object_payload(box(5, 5, 25, 25), 'nucleo', 2),
+                object_payload(box(30, 30, 35, 35), 'micronucleo', 3),
+            ]},
+        }
+        ctx = context_fixture()
+        pixel = characterize_effective_segmentation(effective)
+        result = extend_physical_result(pixel, effective, ctx, version='2.2')
+        keys_23 = {'elongation_index', 'convex_solidity',
+                   'mn_nucleus_perimeter_ratio_px', 'mn_nucleus_perimeter_ratio_physical',
+                   'mn_nucleus_min_distance_px', 'mn_nucleus_min_distance_um'}
+        for cell in result.get('cells', []):
+            for nuc in cell.get('nuclei', []):
+                self.assertTrue(keys_23.isdisjoint(nuc['metrics']),
+                                f'2.2 nucleus metrics contain 2.3 keys: {keys_23 & set(nuc["metrics"])}')
+            for mn in cell.get('micronuclei', []):
+                self.assertTrue(keys_23.isdisjoint(mn['metrics']),
+                                f'2.2 MN metrics contain 2.3 keys: {keys_23 & set(mn["metrics"])}')
+        # Version field must remain '2.2'
+        self.assertEqual(result['version'], '2.2')
+        self.assertEqual(result['schema_version'], '2.2')

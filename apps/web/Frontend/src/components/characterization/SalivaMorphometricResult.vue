@@ -1,6 +1,6 @@
 <template>
   <div class="morphometric-result">
-    <section v-if="resultJson.schema_version === '2.2'" class="physical-context">
+    <section v-if="resultJson.schema_version === '2.2' || resultJson.schema_version === '2.3'" class="physical-context">
       <template v-if="hasPhysical">
         <div class="calibration-heading">
           <strong>Calibración: {{ resultJson.calibration?.label }}</strong>
@@ -78,7 +78,7 @@
           </div>
         </dl>
         <p v-else>Metodología no disponible en este resultado.</p>
-        <p v-if="resultJson.schema_version === '2.2'">GLCM conserva la distancia en píxeles; no está normalizada a una distancia física. Excentricidad y circularidad conservan su definición en píxeles.</p>
+        <p v-if="resultJson.schema_version === '2.2' || resultJson.schema_version === '2.3'">GLCM conserva la distancia en píxeles; no está normalizada a una distancia física. Excentricidad y circularidad conservan su definición en píxeles.</p>
       </div>
     </section>
 
@@ -269,7 +269,7 @@
                     <article class="object-detail">
                       <h6>Región celular {{ displayValue(cell.membrane_id) }}</h6>
                       <span>ID origen: {{ displayValue(cell.source_raw_id) }}</span>
-                      <SalivaObjectMetrics :metrics="cell.metrics" :extended="isExtended" :physical="hasPhysical" />
+                      <SalivaObjectMetrics :metrics="cell.metrics" :extended="isExtended" :physical="hasPhysical" :schema="resultJson.schema_version" />
                     </article>
 
                     <article class="object-detail">
@@ -288,7 +288,7 @@
                         <strong>Nucleo {{ displayValue(nucleus.id) }}</strong>
                         <span>ID origen: {{ displayValue(nucleus.source_raw_id) }}</span>
                         <span>Asociacion: {{ associationDisplay(nucleus.association_status) }}</span>
-                        <SalivaObjectMetrics :metrics="nucleus.metrics" :extended="isExtended" :physical="hasPhysical" />
+                        <SalivaObjectMetrics :metrics="nucleus.metrics" :extended="isExtended" :physical="hasPhysical" :schema="resultJson.schema_version" />
                       </div>
                     </article>
 
@@ -310,7 +310,7 @@
                         <span>ID origen: {{ displayValue(micronucleus.source_raw_id) }}</span>
                         <span>Nucleo asociado: {{ displayValue(micronucleus.nucleus_id) }}</span>
                         <span>Asociacion: {{ associationDisplay(micronucleus.association_status) }}</span>
-                        <SalivaObjectMetrics :metrics="micronucleus.metrics" :extended="isExtended" :physical="hasPhysical" :include-dependency-metrics="true" />
+                        <SalivaObjectMetrics :metrics="micronucleus.metrics" :extended="isExtended" :physical="hasPhysical" :include-dependency-metrics="true" :schema="resultJson.schema_version" />
                       </div>
                     </article>
                   </div>
@@ -361,7 +361,7 @@
               <span v-if="group.ambiguous">
                 Membranas candidatas: {{ candidateMembranesDisplay(item) }}
               </span>
-              <SalivaObjectMetrics :metrics="item.metrics" :extended="isExtended" :physical="hasPhysical" :include-dependency-metrics="group.micronucleus" />
+              <SalivaObjectMetrics :metrics="item.metrics" :extended="isExtended" :physical="hasPhysical" :include-dependency-metrics="group.micronucleus" :schema="resultJson.schema_version" />
             </article>
           </div>
         </details>
@@ -477,10 +477,10 @@ export default {
 
   computed: {
     isExtended() {
-      return ["2.1", "2.2"].includes(this.resultJson.schema_version);
+      return ["2.1", "2.2", "2.3"].includes(this.resultJson.schema_version);
     },
     hasPhysical() {
-      return this.resultJson.schema_version === "2.2" && this.resultJson.physical_units_available === true;
+      return ["2.2", "2.3"].includes(this.resultJson.schema_version) && this.resultJson.physical_units_available === true;
     },
     meanNucleusArea() {
       return metricPresentation("mean_nucleus_area_px2", this.summary, this.hasPhysical);

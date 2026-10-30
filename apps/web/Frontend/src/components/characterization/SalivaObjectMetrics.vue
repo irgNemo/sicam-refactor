@@ -36,10 +36,11 @@ export default {
     extended: { type: Boolean, default: false },
     physical: { type: Boolean, default: false },
     includeDependencyMetrics: { type: Boolean, default: false },
+    schema: { type: String, default: null },
   },
   computed: {
     groups() {
-      return objectMetricGroups(this.metrics, this.extended, this.includeDependencyMetrics, this.physical);
+      return objectMetricGroups(this.metrics, this.extended, this.includeDependencyMetrics, this.physical, this.schema);
     },
   },
 };

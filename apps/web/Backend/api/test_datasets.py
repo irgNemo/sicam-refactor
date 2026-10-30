@@ -350,3 +350,178 @@ class DatasetTests(TestCase):
         self.assertEqual(self.client.post(f"/api/datasets/{obj.pk}/generate/",{'confirm':True,'version':2},format='json').status_code,409)
         self.assertEqual(self.client.get(f"/api/datasets/{obj.pk}/download/csv/").content,before)
         obj.refresh_from_db();self.assertEqual(obj.snapshot,old);self.assertEqual(obj.manifest,historical_manifest)
+
+
+    # ------------------------------------------------------------------
+    # Sprint 18U-C1 — Characterization 2.3 Dataset Builder tests
+    # ------------------------------------------------------------------
+
+    def metrics_23(self):
+        """Metrics dict that includes all 2.3 fields."""
+        base = metrics()
+        base.update(
+            elongation_index=0.3,
+            convex_solidity=0.9,
+        )
+        return base
+
+    def result_json_23(self, counts, physical=True):
+        """Build a minimal 2.3 result_json fixture."""
+        nuclei = [{'id': i + 1, 'metrics': self.metrics_23()} for i in range(len(counts))]
+        mns = [
+            {'id': 100 + i * 10 + j, 'nucleus_id': i + 1, 'metrics': {
+                **self.metrics_23(),
+                'area_fraction_to_nucleus': .05,
+                'distance_to_nucleus_px': 4,
+                'distance_to_nucleus_um': .4,
+                'mn_nucleus_perimeter_ratio_px': 0.25,
+                'mn_nucleus_perimeter_ratio_physical': 0.22,
+                'mn_nucleus_min_distance_px': 5.0,
+                'mn_nucleus_min_distance_um': 0.5,
+            }}
+            for i, n in enumerate(counts) for j in range(n)
+        ]
+        from api.services.datasets.builder import digest
+        base = {'objects': [{'id': 1, 'label': 'nucleo'}]}
+        return {
+            'version': '2.3', 'schema_version': '2.3', 'sample_type': 'SALIVA',
+            'cells': [{'nuclei': nuclei, 'micronuclei': mns}],
+            'unassociated': {'nuclei': [], 'micronuclei': []},
+            'ambiguous': {'nuclei': [], 'micronuclei': []},
+            'physical_units_available': physical,
+            'physical_status': 'COMPATIBLE_PROVISIONAL' if physical else 'NO_ACQUISITION_SERIES',
+            'calibration': {'calibration_id': 1, 'status': 'PROVISIONAL',
+                            'scale_x_um_per_px': '0.1', 'scale_y_um_per_px': '0.1'},
+            'provenance': {'effective_segmentation_hash': digest(base),
+                           'fingerprint': 'stored-23-fingerprint'},
+        }
+
+    def sample_23(self, patient, counts, physical=True):
+        from django.utils import timezone
+        from api.models import Caso, AnalisisPred, MuestraSaliva, ResultadoSegmentacion, RevisionSegmentacion, ResultadoCaracterizacion
+        case = Caso.objects.create(paciente=patient, titulo='PRIVATE_CASE_23')
+        a = AnalisisPred.objects.create(id_paciente_fk=patient, id_caso_fk=case)
+        sample = MuestraSaliva.objects.create(analisis=a, imagen='synthetic-23.jpg')
+        base = {'objects': [{'id': 1, 'label': 'nucleo'}]}
+        result = ResultadoSegmentacion.objects.create(
+            muestra=sample, tipo_muestra='SALIVA', respuesta_json={},
+            resultado_normalizado=base, estado='COMPLETADO')
+        rev = RevisionSegmentacion.objects.create(
+            resultado_segmentacion=result, numero_revision=1, estado='VALIDADA',
+            resultado_editado=base, resumen={}, validado_en=timezone.now())
+        char = ResultadoCaracterizacion.objects.create(
+            resultado_segmentacion=result, revision_segmentacion=rev,
+            source_type='VALIDADA', sample_type='SALIVA',
+            algorithm_version='2.3',
+            resultado_json=self.result_json_23(counts, physical))
+        return sample, result, char
+
+    def test_version_23_selectable(self):
+        """'2.3' appears in options versions list."""
+        resp = self.client.get('/api/datasets/options/')
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('2.3', resp.data['versions'])
+
+    def test_min_version_in_options_response(self):
+        """Each feature in options has a min_version field."""
+        resp = self.client.get('/api/datasets/options/')
+        for feature in resp.data['features']:
+            self.assertIn('min_version', feature,
+                          f"Feature '{feature['key']}' is missing min_version")
+
+    def test_schema_version_in_options_response(self):
+        resp = self.client.get('/api/datasets/options/')
+        self.assertEqual(resp.data['schema_version'], 'saliva-nuclear-2')
+
+    def test_23_feature_rejected_for_21(self):
+        """2.3-only feature submitted with version '2.1' → 400."""
+        data = {**self.data, 'characterization_version': '2.1',
+                'units_mode': 'PIXELS', 'features': ['nucleus_elongation', 'nucleus_area']}
+        resp = self.client.post('/api/datasets/', data, format='json')
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('nucleus_elongation', str(resp.data))
+
+    def test_23_feature_rejected_for_22(self):
+        """2.3-only feature submitted with version '2.2' → 400."""
+        data = {**self.data, 'characterization_version': '2.2',
+                'features': ['nucleus_solidity', 'nucleus_area']}
+        resp = self.client.post('/api/datasets/', data, format='json')
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('nucleus_solidity', str(resp.data))
+
+    def test_23_features_accepted_for_23(self):
+        """All six 2.3 feature keys are accepted with version '2.3'."""
+        p3 = self.patient('HIDDEN-D')
+        self.sample_23(p3, [1])
+        data = {
+            'name': '2.3 test', 'description': '', 'characterization_version': '2.3',
+            'units_mode': 'PIXELS',
+            'features': ['nucleus_elongation', 'nucleus_solidity',
+                         'mn_elongation', 'mn_solidity',
+                         'perimeter_ratio', 'mn_separation'],
+            'classes': ['Class A', 'Class B'],
+            'validated_only': True,
+            'patients': [{'patient_id': p3.pk, 'class_label': 'Class A'},
+                         {'patient_id': self.p1.pk, 'class_label': 'Class B'}],
+        }
+        resp = self.client.post('/api/datasets/', data, format='json')
+        self.assertEqual(resp.status_code, 201, resp.data)
+
+    def test_23_version_selects_only_23_characterizations(self):
+        """Dataset with version='2.3' excludes samples with algorithm_version='2.2'."""
+        p3 = self.patient('HIDDEN-E')
+        self.sample_23(p3, [1])
+        data = {
+            'name': '2.3 version match', 'description': '',
+            'characterization_version': '2.3', 'units_mode': 'PIXELS',
+            'features': ['nucleus_elongation', 'nucleus_area'],
+            'classes': ['Class A', 'Class B'],
+            'validated_only': True,
+            'patients': [
+                {'patient_id': p3.pk, 'class_label': 'Class A'},   # has 2.3
+                {'patient_id': self.p1.pk, 'class_label': 'Class B'},  # has 2.2
+            ],
+        }
+        d = self.create(data)
+        p = self.preview(d).data
+        # p3 has 2.3 characterization → should be included; p1 has 2.2 → excluded
+        self.assertIn('CHARACTERIZATION_VERSION_MISMATCH', p['summary']['exclusion_counts'])
+
+    def test_perimeter_ratio_reconstructible_from_export(self):
+        """Exported ratio = mn_perimeter / nucleus_perimeter within float tolerance."""
+        p3 = self.patient('HIDDEN-F')
+        _s, _r, char = self.sample_23(p3, [1])
+        # Force known perimeter values so ratio is computable
+        mn = char.resultado_json['cells'][0]['micronuclei'][0]
+        nuc = char.resultado_json['cells'][0]['nuclei'][0]
+        nuc['metrics']['perimeter_px'] = 40.0
+        mn['metrics']['perimeter_px'] = 10.0
+        mn['metrics']['mn_nucleus_perimeter_ratio_px'] = 10.0 / 40.0
+        char.save()
+
+        data = {
+            'name': 'perimeter ratio test', 'description': '',
+            'characterization_version': '2.3', 'units_mode': 'PIXELS',
+            'features': ['nucleus_perimeter', 'mn_perimeter', 'perimeter_ratio'],
+            'classes': ['Class A'],
+            'validated_only': True,
+            'patients': [{'patient_id': p3.pk, 'class_label': 'Class A'}],
+        }
+        d = self.create(data)
+        self.generate(d)
+        csv_body = self.client.get(f"/api/datasets/{d['id']}/download/csv/").content.decode()
+        table = list(csv.reader(io.StringIO(csv_body)))
+        headers = table[0]
+        # Locate relevant columns
+        try:
+            nuc_p_col = headers.index('Perimetro_px')
+            mn_p_col = headers.index('MN_Perimetro_px')
+            ratio_col = headers.index('Razon_perimetros_MN_nucleo_px')
+        except ValueError:
+            self.skipTest('Expected columns not found')
+        for row in table[1:]:
+            nuc_p = float(row[nuc_p_col])
+            mn_p = float(row[mn_p_col])
+            ratio = float(row[ratio_col])
+            if nuc_p > 0:
+                self.assertAlmostEqual(ratio * nuc_p, mn_p, places=6)

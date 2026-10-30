@@ -3,7 +3,7 @@ export function isSalivaMorphometricV2(resultJson) {
     resultJson &&
     typeof resultJson === "object" &&
     resultJson.sample_type === "SALIVA" &&
-    ["2.0", "2.1", "2.2"].includes(resultJson.schema_version)
+    ["2.0", "2.1", "2.2", "2.3"].includes(resultJson.schema_version)
   );
 }
 
@@ -50,6 +50,13 @@ export const METRIC_LABELS = Object.freeze({
   distance_to_nucleus_px: "Distancia al núcleo",
   area_fraction_to_nucleus: "Fracción de área respecto al núcleo",
   intensity_fraction_to_nucleus: "Fracción de intensidad respecto al núcleo",
+  // Sprint 18U-C1 — Characterization 2.3 metrics
+  elongation_index: "Índice de elongación",
+  convex_solidity: "Solidez convexa",
+  mn_nucleus_perimeter_ratio_px: "Razón de perímetros MN/núcleo",
+  mn_nucleus_perimeter_ratio_physical: "Razón de perímetros MN/núcleo (física)",
+  mn_nucleus_min_distance_px: "Separación mínima MN–núcleo",
+  mn_nucleus_min_distance_um: "Separación mínima MN–núcleo (µm)",
 });
 
 export function formatCentroid(value) {
@@ -68,7 +75,7 @@ export function formatMetric(key, value) {
   return formatNumber(value, 4);
 }
 
-export function objectMetricGroups(metrics, extended = false, includeDependencyMetrics = false, physical = false) {
+export function objectMetricGroups(metrics, extended = false, includeDependencyMetrics = false, physical = false, schema = null) {
   const values = metrics && typeof metrics === "object" ? metrics : {};
   const rows = (keys, source = values) => keys.map(key => metricPresentation(key, source, physical));
   const morphology = ["area_px2", "perimeter_px", "centroid_px", "circularity"];
@@ -76,6 +83,11 @@ export function objectMetricGroups(metrics, extended = false, includeDependencyM
   if (extended) {
     morphology.push("eccentricity");
     intensity.push("std_gray_intensity");
+  }
+  // 2.3 object-level metrics
+  const is23 = schema === "2.3";
+  if (is23) {
+    morphology.push("elongation_index", "convex_solidity");
   }
   const groups = [
     { key: "morphology", label: "Morfometría", rows: rows(morphology) },
@@ -89,9 +101,11 @@ export function objectMetricGroups(metrics, extended = false, includeDependencyM
     });
   }
   if (includeDependencyMetrics) {
-    groups.push({ key: "relative", label: "Relación con el núcleo asociado", rows: rows([
-      "distance_to_nucleus_px", "area_fraction_to_nucleus", "intensity_fraction_to_nucleus",
-    ]) });
+    const relMetrics = ["distance_to_nucleus_px", "area_fraction_to_nucleus", "intensity_fraction_to_nucleus"];
+    if (is23) {
+      relMetrics.push("mn_nucleus_perimeter_ratio_px", "mn_nucleus_min_distance_px");
+    }
+    groups.push({ key: "relative", label: "Relación con el núcleo asociado", rows: rows(relMetrics) });
   }
   return groups;
 }
@@ -139,6 +153,9 @@ const PHYSICAL_METRICS = Object.freeze({
   area_px2: ["area_um2", " µm²"], perimeter_px: ["perimeter_um", " µm"],
   centroid_px: ["centroid_um", " µm"], distance_to_nucleus_px: ["distance_to_nucleus_um", " µm"],
   mean_nucleus_area_px2: ["mean_nucleus_area_um2", " µm²"],
+  // 2.3 metrics with physical variants
+  mn_nucleus_min_distance_px: ["mn_nucleus_min_distance_um", " µm"],
+  mn_nucleus_perimeter_ratio_px: ["mn_nucleus_perimeter_ratio_physical", ""],
 });
 export function metricPresentation(key, metrics, physical = false) {
   const pixel = key === "mean_nucleus_area_px2"

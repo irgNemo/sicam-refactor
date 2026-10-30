@@ -1,4 +1,5 @@
 import copy
+import copy as _copy
 
 from django.db import transaction
 
@@ -10,7 +11,7 @@ from api.services.segmentation.effective import (
 from api.services.segmentation.types import SampleType
 
 from .saliva import characterize_saliva_result
-from .physical import calibration_context, fingerprint, extend_physical_result
+from .physical import calibration_context, fingerprint, extend_physical_result, extend_23_metrics
 from .types import (
     CAPABILITY_COUNTS,
     CAPABILITY_CYTOTOXICITY_INDEX,
@@ -74,9 +75,23 @@ def get_or_create_resultado_caracterizacion(resultado_or_id, *, actor=None):
         )
 
         if context is not None:
-            resultado_json = extend_physical_result(
-                resultado_json, effective, context, algorithm_version,
+            # Always produce the 2.2 intermediate result first.
+            physical_result = extend_physical_result(
+                resultado_json, effective, context, version='2.2',
             )
+            if algorithm_version == '2.3':
+                resultado_json = extend_23_metrics(
+                    physical_result, effective, context, algorithm_version,
+                )
+            else:
+                # For any other algorithm version (2.2, or a future/test version)
+                # stamp the version fields with the actual algorithm_version.
+                resultado_json = physical_result
+                if algorithm_version != '2.2':
+                    resultado_json = _copy.deepcopy(physical_result)
+                    resultado_json['version'] = algorithm_version
+                    resultado_json['schema_version'] = algorithm_version
+                    resultado_json['characterization_version'] = algorithm_version
 
         caracterizacion = ResultadoCaracterizacion(
             created_by=actor, updated_by=actor,

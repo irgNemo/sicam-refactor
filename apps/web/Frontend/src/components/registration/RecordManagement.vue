@@ -63,8 +63,9 @@
       <section v-if="assignmentOpen" class="assignment" aria-label="Asignar a serie">
         <h4>Asignar a serie</h4>
         <p>La serie debe corresponder a la adquisición real. La coincidencia de resolución no demuestra su origen.</p>
-        <p v-if="!busy && !series.length">No hay series válidas disponibles para este paciente.</p>
-        <label>Serie<select v-model="target" :disabled="busy" @change="invalidatePreview"><option value="">Seleccione explícitamente</option><option v-for="s in series" :key="s.id" :value="s.id">{{ s.label }} · {{ s.profile.name }} · {{ s.profile.width }} × {{ s.profile.height }} {{ s.profile.mode }} · {{ s.calibration?.status || 'Sin calibración' }}</option></select></label>
+        <p v-if="seriesCreationMessage" role="alert">{{ seriesCreationMessage }}</p>
+        <p v-if="!busy && !series.length && !showSeriesForm">No hay series válidas disponibles para este paciente.</p>
+        <label>Serie<select v-model="target" :disabled="busy" @change="onTargetChange"><option value="">Seleccione explícitamente</option><option v-for="s in series" :key="s.id" :value="s.id">{{ s.label }} · {{ s.profile.name }} · {{ s.profile.width }} × {{ s.profile.height }} {{ s.profile.mode }} · {{ s.calibration?.status || 'Sin calibración' }}</option></select></label>
         <p v-if="targetSeries">Objetivo: {{ targetSeries.profile.objective || 'No indicado' }} · Calibración: {{ targetSeries.calibration?.label || 'Sin calibración' }}</p>
         <button :disabled="busy || !target" @click="previewAssignment">Comprobar compatibilidad</button>
         <div v-if="preview">
@@ -74,6 +75,14 @@
           <label class="check"><input v-model="confirmed" type="checkbox" :disabled="busy" /> Confirmo la serie y la asociación de las imágenes seleccionadas.</label>
           <button :disabled="busy || !confirmed" @click="assign">{{ busy ? 'Procesando…' : 'Confirmar asociación' }}</button>
         </div>
+        <button v-if="can('register') && !showSeriesForm" type="button" :disabled="busy" @click="showSeriesForm = true">Crear serie para este paciente</button>
+        <AcquisitionSeriesCreateForm
+          v-if="showSeriesForm"
+          :patientId="assignmentPatientId"
+          :disabled="busy"
+          @created="onSeriesCreated"
+          @cancel="showSeriesForm = false"
+        />
         <button :disabled="busy" @click="closeAssignment">Cancelar</button>
       </section>
     </section>
@@ -90,12 +99,14 @@ import CompactValue from './CompactValue.vue';
 import PatientLookup from './PatientLookup.vue';
 import { patientIdentityContext, patientIdentityMode } from '../../domain/patientPresentation';
 import LifecycleActions from '../lifecycle/LifecycleActions.vue';
+import AcquisitionSeriesCreateForm from '../acquisition/AcquisitionSeriesCreateForm.vue';
 export default {
-  components: { LifecycleActions, PatientLookup, CompactValue }, emits: ['busy','dirty','changed'],
+  components: { LifecycleActions, PatientLookup, CompactValue, AcquisitionSeriesCreateForm }, emits: ['busy','dirty','changed'],
   data: () => ({ auth, tabs:[{key:'patients',label:'Pacientes'},{key:'cases',label:'Casos'},{key:'images',label:'Imágenes'}],
     resource:'patients', search:'', patient:'', selectedPatient:null, caseId:'', caseOptions:[], caseCount:0, casePage:1, casesLoading:false, caseError:'', caseGeneration:0, seriesFilter:'', seriesIdFilter:'', type:'', physical:'', includeArchived:false,
     rows:[], count:0, page:1, loading:false, busy:false, error:'', message:'', generation:0, disposed:false,
-    selected:[], assignmentOpen:false, series:[], target:'', preview:null, confirmed:false }),
+    selected:[], assignmentOpen:false, series:[], target:'', preview:null, confirmed:false,
+    showSeriesForm:false, assignmentPatientId:null, seriesCreationMessage:'' }),
   computed: {
     identityPeers() { return this.rows.map(r=>r.patient_identity?.identificacion || r.identificacion); },
     title() { return this.tabs.find(t=>t.key===this.resource)?.label; },
@@ -123,7 +134,8 @@ export default {
     },
     key: row=>`${row.type || 'record'}:${row.id}`,
     invalidatePreview() { this.preview=null;this.confirmed=false; },
-    closeAssignment() { this.assignmentOpen=false;this.target='';this.invalidatePreview(); },
+    onTargetChange() { this.showSeriesForm=false;this.invalidatePreview(); },
+    closeAssignment() { this.assignmentOpen=false;this.target='';this.showSeriesForm=false;this.assignmentPatientId=null;this.seriesCreationMessage='';this.invalidatePreview(); },
     clearSelection() { this.selected=[];this.closeAssignment(); },
     toggle(row) { if(this.busy || row.archived)return;this.closeAssignment();const key=this.key(row);this.selected=this.selected.includes(key)?this.selected.filter(k=>k!==key):[...this.selected,key]; },
     selectPage() { if(this.busy)return;this.closeAssignment();this.selected=this.visibleRows.filter(r=>!r.archived).map(this.key); },
@@ -164,9 +176,29 @@ export default {
     async changed() { await this.load();this.$emit('changed'); },
     async openAssignment() {
       if(this.busy || !this.selectedRows.length || this.mixedPatients || !can('register'))return;
-      this.busy=true;this.error='';this.series=[];this.target='';this.invalidatePreview();this.assignmentOpen=true;
-      try { const {data}=await api.get('/api/record-management/series/',{params:{patient:this.selectedRows[0].patient_id}});if(!this.disposed)this.series=data; }
+      this.assignmentPatientId=this.selectedRows[0].patient_id;
+      this.busy=true;this.error='';this.series=[];this.target='';this.showSeriesForm=false;this.seriesCreationMessage='';this.invalidatePreview();this.assignmentOpen=true;
+      try { const {data}=await api.get('/api/record-management/series/',{params:{patient:this.assignmentPatientId}});if(!this.disposed)this.series=data; }
       catch(e){this.error=registrationErrorMessage(e,'No se pudieron cargar las series.');}finally{this.busy=false;}
+    },
+    async onSeriesCreated(newSeries) {
+      this.showSeriesForm=false;
+      this.seriesCreationMessage='';
+      this.invalidatePreview();
+      try {
+        const {data}=await api.get('/api/record-management/series/',{params:{patient:this.assignmentPatientId}});
+        if(!this.disposed){
+          this.series=data;
+          if(data.some(s=>s.id===newSeries.id)){
+            this.target=newSeries.id;
+          } else {
+            this.target='';
+            this.seriesCreationMessage='La serie se creó pero no está disponible para asignación en este contexto.';
+          }
+        }
+      } catch(e){
+        if(!this.disposed)this.error=registrationErrorMessage(e,'No se pudieron recargar las series.');
+      }
     },
     payload() { return {series_id:Number(this.target),samples:this.selectedRows.map(r=>({type:r.type,id:r.id}))}; },
     async previewAssignment() {

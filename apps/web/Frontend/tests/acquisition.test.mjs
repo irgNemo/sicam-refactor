@@ -15,6 +15,7 @@ const keepAlive = setInterval(()=>{},1000);
 after(async()=>{clearInterval(keepAlive);await server.close();});
 const {default:View}=await server.ssrLoadModule('/src/views/AdquisicionView.vue');
 const {default:Series}=await server.ssrLoadModule('/src/components/acquisition/AcquisitionSeriesSelector.vue');
+const {default:CreateForm}=await server.ssrLoadModule('/src/components/acquisition/AcquisitionSeriesCreateForm.vue');
 const {default:Registration}=await server.ssrLoadModule('/src/views/RegistroView.vue');
 const {default:App}=await server.ssrLoadModule('/src/App.vue');
 const {default:TopBar}=await server.ssrLoadModule('/src/components/TopBar.vue');
@@ -98,9 +99,15 @@ test('patient switch discards stale series response',async()=>{
   ctx.patientId=2;listAdapter([{...series,patient:2,id:7}]);await ctx.load();oldResolve([series]);await first;assert.equal(ctx.selectedId,7);
 });
 test('series creation sends patient, nullable calibration and resets dirty baseline',async()=>{
-  const ctx=context(Series,{patientId:1,disabled:false});ctx.profiles=[profile];ctx.form={label:'New',acquisition_profile:1,calibration:'',acquisition_date:''};let sent;
+  // creation logic now lives in AcquisitionSeriesCreateForm; selector onCreated selects the result
+  const ctx=context(CreateForm,{patientId:1});ctx.profiles=[profile];ctx.form={label:'New',acquisition_profile:1,calibration:'',acquisition_date:''};let sent;
   api.defaults.adapter=async config=>{sent=JSON.parse(config.data);return ok(config,{...series,calibration:null});};await ctx.create();
-  assert.equal(sent.patient,1);assert.equal(sent.calibration,null);assert.equal(ctx.selectedId,3);assert.equal(ctx.dirty,false);
+  assert.equal(sent.patient,1);assert.equal(sent.calibration,null);
+  // dirty (form cleared) — form fields reset after creation
+  assert.equal(ctx.form.label,'');
+  // verify selector onCreated selects returned series
+  const selectorCtx=context(Series,{patientId:1,disabled:false});selectorCtx.series=[];
+  selectorCtx.onCreated({...series,calibration:null});assert.equal(selectorCtx.selectedId,3);assert.equal(selectorCtx.dirty,false);
 });
 test('series without calibration, provisional and retired are explicit; retired excluded from new choices',async()=>{
   auth.user=sessionFixture();
@@ -108,7 +115,8 @@ test('series without calibration, provisional and retired are explicit; retired 
     const html=await render(Series,{selectedId:3,series:[series],profiles:[profile],calibrations:[{...calibration,status}]},{patientId:1});assert.ok(html.includes(text));
   }
   const html=await render(Series,{selectedId:3,series:[{...series,calibration:null}],profiles:[profile]},{patientId:1});assert.match(html,/Sin calibración física/);
-  const ctx=context(Series);ctx.form.acquisition_profile=1;ctx.calibrations=[calibration,{...calibration,id:5,status:'RETIRED'}];assert.deepEqual(ctx.eligibleCalibrations.map(c=>c.id),[2]);
+  // eligibleCalibrations now lives in CreateForm
+  const ctx=context(CreateForm,{patientId:1});ctx.form.acquisition_profile=1;ctx.calibrations=[calibration,{...calibration,id:5,status:'RETIRED'}];assert.deepEqual(ctx.eligibleCalibrations.map(c=>c.id),[2]);
 });
 test('resolution feedback never derives scale or resizes image',()=>{
   assert.match(service.resolutionFeedback({width:4928,height:4928},profile),/Compatible/);
@@ -152,4 +160,106 @@ test('series upload choices exclude archived profiles, series and retired calibr
     : config.url.includes('profiles') ? [profile,{...profile,id:9,archived_at:'now'}]
     : [calibration,{...calibration,id:9,status:'RETIRED'}]);
   await ctx.load();assert.deepEqual(ctx.series.map(item=>item.id),[series.id]);assert.deepEqual(ctx.profiles.map(item=>item.id),[profile.id]);
+});
+
+// ── AcquisitionSeriesCreateForm shared component tests ──────────────────────
+
+test('T-A1: patientId is supplied by parent and form has no patient field',async()=>{
+  const html=await renderToString(createSSRApp({...CreateForm,watch:{},data:()=>({...CreateForm.data(),profiles:[profile],calibrations:[calibration]})},{patientId:1}));
+  // Patient must not be editable — no patient input/select rendered by the form itself
+  assert.doesNotMatch(html,/Paciente<input|Paciente<select/);
+  // But form fields are present
+  assert.match(html,/Nombre/);assert.match(html,/Configuración/);assert.match(html,/Calibración/);
+});
+
+test('T-A2: profile and calibration are loaded fresh on every mount',async()=>{
+  const calls=[];api.defaults.adapter=async config=>{calls.push(config.url);
+    return ok(config,config.url.includes('profiles')?[profile]:[calibration]);};
+  const ctx=context(CreateForm,{patientId:1});await ctx.load();
+  const profileCalls=calls.filter(u=>u.includes('acquisition-profiles')).length;
+  const calCalls=calls.filter(u=>u.includes('calibrations')).length;
+  assert.equal(profileCalls,1);assert.equal(calCalls,1);
+  // Second load (simulating re-mount) fetches again
+  await ctx.load();
+  assert.equal(calls.filter(u=>u.includes('acquisition-profiles')).length,2);
+});
+
+test('T-A3: create POST sends correct payload with patient from prop',async()=>{
+  const ctx=context(CreateForm,{patientId:5});ctx.profiles=[profile];ctx.calibrations=[calibration];
+  ctx.form={label:'My Series',acquisition_profile:1,calibration:2,acquisition_date:'2026-01-01'};
+  let sent;api.defaults.adapter=async config=>{sent=JSON.parse(config.data);return ok(config,{...series,id:10,patient:5});};
+  await ctx.create();
+  assert.equal(sent.patient,5);assert.equal(sent.label,'My Series');assert.equal(sent.acquisition_profile,1);assert.equal(sent.calibration,2);assert.equal(sent.acquisition_date,'2026-01-01');
+});
+
+test('T-A4: successful creation emits created with full series object',async()=>{
+  const ctx=context(CreateForm,{patientId:1});ctx.profiles=[profile];ctx.calibrations=[calibration];
+  ctx.form={label:'New',acquisition_profile:1,calibration:'',acquisition_date:''};
+  const created={...series,id:20};api.defaults.adapter=async config=>ok(config,created);
+  await ctx.create();
+  const createdEvent=ctx.events.find(([name])=>name==='created');
+  assert.ok(createdEvent,'created event not emitted');assert.deepEqual(createdEvent[1],created);
+});
+
+test('T-A5: failed creation displays error and does not emit created',async()=>{
+  const ctx=context(CreateForm,{patientId:1});ctx.profiles=[profile];ctx.calibrations=[calibration];
+  ctx.form={label:'Fail',acquisition_profile:1,calibration:'',acquisition_date:''};
+  api.defaults.adapter=async()=>{throw {response:{status:400,data:{label:['This field is required.']}}};};
+  await ctx.create();
+  assert.ok(!ctx.events.find(([name])=>name==='created'),'created must not emit on failure');
+  assert.ok(ctx.error,'error message must be set');
+});
+
+test('T-A6: cancel resets form and emits cancel',async()=>{
+  const ctx=context(CreateForm,{patientId:1});
+  ctx.form={label:'Draft',acquisition_profile:1,calibration:'',acquisition_date:''};
+  ctx.cancel();
+  assert.equal(ctx.form.label,'');assert.equal(ctx.form.acquisition_profile,'');
+  const cancelEvent=ctx.events.find(([name])=>name==='cancel');
+  assert.ok(cancelEvent,'cancel event not emitted');
+});
+
+test('T-A7: busy=true emitted before POST and busy=false in finally',async()=>{
+  const ctx=context(CreateForm,{patientId:1});ctx.profiles=[profile];ctx.calibrations=[calibration];
+  ctx.form={label:'New',acquisition_profile:1,calibration:'',acquisition_date:''};
+  let busyStates=[];api.defaults.adapter=async config=>{busyStates.push(ctx.busy);return ok(config,{...series,id:30});};
+  await ctx.create();
+  const emittedBusy=ctx.events.filter(([name])=>name==='busy').map(([,v])=>v);
+  assert.ok(emittedBusy.includes(true),'busy=true must be emitted');
+  assert.ok(emittedBusy.includes(false),'busy=false must be emitted');
+  assert.equal(ctx.busy,false,'busy must be false after completion');
+  assert.ok(busyStates[0],'busy must be true during POST');
+});
+
+test('T-A8: create form renders session identity and hides form when not operator.ready',async()=>{
+  auth.user={...sessionFixture()};
+  const html=await renderToString(createSSRApp({...CreateForm,watch:{},data:()=>({...CreateForm.data(),profiles:[profile],calibrations:[calibration]})},{patientId:1}));
+  assert.match(html,/Sesión:/);
+  auth.user=null;
+  const htmlUnauth=await renderToString(createSSRApp({...CreateForm,watch:{},data:()=>({...CreateForm.data()})},{patientId:1}));
+  assert.doesNotMatch(htmlUnauth,/Guardar serie/);
+});
+
+// ── AcquisitionSeriesSelector regression tests after extraction ───────────────
+
+test('T-A9: selector creation works after extraction — series added and selected',async()=>{
+  const ctx=context(Series,{patientId:1,disabled:false});
+  ctx.series=[{...series,id:1}];ctx.profiles=[profile];ctx.calibrations=[calibration];
+  const newSeries={...series,id:99};ctx.onCreated(newSeries);
+  assert.equal(ctx.selectedId,99);assert.ok(ctx.series.some(s=>s.id===99));
+  assert.ok(!ctx.showForm,'form must close after creation');
+});
+
+test('T-A10: selector dirty=true while form open, dirty=false after cancel; busy propagated',async()=>{
+  const ctx=context(Series,{patientId:1,disabled:false});
+  assert.equal(ctx.dirty,false);
+  ctx.showForm=true;assert.equal(ctx.dirty,true);
+  ctx.showForm=false;assert.equal(ctx.dirty,false);
+  // busy propagation: onBusy sets this.busy which the watcher emits
+  ctx.onBusy(true);assert.equal(ctx.busy,true);
+  ctx.onBusy(false);assert.equal(ctx.busy,false);
+  // change event emitted after creation
+  const events=[];ctx.$emit=(name,val)=>events.push([name,val]);
+  ctx.series=[];ctx.onCreated({...series,id:88});
+  assert.ok(events.some(([n])=>n==='change'),'change must be emitted after creation');
 });

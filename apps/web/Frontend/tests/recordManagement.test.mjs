@@ -146,3 +146,92 @@ test('Segmentacion selected patient has one change action and returns to clean l
  const events=[];SideBar.methods.cambiarPaciente.call({$emit:(...args)=>events.push(args)});assert.deepEqual(events,[['select-patient',null]]);
  const cleared=await render({pacienteSeleccionado:null,loading:false},SideBar);assert.match(cleared,/Iniciales o identificador/);assert.doesNotMatch(cleared,/Cambiar paciente|Seleccione un paciente/);
 });
+
+// ── RecordManagement creation workflow tests ─────────────────────────────────
+
+test('T-R1: create button visible for ADMIN, hidden for REVIEWER',async()=>{
+  auth.user={id:1,role:'ADMIN',institution:{id:1},must_change_password:false};
+  const html=await render({resource:'images',assignmentOpen:true,series:[]});
+  assert.match(html,/Crear serie para este paciente/);
+  auth.user={...auth.user,role:'REVIEWER'};
+  const htmlR=await render({resource:'images',assignmentOpen:true,series:[]});
+  assert.doesNotMatch(htmlR,/Crear serie para este paciente/);
+  auth.user={...auth.user,role:'ADMIN'};
+});
+
+test('T-R2: create button visible for OPERATOR',async()=>{
+  auth.user={id:1,role:'OPERATOR',institution:{id:1},must_change_password:false};
+  const html=await render({resource:'images',assignmentOpen:true,series:[]});
+  assert.match(html,/Crear serie para este paciente/);
+  auth.user={...auth.user,role:'ADMIN'};
+});
+
+test('T-R3: zero-series state still permits creation button',async()=>{
+  const html=await render({resource:'images',assignmentOpen:true,series:[]});
+  assert.match(html,/Crear serie para este paciente/);
+  assert.match(html,/No hay series válidas/);
+});
+
+test('T-R4: existing series coexist with create button',async()=>{
+  const html=await render({resource:'images',assignmentOpen:true,series:[series]});
+  assert.match(html,/Crear serie para este paciente/);
+  assert.match(html,/TEST series/);
+});
+
+test('T-R5: create button hidden while showSeriesForm is true',async()=>{
+  const html=await render({resource:'images',assignmentOpen:true,series:[],showSeriesForm:true});
+  assert.doesNotMatch(html,/Crear serie para este paciente/);
+});
+
+test('T-R6: onSeriesCreated re-fetches stricter series endpoint and selects eligible series',async()=>{
+  const calls=[];api.defaults.adapter=async config=>{calls.push(config);return ok(config,config.url.includes('record-management/series')?[{...series,id:55}]:{count:1,results:[image()]});};
+  const c=context();c.assignmentPatientId=1;c.assignmentOpen=true;const newSeries={id:55,label:'New'};
+  await c.onSeriesCreated(newSeries);
+  assert.ok(calls.some(x=>x.url.includes('record-management/series')),'must call record-management/series endpoint');
+  assert.equal(c.target,55,'newly created eligible series must be selected');
+  assert.ok(!c.showSeriesForm,'form must be closed');
+});
+
+test('T-R7: absent/non-eligible new series is not force-selected and shows message',async()=>{
+  api.defaults.adapter=async config=>ok(config,config.url.includes('record-management/series')?[]:{count:1,results:[image()]});
+  const c=context();c.assignmentPatientId=1;c.assignmentOpen=true;
+  await c.onSeriesCreated({id:99,label:'Absent'});
+  assert.equal(c.target,'','absent series must not be selected');
+  assert.match(c.seriesCreationMessage,/no está disponible/);
+});
+
+test('T-R8: creation never calls preview or assignment endpoints',async()=>{
+  const calls=[];api.defaults.adapter=async config=>{calls.push(config.url);return ok(config,config.url.includes('record-management/series')?[{...series,id:60}]:{});};
+  const c=context();c.assignmentPatientId=1;
+  await c.onSeriesCreated({id:60});
+  assert.ok(calls.every(u=>!u.includes('preview')&&!u.includes('assign')),'creation must not call preview or assign');
+});
+
+test('T-R9: preview is invalidated after series creation',async()=>{
+  api.defaults.adapter=async config=>ok(config,config.url.includes('record-management/series')?[{...series,id:70}]:{});
+  const c=context();c.assignmentPatientId=1;c.preview={preview_token:'old'};c.confirmed=true;
+  await c.onSeriesCreated({id:70});
+  assert.equal(c.preview,null,'preview must be null after creation');
+  assert.equal(c.confirmed,false,'confirmed must be reset');
+});
+
+test('T-R10: closeAssignment resets showSeriesForm and assignmentPatientId',()=>{
+  const c=context();c.assignmentOpen=true;c.showSeriesForm=true;c.assignmentPatientId=5;c.seriesCreationMessage='msg';
+  c.closeAssignment();
+  assert.equal(c.showSeriesForm,false);assert.equal(c.assignmentPatientId,null);assert.equal(c.seriesCreationMessage,'');
+  assert.equal(c.assignmentOpen,false);
+});
+
+test('T-R11: onTargetChange closes creation form and invalidates preview',()=>{
+  const c=context();c.showSeriesForm=true;c.preview={preview_token:'x'};c.confirmed=true;
+  c.onTargetChange();
+  assert.equal(c.showSeriesForm,false);assert.equal(c.preview,null);assert.equal(c.confirmed,false);
+});
+
+test('T-R12: existing assignment flow unchanged — preview then assign',async()=>{
+  let resolve;const calls=[];api.defaults.adapter=config=>{calls.push(config);if(config.method==='post')return new Promise(r=>{resolve=data=>r(ok(config,data));});return Promise.resolve(ok(config,{count:1,results:[image()]}));};
+  const c=context();c.rows=[image()];c.selectPage();c.target=7;c.preview={preview_token:'signed'};c.confirmed=true;
+  const pending=c.assign();await turn();resolve({series,compatible_count:1});await pending;
+  assert.ok(calls.some(x=>x.method==='post'&&x.url.includes('assign')),'assign endpoint must be called');
+  assert.ok(calls.every(x=>!x.url.includes('caracteriz')),'characterization must not be called');
+});
